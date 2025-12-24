@@ -203,7 +203,7 @@ def deep_merge(base, updates, preserve_keys=None):
     return result
 
 # Keys to preserve from old config
-preserve = ${PRESERVE_CONFIG_KEYS[@]+"${PRESERVE_CONFIG_KEYS[@]}"}
+preserve = ["projectName", "skills.installed"]
 
 # Merge: start with old, add new keys, preserve project-specific values
 merged = deep_merge(old, new)
@@ -283,7 +283,7 @@ print_completion() {
 main() {
     print_header
     
-    local branch="main"
+    local branch="master"
     local force=false
     
     # Parse arguments
@@ -306,7 +306,7 @@ main() {
                 echo ""
                 echo "Options:"
                 echo "  --check       Check for updates without installing"
-                echo "  --branch NAME Use specific branch (default: main)"
+                echo "  --branch NAME Use specific branch (default: master)"
                 echo "  --force       Update even if on latest version"
                 echo "  --help        Show this help"
                 exit 0
