@@ -1,0 +1,34 @@
+# Wogi Flow - Project .gitignore
+# 
+# USAGE: Copy relevant sections to your project's .gitignore
+#
+# RECOMMENDATION: Track .workflow/ in git so your team shares:
+# - Task queue and history
+# - Request log
+# - Component map
+# - Project decisions
+#
+# If you prefer NOT to track workflow state, uncomment the lines below.
+
+# === OPTIONAL: Uncomment to exclude workflow state ===
+# .workflow/state/
+# .workflow/archive/
+# .workflow/corrections/
+
+# === NEVER track these (sensitive or temp) ===
+# .workflow/state/components/*.secret
+# .workflow/tests/flows/*.recording
+
+# === Always safe to exclude ===
+.workflow/tests/flows/*.tmp
+.workflow/archive/*.bak
+
+# === Note ===
+# The update command (./scripts/flow update) will NEVER overwrite:
+# - .workflow/config.json (your settings)
+# - .workflow/state/* (your project data)
+# - .workflow/changes/* (your features)
+# - .workflow/bugs/* (your bug reports)
+# - .workflow/corrections/* (your correction reports)
+# - .claude/rules/* (your custom rules)
+# - .claude/skills/* (your installed skills)

@@ -1,0 +1,79 @@
+{
+  "version": "1.0",
+  "projectName": "",
+  
+  "workflow": {
+    "planningStyle": "feature-based",
+    "agentStructure": "unified"
+  },
+  
+  "corrections": {
+    "mode": "inline",
+    "detailPath": ".workflow/corrections"
+  },
+  
+  "phases": {
+    "enabled": false,
+    "definitions": []
+  },
+  
+  "mandatorySteps": {
+    "afterTask": [],
+    "beforeCommit": [],
+    "onSessionEnd": ["updateRequestLog", "updateAppMap"]
+  },
+  
+  "autoLog": true,
+  "autoUpdateAppMap": true,
+  
+  "qualityGates": {
+    "feature": {
+      "require": ["tests", "appMapUpdate", "requestLogEntry"],
+      "optional": ["review", "docs"]
+    },
+    "bugfix": {
+      "require": ["tests", "requestLogEntry"],
+      "optional": ["review"]
+    },
+    "refactor": {
+      "require": ["tests", "noNewFeatures"],
+      "optional": ["review"]
+    }
+  },
+  
+  "strictMode": {
+    "verificationChecklist": false,
+    "correctionReportsOnFail": false,
+    "featureReportsOnComplete": false
+  },
+  
+  "requireApproval": [],
+  
+  "componentRules": {
+    "preferVariants": true,
+    "requireAppMapEntry": true,
+    "requireDetailDoc": false,
+    "autoGenerateStorybook": false,
+    "storybookPath": "src/stories"
+  },
+  
+  "testing": {
+    "runAfterTask": false,
+    "runBeforeCommit": false,
+    "browserTests": false,
+    "browserTestUrl": "http://localhost:3000"
+  },
+  
+  "hooks": {
+    "preCommit": false
+  },
+  
+  "skills": {
+    "installed": []
+  },
+  
+  "agents": {
+    "enabled": ["orchestrator", "story-writer", "developer", "reviewer", "tester"],
+    "optional": ["accessibility", "security", "performance", "docs", "design-system", "onboarding"]
+  }
+}

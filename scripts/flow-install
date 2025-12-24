@@ -1,0 +1,675 @@
+#!/bin/bash
+
+# Wogi Flow - Interactive Installer
+# Sets up workflow with user preferences
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKFLOW_DIR=".workflow"
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+# Default values
+PROJECT_NAME=""
+AGENT_STRUCTURE="unified"
+CORRECTION_MODE="inline"
+PLANNING_STYLE="feature-based"
+SKILLS=""
+ENABLE_HOOKS=false
+ENABLE_STORYBOOK=false
+STRICT_VERIFICATION=false
+STRICT_CORRECTIONS=false
+STRICT_REPORTS=false
+
+print_header() {
+    clear
+    echo -e "${CYAN}"
+    echo "╔═══════════════════════════════════════════════════════════════╗"
+    echo "║                                                               ║"
+    echo "║               🚀 Wogi Flow Installer v3.0 🚀                  ║"
+    echo "║                                                               ║"
+    echo "║     Self-improving AI Development Workflow                    ║"
+    echo "║                                                               ║"
+    echo "╚═══════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+}
+
+# Check if already initialized
+check_existing() {
+    if [ -d "$WORKFLOW_DIR" ]; then
+        echo -e "${YELLOW}⚠ Wogi Flow is already installed in this directory.${NC}"
+        echo ""
+        read -p "Do you want to reconfigure? (y/n): " reconfigure
+        if [[ ! "$reconfigure" =~ ^[Yy]$ ]]; then
+            echo "Installation cancelled."
+            exit 0
+        fi
+        echo ""
+    fi
+}
+
+# Question 1: Project name
+ask_project_name() {
+    echo -e "${BOLD}1. Project Name${NC}"
+    echo "   Enter a name for your project (used in docs and commits)"
+    echo ""
+    
+    # Try to get from package.json or directory name
+    local default_name=""
+    if [ -f "package.json" ]; then
+        default_name=$(python3 -c "import json; print(json.load(open('package.json')).get('name', ''))" 2>/dev/null || echo "")
+    fi
+    if [ -z "$default_name" ]; then
+        default_name=$(basename "$(pwd)")
+    fi
+    
+    read -p "   Project name [$default_name]: " PROJECT_NAME
+    PROJECT_NAME="${PROJECT_NAME:-$default_name}"
+    echo ""
+}
+
+# Question 2: Agent structure
+ask_agent_structure() {
+    echo -e "${BOLD}2. Agent Structure${NC}"
+    echo "   How should development agents be organized?"
+    echo ""
+    echo "   (a) Unified - Single developer/reviewer/tester agents [recommended]"
+    echo "       Best for: Solo devs, small teams, fullstack developers"
+    echo ""
+    echo "   (b) Split - Separate frontend/backend agents"
+    echo "       Best for: Large teams with specialists, complex projects"
+    echo ""
+    
+    read -p "   Choice [a]: " choice
+    case "$choice" in
+        b|B) AGENT_STRUCTURE="split" ;;
+        *) AGENT_STRUCTURE="unified" ;;
+    esac
+    echo ""
+}
+
+# Question 3: Correction report mode
+ask_correction_mode() {
+    echo -e "${BOLD}3. Correction Report Mode${NC}"
+    echo "   How detailed should bug fix documentation be?"
+    echo ""
+    echo "   (a) Inline only - Everything in request-log.md [recommended]"
+    echo "       Quick entries, low overhead"
+    echo ""
+    echo "   (b) Hybrid - Summary in log, detailed doc for significant fixes"
+    echo "       Balance of speed and thoroughness"
+    echo ""
+    echo "   (c) Always detailed - Summary + linked detailed doc for every fix"
+    echo "       Maximum traceability, higher overhead"
+    echo ""
+    
+    read -p "   Choice [a]: " choice
+    case "$choice" in
+        b|B) CORRECTION_MODE="hybrid" ;;
+        c|C) CORRECTION_MODE="always-detailed" ;;
+        *) CORRECTION_MODE="inline" ;;
+    esac
+    echo ""
+}
+
+# Question 4: Planning style
+ask_planning_style() {
+    echo -e "${BOLD}4. Planning Style${NC}"
+    echo "   How should features and tasks be organized?"
+    echo ""
+    echo "   (a) Feature-based - Flexible, work on any feature [recommended]"
+    echo "       Best for: Ongoing products, agile teams, maintenance"
+    echo ""
+    echo "   (b) Phase-based - Sequential phases with milestones"
+    echo "       Best for: New projects, fixed scope, waterfall-ish"
+    echo ""
+    
+    read -p "   Choice [a]: " choice
+    case "$choice" in
+        b|B) PLANNING_STYLE="phase-based" ;;
+        *) PLANNING_STYLE="feature-based" ;;
+    esac
+    echo ""
+}
+
+# Question 5: Skills
+ask_skills() {
+    echo -e "${BOLD}5. Install Skills${NC}"
+    echo "   Skills add specialized commands and templates for specific tech stacks."
+    echo ""
+    echo "   Available skills:"
+    echo "   • nestjs    - NestJS module builder, entity/DTO templates, migrations"
+    echo "   • react     - Component templates, hooks, Storybook integration"
+    echo "   • python    - FastAPI/Django patterns, pytest templates"
+    echo ""
+    echo "   Enter: skill names (comma-separated), 'all', or 'none'"
+    echo ""
+    
+    read -p "   Skills to install [none]: " SKILLS
+    SKILLS="${SKILLS:-none}"
+    
+    if [ "$SKILLS" = "all" ]; then
+        SKILLS="nestjs,react,python"
+    fi
+    echo ""
+}
+
+# Question 6: Optional features
+ask_optional_features() {
+    echo -e "${BOLD}6. Optional Features${NC}"
+    echo "   Enable additional features? (y/n for each)"
+    echo ""
+    
+    read -p "   Pre-commit git hooks? [n]: " choice
+    [[ "$choice" =~ ^[Yy]$ ]] && ENABLE_HOOKS=true
+    
+    read -p "   Auto-generate Storybook stories? [n]: " choice
+    [[ "$choice" =~ ^[Yy]$ ]] && ENABLE_STORYBOOK=true
+    
+    echo ""
+    echo -e "${BOLD}   Strict Mode Options:${NC}"
+    
+    read -p "   Require verification checklist before done? [n]: " choice
+    [[ "$choice" =~ ^[Yy]$ ]] && STRICT_VERIFICATION=true
+    
+    read -p "   Require correction reports on test failures? [n]: " choice
+    [[ "$choice" =~ ^[Yy]$ ]] && STRICT_CORRECTIONS=true
+    
+    read -p "   Require feature reports on completion? [n]: " choice
+    [[ "$choice" =~ ^[Yy]$ ]] && STRICT_REPORTS=true
+    
+    echo ""
+}
+
+# Show summary and confirm
+confirm_settings() {
+    echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BOLD}                     Configuration Summary${NC}"
+    echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo "   Project Name:        $PROJECT_NAME"
+    echo "   Agent Structure:     $AGENT_STRUCTURE"
+    echo "   Correction Mode:     $CORRECTION_MODE"
+    echo "   Planning Style:      $PLANNING_STYLE"
+    echo "   Skills:              $SKILLS"
+    echo ""
+    echo "   Optional Features:"
+    echo "   • Pre-commit hooks:           $ENABLE_HOOKS"
+    echo "   • Auto Storybook:             $ENABLE_STORYBOOK"
+    echo "   • Strict verification:        $STRICT_VERIFICATION"
+    echo "   • Strict correction reports:  $STRICT_CORRECTIONS"
+    echo "   • Strict feature reports:     $STRICT_REPORTS"
+    echo ""
+    echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    
+    read -p "Proceed with installation? (y/n): " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        echo "Installation cancelled."
+        exit 0
+    fi
+    echo ""
+}
+
+# Create directory structure
+create_structure() {
+    echo -e "${CYAN}Creating directory structure...${NC}"
+    
+    mkdir -p "$WORKFLOW_DIR/state/components"
+    mkdir -p "$WORKFLOW_DIR/changes"
+    mkdir -p "$WORKFLOW_DIR/bugs"
+    mkdir -p "$WORKFLOW_DIR/corrections"
+    mkdir -p "$WORKFLOW_DIR/archive"
+    mkdir -p "$WORKFLOW_DIR/tests/flows"
+    mkdir -p "$WORKFLOW_DIR/specs/capabilities"
+    mkdir -p ".claude/commands"
+    mkdir -p ".claude/rules"
+    mkdir -p ".claude/skills"
+    
+    if [ "$AGENT_STRUCTURE" = "split" ]; then
+        mkdir -p ".claude/agents/developer"
+        mkdir -p ".claude/agents/reviewer"
+        mkdir -p ".claude/agents/tester"
+    else
+        mkdir -p ".claude/agents"
+    fi
+    
+    # Create .gitkeep files
+    touch "$WORKFLOW_DIR/changes/.gitkeep"
+    touch "$WORKFLOW_DIR/bugs/.gitkeep"
+    touch "$WORKFLOW_DIR/corrections/.gitkeep"
+    touch "$WORKFLOW_DIR/archive/.gitkeep"
+    touch "$WORKFLOW_DIR/tests/flows/.gitkeep"
+    touch "$WORKFLOW_DIR/specs/capabilities/.gitkeep"
+    touch "$WORKFLOW_DIR/state/components/.gitkeep"
+    
+    echo -e "${GREEN}✓${NC} Directory structure created"
+}
+
+# Generate config.json
+generate_config() {
+    echo -e "${CYAN}Generating configuration...${NC}"
+    
+    cat > "$WORKFLOW_DIR/config.json" << EOF
+{
+  "version": "1.0",
+  "projectName": "$PROJECT_NAME",
+  
+  "workflow": {
+    "planningStyle": "$PLANNING_STYLE",
+    "agentStructure": "$AGENT_STRUCTURE"
+  },
+  
+  "corrections": {
+    "mode": "$CORRECTION_MODE",
+    "detailPath": ".workflow/corrections"
+  },
+  
+  "phases": {
+    "enabled": $([ "$PLANNING_STYLE" = "phase-based" ] && echo "true" || echo "false"),
+    "definitions": []
+  },
+  
+  "mandatorySteps": {
+    "afterTask": [],
+    "beforeCommit": [],
+    "onSessionEnd": ["updateRequestLog", "updateAppMap"]
+  },
+  
+  "autoLog": true,
+  "autoUpdateAppMap": true,
+  
+  "qualityGates": {
+    "feature": {
+      "require": ["tests", "appMapUpdate", "requestLogEntry"],
+      "optional": ["review", "docs"]
+    },
+    "bugfix": {
+      "require": ["tests", "requestLogEntry"],
+      "optional": ["review"]
+    },
+    "refactor": {
+      "require": ["tests", "noNewFeatures"],
+      "optional": ["review"]
+    }
+  },
+  
+  "strictMode": {
+    "verificationChecklist": $STRICT_VERIFICATION,
+    "correctionReportsOnFail": $STRICT_CORRECTIONS,
+    "featureReportsOnComplete": $STRICT_REPORTS
+  },
+  
+  "requireApproval": [],
+  
+  "componentRules": {
+    "preferVariants": true,
+    "requireAppMapEntry": true,
+    "requireDetailDoc": false,
+    "autoGenerateStorybook": $ENABLE_STORYBOOK,
+    "storybookPath": "src/stories"
+  },
+  
+  "testing": {
+    "runAfterTask": false,
+    "runBeforeCommit": $ENABLE_HOOKS,
+    "browserTests": false,
+    "browserTestUrl": "http://localhost:3000"
+  },
+  
+  "hooks": {
+    "preCommit": $ENABLE_HOOKS
+  },
+  
+  "skills": {
+    "installed": []
+  },
+  
+  "agents": {
+    "enabled": ["orchestrator", "story-writer", "developer", "reviewer", "tester"],
+    "optional": ["accessibility", "security", "performance", "docs", "design-system", "onboarding"]
+  }
+}
+EOF
+    
+    echo -e "${GREEN}✓${NC} Configuration generated"
+}
+
+# Generate state files
+generate_state_files() {
+    echo -e "${CYAN}Creating state files...${NC}"
+    
+    # ready.json with new fields
+    cat > "$WORKFLOW_DIR/state/ready.json" << EOF
+{
+  "lastUpdated": "$(date -Iseconds)",
+  "ready": [],
+  "inProgress": [],
+  "blocked": [],
+  "recentlyCompleted": []
+}
+EOF
+    
+    # request-log.md
+    cat > "$WORKFLOW_DIR/state/request-log.md" << EOF
+# Request Log
+
+All changes, fixes, and additions are logged here.
+
+---
+
+EOF
+    
+    # app-map.md
+    cat > "$WORKFLOW_DIR/state/app-map.md" << EOF
+# App Map - Component Registry
+
+## Screens
+
+| Screen | Route | Description |
+|--------|-------|-------------|
+| - | - | - |
+
+## Modals
+
+| Modal | Trigger | Description |
+|-------|---------|-------------|
+| - | - | - |
+
+## Components
+
+| Component | Variants | Path |
+|-----------|----------|------|
+| - | - | - |
+
+EOF
+    
+    # decisions.md
+    cat > "$WORKFLOW_DIR/state/decisions.md" << EOF
+# Project Decisions
+
+Coding patterns, architectural decisions, and conventions.
+
+## Conventions
+
+- 
+
+## Patterns
+
+- 
+
+## Tech Stack
+
+- 
+
+EOF
+    
+    # progress.md
+    cat > "$WORKFLOW_DIR/state/progress.md" << EOF
+# Progress - $PROJECT_NAME
+
+## Current Status
+
+| Field | Value |
+|-------|-------|
+| **Started** | $(date +%Y-%m-%d) |
+| **Last Updated** | $(date +%Y-%m-%d) |
+| **Total Tasks** | 0 |
+| **Completed** | 0 |
+
+---
+
+## Session Log
+
+### Session 1 - $(date +%Y-%m-%d)
+
+**Focus:** Project initialization
+
+**Activities:**
+- Initialized Wogi Flow workflow
+- Created project structure
+
+**Next Session:**
+- Define initial tasks
+- Set up development environment
+
+EOF
+    
+    # feedback-patterns.md
+    cat > "$WORKFLOW_DIR/state/feedback-patterns.md" << EOF
+# Feedback Patterns
+
+Patterns learned from corrections and feedback.
+
+## Patterns
+
+| Pattern | Source | Applied |
+|---------|--------|---------|
+| - | - | - |
+
+EOF
+    
+    echo -e "${GREEN}✓${NC} State files created"
+}
+
+# Generate phase files if phase-based
+generate_phase_files() {
+    if [ "$PLANNING_STYLE" = "phase-based" ]; then
+        echo -e "${CYAN}Creating phase planning files...${NC}"
+        
+        cat > "$WORKFLOW_DIR/specs/ROADMAP.md" << EOF
+# $PROJECT_NAME - Project Roadmap
+
+## Phase Overview
+
+| Phase | Name | Features | Status |
+|-------|------|----------|--------|
+| 0 | Project Setup | - | Not Started |
+| 1 | Core Infrastructure | - | Not Started |
+| 2 | Core Features | - | Not Started |
+| 3 | Business Logic | - | Not Started |
+| 4 | Testing & Docs | - | Not Started |
+
+---
+
+## Phase 0: Project Setup
+
+**Goal:** Working project with basic configuration
+
+### Features
+| ID | Name | Priority | Dependencies |
+|----|------|----------|--------------|
+| - | - | - | - |
+
+### Acceptance Criteria
+- [ ] Project builds successfully
+- [ ] Basic structure in place
+
+---
+
+## Phase 1: Core Infrastructure
+
+**Goal:** Foundation ready for features
+
+### Features
+| ID | Name | Priority | Dependencies |
+|----|------|----------|--------------|
+| - | - | - | - |
+
+---
+
+*Add more phases as needed*
+
+EOF
+        
+        echo -e "${GREEN}✓${NC} Phase planning files created"
+    fi
+}
+
+# Install skills
+install_skills() {
+    if [ "$SKILLS" != "none" ] && [ -n "$SKILLS" ]; then
+        echo -e "${CYAN}Installing skills...${NC}"
+        
+        IFS=',' read -ra SKILL_ARRAY <<< "$SKILLS"
+        for skill in "${SKILL_ARRAY[@]}"; do
+            skill=$(echo "$skill" | xargs)  # trim whitespace
+            
+            if [ -d "$SCRIPT_DIR/../skills/$skill" ]; then
+                cp -r "$SCRIPT_DIR/../skills/$skill" ".claude/skills/"
+                echo -e "${GREEN}✓${NC} Installed skill: $skill"
+                
+                # Update config with installed skill
+                python3 << EOF
+import json
+with open('$WORKFLOW_DIR/config.json', 'r') as f:
+    config = json.load(f)
+if '$skill' not in config['skills']['installed']:
+    config['skills']['installed'].append('$skill')
+with open('$WORKFLOW_DIR/config.json', 'w') as f:
+    json.dump(config, f, indent=2)
+EOF
+            else
+                echo -e "${YELLOW}⚠${NC} Skill not found: $skill (will be available in skills repository)"
+            fi
+        done
+    fi
+}
+
+# Copy core files
+copy_core_files() {
+    echo -e "${CYAN}Copying core files...${NC}"
+    
+    # Copy CLAUDE.md
+    if [ -f "$SCRIPT_DIR/../CLAUDE.md" ]; then
+        cp "$SCRIPT_DIR/../CLAUDE.md" "./CLAUDE.md"
+        # Update project name in CLAUDE.md
+        sed -i "s/projectName\": \"\"/projectName\": \"$PROJECT_NAME\"/" "./CLAUDE.md" 2>/dev/null || true
+    fi
+    
+    # Copy agents based on structure
+    if [ "$AGENT_STRUCTURE" = "unified" ]; then
+        if [ -d "$SCRIPT_DIR/../agents" ]; then
+            cp -r "$SCRIPT_DIR/../agents/"* ".claude/agents/" 2>/dev/null || true
+        fi
+    else
+        # Split structure - copy from split agents if available
+        if [ -d "$SCRIPT_DIR/../agents-split" ]; then
+            cp -r "$SCRIPT_DIR/../agents-split/"* ".claude/agents/" 2>/dev/null || true
+        fi
+    fi
+    
+    # Copy commands
+    if [ -d "$SCRIPT_DIR/../.claude/commands" ]; then
+        cp -r "$SCRIPT_DIR/../.claude/commands/"* ".claude/commands/" 2>/dev/null || true
+    fi
+    
+    # Copy templates
+    if [ -d "$SCRIPT_DIR/../templates" ]; then
+        mkdir -p ".workflow/templates"
+        cp -r "$SCRIPT_DIR/../templates/"* ".workflow/templates/" 2>/dev/null || true
+    fi
+    
+    echo -e "${GREEN}✓${NC} Core files copied"
+}
+
+# Setup hooks if enabled
+setup_hooks() {
+    if [ "$ENABLE_HOOKS" = true ]; then
+        echo -e "${CYAN}Setting up git hooks...${NC}"
+        "$SCRIPT_DIR/flow-setup-hooks" install 2>/dev/null || echo -e "${YELLOW}⚠${NC} Could not install hooks (not a git repo?)"
+    fi
+}
+
+# Print completion message
+print_completion() {
+    echo ""
+    echo -e "${GREEN}╔═══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║                                                               ║${NC}"
+    echo -e "${GREEN}║           ✅ Wogi Flow installed successfully!               ║${NC}"
+    echo -e "${GREEN}║                                                               ║${NC}"
+    echo -e "${GREEN}╚═══════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${BOLD}Next steps:${NC}"
+    echo ""
+    echo "  1. Review configuration:"
+    echo "     ${CYAN}cat .workflow/config.json${NC}"
+    echo ""
+    echo "  2. Create your first task:"
+    echo "     ${CYAN}/wogi-story \"Your first feature\"${NC}"
+    echo ""
+    echo "  3. Check workflow health:"
+    echo "     ${CYAN}/wogi-health${NC}"
+    echo ""
+    echo "  4. See all commands:"
+    echo "     ${CYAN}/wogi-help${NC}"
+    echo ""
+    
+    if [ "$SKILLS" != "none" ] && [ -n "$SKILLS" ]; then
+        echo -e "${BOLD}Installed skills:${NC}"
+        echo "  Run /wogi-skills to see skill-specific commands"
+        echo ""
+    fi
+    
+    echo -e "${YELLOW}Tip:${NC} Add .workflow/ to git to track workflow state with your code."
+    echo ""
+}
+
+# Main installation flow
+main() {
+    print_header
+    check_existing
+    
+    ask_project_name
+    ask_agent_structure
+    ask_correction_mode
+    ask_planning_style
+    ask_skills
+    ask_optional_features
+    
+    confirm_settings
+    
+    echo -e "${CYAN}Installing Wogi Flow...${NC}"
+    echo ""
+    
+    create_structure
+    generate_config
+    generate_state_files
+    generate_phase_files
+    copy_core_files
+    install_skills
+    setup_hooks
+    
+    print_completion
+}
+
+# Run with --quick for non-interactive install with defaults
+if [ "${1:-}" = "--quick" ]; then
+    PROJECT_NAME="${2:-$(basename "$(pwd)")}"
+    create_structure
+    generate_config
+    generate_state_files
+    copy_core_files
+    echo -e "${GREEN}✓ Quick install complete${NC}"
+    exit 0
+fi
+
+# Run with --help
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+    echo "Wogi Flow Installer"
+    echo ""
+    echo "Usage:"
+    echo "  flow install           Interactive installation"
+    echo "  flow install --quick   Quick install with defaults"
+    echo "  flow install --help    Show this help"
+    exit 0
+fi
+
+main

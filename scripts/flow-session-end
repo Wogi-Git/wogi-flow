@@ -1,0 +1,85 @@
+#!/bin/bash
+
+# Wogi Flow - End Session Properly
+
+set -e
+
+WORKFLOW_DIR=".workflow"
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+echo -e "${CYAN}Ending Session${NC}"
+echo "==============="
+echo ""
+
+# Check config for onSessionEnd requirements
+if [ -f "$WORKFLOW_DIR/config.json" ]; then
+    echo -e "${YELLOW}Checking session-end requirements...${NC}"
+    python3 << EOF
+import json
+with open('$WORKFLOW_DIR/config.json') as f:
+    config = json.load(f)
+steps = config.get('mandatorySteps', {}).get('onSessionEnd', [])
+if steps:
+    print('Required:')
+    for step in steps:
+        print(f'  • {step}')
+EOF
+    echo ""
+fi
+
+# Check for uncommitted changes
+uncommitted=$(git status --porcelain 2>/dev/null | wc -l)
+if [ $uncommitted -gt 0 ]; then
+    echo -e "${YELLOW}Uncommitted changes: $uncommitted files${NC}"
+    git status --short
+    echo ""
+    
+    read -p "Commit all changes? (y/N) " confirm
+    if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+        read -p "Commit message: " msg
+        git add -A
+        git commit -m "${msg:-checkpoint: end of session}"
+        echo -e "${GREEN}✓ Changes committed${NC}"
+    fi
+else
+    echo -e "${GREEN}✓ No uncommitted changes${NC}"
+fi
+
+echo ""
+
+# Update progress.md
+if [ -f "$WORKFLOW_DIR/state/progress.md" ]; then
+    echo -e "${YELLOW}Updating progress.md...${NC}"
+    
+    # Create backup
+    cp "$WORKFLOW_DIR/state/progress.md" "$WORKFLOW_DIR/state/progress.md.bak"
+    
+    # Update timestamp
+    sed -i.tmp "s/## Last Updated.*/## Last Updated\n$(date +%Y-%m-%d\ %H:%M)/" "$WORKFLOW_DIR/state/progress.md" 2>/dev/null || true
+    rm -f "$WORKFLOW_DIR/state/progress.md.tmp"
+    
+    echo -e "${GREEN}✓ Progress updated${NC}"
+fi
+
+echo ""
+
+# Push if remote exists
+if git remote get-url origin &>/dev/null; then
+    read -p "Push to remote? (y/N) " push_confirm
+    if [ "$push_confirm" = "y" ] || [ "$push_confirm" = "Y" ]; then
+        git push
+        echo -e "${GREEN}✓ Pushed to remote${NC}"
+    fi
+fi
+
+echo ""
+echo -e "${GREEN}Session ended cleanly.${NC}"
+echo ""
+echo "Summary:"
+./scripts/flow status 2>/dev/null || echo "  (run 'flow status' for details)"

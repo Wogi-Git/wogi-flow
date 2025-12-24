@@ -1,0 +1,150 @@
+#!/bin/bash
+
+# Wogi Flow - Main CLI
+# Self-improving AI development workflow
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+show_version() {
+    if [ -f "$PROJECT_ROOT/.wogi-version" ]; then
+        echo "Wogi Flow v$(cat "$PROJECT_ROOT/.wogi-version")"
+    else
+        echo "Wogi Flow (version unknown)"
+    fi
+}
+
+show_help() {
+    show_version
+    echo ""
+    echo "Usage: flow <command> [options]"
+    echo ""
+    echo "Setup & Updates:"
+    echo "  install              Interactive setup wizard"
+    echo "  install --quick      Quick setup with defaults"
+    echo "  onboard              Analyze existing project & set up context"
+    echo "  update               Update to latest version (preserves data)"
+    echo "  update --check       Check for available updates"
+    echo ""
+    echo "Task Management:"
+    echo "  ready                Show tasks ready to work on"
+    echo "  start <task-id>      Start working on a task"
+    echo "  done <task-id>       Mark task complete"
+    echo "  status               Show project overview"
+    echo "  deps <task-id>       Show task dependencies"
+    echo ""
+    echo "Story & Feature Creation:"
+    echo "  story <title>        Create detailed story with acceptance criteria"
+    echo "  new-feature <n>   Create new feature"
+    echo "  bug <title>          Create bug report"
+    echo ""
+    echo "Workflow:"
+    echo "  health               Check workflow health"
+    echo "  standup [days]       Generate standup summary"
+    echo "  session-end          End session properly"
+    echo "  init                 Initialize workflow (legacy)"
+    echo "  setup-hooks          Install/manage git hooks"
+    echo "  archive              Archive old request-log entries"
+    echo ""
+    echo "Components:"
+    echo "  update-map           Add/scan components in app map"
+    echo ""
+    echo "Search & Context:"
+    echo "  search <query>       Search request-log by tag/keyword"
+    echo "  context <task-id>    Load all context for a task"
+    echo ""
+    echo "Team:"
+    echo "  export-profile       Export workflow config for team"
+    echo "  import-profile       Import team config"
+    echo ""
+    echo "Docs:"
+    echo "  changelog            Generate changelog from request-log"
+    echo ""
+    echo "Options:"
+    echo "  help, --help, -h     Show this help"
+    echo "  version, --version   Show version"
+}
+
+case "${1:-}" in
+    ready)
+        "$SCRIPT_DIR/flow-ready" "${@:2}"
+        ;;
+    start)
+        "$SCRIPT_DIR/flow-start" "${@:2}"
+        ;;
+    done)
+        "$SCRIPT_DIR/flow-done" "${@:2}"
+        ;;
+    story)
+        "$SCRIPT_DIR/flow-story" "${@:2}"
+        ;;
+    new-feature)
+        "$SCRIPT_DIR/flow-new-feature" "${@:2}"
+        ;;
+    bug)
+        "$SCRIPT_DIR/flow-bug" "${@:2}"
+        ;;
+    status)
+        "$SCRIPT_DIR/flow-status" "${@:2}"
+        ;;
+    deps)
+        "$SCRIPT_DIR/flow-deps" "${@:2}"
+        ;;
+    health)
+        "$SCRIPT_DIR/flow-health" "${@:2}"
+        ;;
+    standup)
+        "$SCRIPT_DIR/flow-standup" "${@:2}"
+        ;;
+    session-end)
+        "$SCRIPT_DIR/flow-session-end" "${@:2}"
+        ;;
+    init)
+        "$SCRIPT_DIR/flow-init" "${@:2}"
+        ;;
+    install)
+        "$SCRIPT_DIR/flow-install" "${@:2}"
+        ;;
+    onboard)
+        "$SCRIPT_DIR/flow-onboard" "${@:2}"
+        ;;
+    update)
+        "$SCRIPT_DIR/flow-update" "${@:2}"
+        ;;
+    setup-hooks)
+        "$SCRIPT_DIR/flow-setup-hooks" "${@:2}"
+        ;;
+    update-map)
+        "$SCRIPT_DIR/flow-update-map" "${@:2}"
+        ;;
+    search)
+        "$SCRIPT_DIR/flow-search" "${@:2}"
+        ;;
+    context)
+        "$SCRIPT_DIR/flow-context" "${@:2}"
+        ;;
+    export-profile)
+        "$SCRIPT_DIR/flow-export-profile" "${@:2}"
+        ;;
+    import-profile)
+        "$SCRIPT_DIR/flow-import-profile" "${@:2}"
+        ;;
+    changelog)
+        "$SCRIPT_DIR/flow-changelog" "${@:2}"
+        ;;
+    archive)
+        "$SCRIPT_DIR/flow-archive" "${@:2}"
+        ;;
+    version|--version|-v)
+        show_version
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        show_help
+        exit 1
+        ;;
+esac

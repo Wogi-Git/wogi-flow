@@ -1,0 +1,56 @@
+{
+  "feature": "[feature-name]",
+  "created": "[ISO date]",
+  "tasks": [
+    {
+      "id": "TASK-001",
+      "title": "[Descriptive title]",
+      "type": "feature",
+      "status": "pending",
+      "priority": "high",
+      "complexity": "medium",
+      "phase": null,
+      "dependencies": [],
+      "userStory": {
+        "asA": "[user type]",
+        "iWant": "[action/capability]",
+        "soThat": "[benefit/value]"
+      },
+      "description": "[2-4 sentences of context explaining what and why]",
+      "acceptanceCriteria": [
+        {
+          "scenario": "Happy path",
+          "given": "[initial state]",
+          "when": "[action]",
+          "then": "[outcome]"
+        },
+        {
+          "scenario": "Error case",
+          "given": "[state]",
+          "when": "[invalid action]",
+          "then": "[error handling]"
+        }
+      ],
+      "testSteps": [
+        "Step 1: Verify [specific behavior]",
+        "Step 2: Verify [another behavior]"
+      ],
+      "technicalNotes": {
+        "componentsExisting": ["Button", "Input"],
+        "componentsNew": [],
+        "api": "",
+        "state": "",
+        "constraints": ""
+      },
+      "testStrategy": {
+        "unit": "[what to test]",
+        "integration": "[what to test]",
+        "e2e": "[flow to verify]"
+      },
+      "outOfScope": [],
+      "implemented": false,
+      "tested": false,
+      "commitHash": null
+    }
+  ]
+}

@@ -1,0 +1,139 @@
+#!/bin/bash
+
+# Wogi Flow - Export Profile
+# Export workflow configuration for team sharing
+
+set -e
+
+WORKFLOW_DIR=".workflow"
+PROFILES_DIR="wogi-profiles"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+show_help() {
+    echo "Export Workflow Profile"
+    echo ""
+    echo "Usage: flow export-profile <profile-name> [options]"
+    echo ""
+    echo "Options:"
+    echo "  --include-decisions    Include decisions.md (project-specific rules)"
+    echo "  --include-app-map      Include app-map.md (component registry)"
+    echo "  --full                 Include everything"
+    echo ""
+    echo "Examples:"
+    echo "  flow export-profile team-frontend"
+    echo "  flow export-profile team-frontend --include-decisions"
+    echo "  flow export-profile team-frontend --full"
+}
+
+if [ -z "$1" ] || [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+    show_help
+    exit 0
+fi
+
+PROFILE_NAME="$1"
+shift
+
+# Parse options
+INCLUDE_DECISIONS=false
+INCLUDE_APP_MAP=false
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --include-decisions)
+            INCLUDE_DECISIONS=true
+            ;;
+        --include-app-map)
+            INCLUDE_APP_MAP=true
+            ;;
+        --full)
+            INCLUDE_DECISIONS=true
+            INCLUDE_APP_MAP=true
+            ;;
+        *)
+            echo -e "${RED}Unknown option: $1${NC}"
+            exit 1
+            ;;
+    esac
+    shift
+done
+
+# Create profiles directory
+mkdir -p "$PROFILES_DIR"
+
+# Create temp directory for profile
+TEMP_DIR=$(mktemp -d)
+PROFILE_DIR="$TEMP_DIR/$PROFILE_NAME"
+mkdir -p "$PROFILE_DIR/agents"
+mkdir -p "$PROFILE_DIR/.workflow"
+
+echo -e "${CYAN}Exporting profile: $PROFILE_NAME${NC}"
+echo ""
+
+# Copy core files
+echo -e "  ${GREEN}✓${NC} CLAUDE.md"
+cp CLAUDE.md "$PROFILE_DIR/"
+
+echo -e "  ${GREEN}✓${NC} agents/"
+cp agents/*.md "$PROFILE_DIR/agents/"
+
+echo -e "  ${GREEN}✓${NC} config.json"
+cp "$WORKFLOW_DIR/config.json" "$PROFILE_DIR/.workflow/"
+
+# Optional: decisions.md
+if [ "$INCLUDE_DECISIONS" = true ] && [ -f "$WORKFLOW_DIR/state/decisions.md" ]; then
+    mkdir -p "$PROFILE_DIR/.workflow/state"
+    cp "$WORKFLOW_DIR/state/decisions.md" "$PROFILE_DIR/.workflow/state/"
+    echo -e "  ${GREEN}✓${NC} decisions.md"
+fi
+
+# Optional: app-map.md
+if [ "$INCLUDE_APP_MAP" = true ] && [ -f "$WORKFLOW_DIR/state/app-map.md" ]; then
+    mkdir -p "$PROFILE_DIR/.workflow/state"
+    cp "$WORKFLOW_DIR/state/app-map.md" "$PROFILE_DIR/.workflow/state/"
+    echo -e "  ${GREEN}✓${NC} app-map.md"
+fi
+
+# Create profile info file
+cat > "$PROFILE_DIR/PROFILE.md" << EOF
+# Wogi Flow Profile: $PROFILE_NAME
+
+Exported: $(date +%Y-%m-%d\ %H:%M)
+Source: $(git remote get-url origin 2>/dev/null || echo "unknown")
+
+## Contents
+- CLAUDE.md (core workflow instructions)
+- agents/ (all agent personas)
+- .workflow/config.json (workflow configuration)
+$([ "$INCLUDE_DECISIONS" = true ] && echo "- .workflow/state/decisions.md (project rules)")
+$([ "$INCLUDE_APP_MAP" = true ] && echo "- .workflow/state/app-map.md (component registry)")
+
+## Import Instructions
+\`\`\`bash
+./scripts/flow import-profile $PROFILE_NAME.zip
+\`\`\`
+
+## Configuration Highlights
+\`\`\`json
+$(cat "$WORKFLOW_DIR/config.json" | head -20)
+\`\`\`
+EOF
+
+# Create zip
+OUTPUT_FILE="$PROFILES_DIR/$PROFILE_NAME.zip"
+(cd "$TEMP_DIR" && zip -r "$PROFILE_NAME.zip" "$PROFILE_NAME" > /dev/null)
+mv "$TEMP_DIR/$PROFILE_NAME.zip" "$OUTPUT_FILE"
+
+# Cleanup
+rm -rf "$TEMP_DIR"
+
+echo ""
+echo -e "${GREEN}✓ Profile exported: $OUTPUT_FILE${NC}"
+echo ""
+echo "Share this file with team members."
+echo "They can import with: ./scripts/flow import-profile $OUTPUT_FILE"

@@ -1,0 +1,224 @@
+#!/bin/bash
+
+# Wogi Flow - Update App Map
+
+set -e
+
+WORKFLOW_DIR=".workflow"
+APP_MAP="$WORKFLOW_DIR/state/app-map.md"
+COMPONENTS_DIR="$WORKFLOW_DIR/state/components"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+show_help() {
+    echo "Update App Map - Add or scan components"
+    echo ""
+    echo "Usage:"
+    echo "  flow update-map add <name> <path> [variants]    Add component"
+    echo "  flow update-map screen <name> <route>           Add screen"
+    echo "  flow update-map modal <name> <trigger>          Add modal"
+    echo "  flow update-map scan [directory]                Scan for components"
+    echo "  flow update-map check                           Check for drift"
+    echo ""
+    echo "Examples:"
+    echo "  flow update-map add Button components/ui/Button \"primary,secondary\""
+    echo "  flow update-map screen Login /login"
+    echo "  flow update-map scan src/components"
+}
+
+mkdir -p "$COMPONENTS_DIR"
+
+case "${1:-}" in
+    add)
+        if [ -z "$2" ] || [ -z "$3" ]; then
+            echo -e "${RED}Error: Name and path required${NC}"
+            exit 1
+        fi
+        
+        NAME="$2"
+        COMP_PATH="$3"
+        VARIANTS="${4:-}"
+        
+        # Add to app-map
+        if grep -q "| $NAME |" "$APP_MAP" 2>/dev/null; then
+            echo -e "${YELLOW}Component '$NAME' already exists, updating...${NC}"
+            sed -i.bak "/| $NAME |/d" "$APP_MAP"
+            rm -f "$APP_MAP.bak"
+        fi
+        
+        # Insert before last ---
+        sed -i.bak "/^---$/,\${ /^---$/!b; i\\
+| $NAME | $VARIANTS | \`$COMP_PATH\` | [→](components/$NAME.md) |
+}" "$APP_MAP"
+        rm -f "$APP_MAP.bak"
+        
+        # Create component detail file
+        if [ ! -f "$COMPONENTS_DIR/$NAME.md" ]; then
+            cat > "$COMPONENTS_DIR/$NAME.md" << EOF
+# $NAME
+
+**Path**: \`$COMP_PATH\`
+**Status**: complete
+
+## Variants
+| Variant | Description |
+|---------|-------------|
+$(echo "$VARIANTS" | tr ',' '\n' | while read v; do [ -n "$v" ] && echo "| \`$v\` | |"; done)
+
+## Props
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+
+## Usage
+\`\`\`tsx
+<$NAME />
+\`\`\`
+
+## Used In
+- 
+EOF
+            echo -e "${GREEN}✓${NC} Created $COMPONENTS_DIR/$NAME.md"
+        fi
+        
+        echo -e "${GREEN}✓${NC} Added '$NAME' to app-map"
+        ;;
+        
+    screen)
+        if [ -z "$2" ] || [ -z "$3" ]; then
+            echo -e "${RED}Error: Name and route required${NC}"
+            exit 1
+        fi
+        
+        NAME="$2"
+        ROUTE="$3"
+        
+        # Add to Screens section
+        sed -i.bak "/^## Modals/i | $NAME | \`$ROUTE\` | complete |" "$APP_MAP"
+        rm -f "$APP_MAP.bak"
+        
+        echo -e "${GREEN}✓${NC} Added screen '$NAME'"
+        ;;
+        
+    modal)
+        if [ -z "$2" ] || [ -z "$3" ]; then
+            echo -e "${RED}Error: Name and trigger required${NC}"
+            exit 1
+        fi
+        
+        NAME="$2"
+        TRIGGER="$3"
+        
+        # Add to Modals section
+        sed -i.bak "/^## Components/i | $NAME | $TRIGGER | complete |" "$APP_MAP"
+        rm -f "$APP_MAP.bak"
+        
+        echo -e "${GREEN}✓${NC} Added modal '$NAME'"
+        ;;
+        
+    scan)
+        SCAN_DIR="${2:-src/components}"
+        
+        if [ ! -d "$SCAN_DIR" ]; then
+            echo -e "${YELLOW}Directory '$SCAN_DIR' not found${NC}"
+            exit 0
+        fi
+        
+        echo -e "${CYAN}Scanning $SCAN_DIR...${NC}"
+        echo ""
+        
+        found=0
+        new=0
+        
+        while IFS= read -r file; do
+            if [ -f "$file" ]; then
+                filename=$(basename "$file")
+                name="${filename%.*}"
+                
+                # Skip index, test, story files
+                if [[ "$name" == "index" ]] || [[ "$name" == *".test"* ]] || [[ "$name" == *".stories"* ]]; then
+                    continue
+                fi
+                
+                found=$((found + 1))
+                
+                if grep -q "| $name |" "$APP_MAP" 2>/dev/null; then
+                    echo -e "  ${GREEN}✓${NC} $name"
+                else
+                    echo -e "  ${YELLOW}+${NC} $name (not in app-map)"
+                    new=$((new + 1))
+                fi
+            fi
+        done < <(find "$SCAN_DIR" -type f \( -name "*.tsx" -o -name "*.jsx" -o -name "*.vue" \) 2>/dev/null)
+        
+        echo ""
+        echo "Found: $found components"
+        if [ $new -gt 0 ]; then
+            echo -e "${YELLOW}$new not in app-map${NC}"
+            echo ""
+            echo "Add them with: flow update-map add <name> <path>"
+        fi
+        ;;
+        
+    check)
+        echo -e "${CYAN}Checking app-map for drift...${NC}"
+        echo ""
+        
+        if [ ! -f "$APP_MAP" ]; then
+            echo -e "${RED}No app-map.md found${NC}"
+            exit 1
+        fi
+        
+        missing=0
+        orphaned=0
+        
+        # Extract component paths from app-map and check if they exist
+        echo -e "${YELLOW}Checking mapped components...${NC}"
+        
+        grep "^\| " "$APP_MAP" | grep -v "^| ---" | grep -v "^| Component" | grep -v "^| Screen" | grep -v "^| Modal" | while IFS='|' read -r _ name _ path _; do
+            # Clean up the path
+            path=$(echo "$path" | sed 's/`//g' | xargs)
+            name=$(echo "$name" | xargs)
+            
+            if [ -n "$path" ] && [ "$path" != "Path" ]; then
+                # Check if path exists (try common extensions)
+                found=false
+                for ext in "" ".tsx" ".jsx" ".vue" ".ts" ".js"; do
+                    if [ -f "src/$path$ext" ] || [ -f "$path$ext" ] || [ -d "src/$path" ] || [ -d "$path" ]; then
+                        found=true
+                        break
+                    fi
+                done
+                
+                if [ "$found" = true ]; then
+                    echo -e "  ${GREEN}✓${NC} $name"
+                else
+                    echo -e "  ${RED}✗${NC} $name - not found at $path"
+                    orphaned=$((orphaned + 1))
+                fi
+            fi
+        done
+        
+        echo ""
+        
+        if [ $orphaned -gt 0 ]; then
+            echo -e "${YELLOW}Found $orphaned orphaned entries in app-map${NC}"
+            echo "Consider removing them or updating paths."
+        else
+            echo -e "${GREEN}✓ All mapped components exist${NC}"
+        fi
+        ;;
+        
+    help|--help|-h|"")
+        show_help
+        ;;
+        
+    *)
+        show_help
+        exit 1
+        ;;
+esac

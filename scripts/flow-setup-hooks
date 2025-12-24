@@ -1,0 +1,195 @@
+#!/bin/bash
+
+# Wogi Flow - Setup Git Hooks
+# Installs optional pre-commit hooks to enforce workflow rules
+
+set -e
+
+WORKFLOW_DIR=".workflow"
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+show_help() {
+    echo "Setup Git Hooks"
+    echo ""
+    echo "Usage: flow setup-hooks [options]"
+    echo ""
+    echo "Options:"
+    echo "  install      Install pre-commit hooks"
+    echo "  uninstall    Remove pre-commit hooks"
+    echo "  status       Check if hooks are installed"
+    echo ""
+    echo "Hooks enforce:"
+    echo "  • request-log.md has been updated"
+    echo "  • app-map.md updated if new components"
+    echo "  • No console.log in production code"
+    echo "  • Tests pass (if configured in config.json)"
+}
+
+install_hooks() {
+    if [ ! -d ".git" ]; then
+        echo -e "${RED}Error: Not a git repository${NC}"
+        exit 1
+    fi
+    
+    mkdir -p .git/hooks
+    
+    # Create pre-commit hook
+    cat > .git/hooks/pre-commit << 'HOOK'
+#!/bin/bash
+
+# Wogi Flow Pre-commit Hook
+# Enforces workflow rules before commits
+
+WORKFLOW_DIR=".workflow"
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+echo "Running Wogi Flow pre-commit checks..."
+
+failed=0
+
+# Check 1: request-log.md was modified (if other files changed)
+staged_files=$(git diff --cached --name-only)
+non_workflow_files=$(echo "$staged_files" | grep -v "^\.workflow/" | grep -v "^CLAUDE.md" || true)
+
+if [ -n "$non_workflow_files" ]; then
+    if ! echo "$staged_files" | grep -q "request-log.md"; then
+        echo -e "${YELLOW}⚠ Warning: Code changed but request-log.md not updated${NC}"
+        echo "  Consider adding a log entry for this change."
+        # Warning only, don't fail
+    else
+        echo -e "${GREEN}✓${NC} request-log.md updated"
+    fi
+fi
+
+# Check 2: No console.log in staged JS/TS files (warning only)
+js_files=$(echo "$staged_files" | grep -E '\.(js|ts|jsx|tsx)$' || true)
+if [ -n "$js_files" ]; then
+    console_logs=$(git diff --cached -- $js_files | grep -E '^\+.*console\.(log|debug)' || true)
+    if [ -n "$console_logs" ]; then
+        echo -e "${YELLOW}⚠ Warning: console.log found in staged files${NC}"
+        echo "$console_logs" | head -5
+        # Warning only
+    fi
+fi
+
+# Check 3: Run tests if configured
+if [ -f "$WORKFLOW_DIR/config.json" ]; then
+    run_tests=$(python3 -c "
+import json
+with open('$WORKFLOW_DIR/config.json') as f:
+    config = json.load(f)
+print(config.get('testing', {}).get('runBeforeCommit', False))
+" 2>/dev/null || echo "False")
+    
+    if [ "$run_tests" = "True" ]; then
+        echo "Running tests..."
+        if npm test --silent 2>/dev/null; then
+            echo -e "${GREEN}✓${NC} Tests passed"
+        else
+            echo -e "${RED}✗ Tests failed${NC}"
+            failed=1
+        fi
+    fi
+fi
+
+# Check 4: Lint if configured
+if [ -f "package.json" ] && grep -q '"lint"' package.json 2>/dev/null; then
+    staged_code=$(echo "$staged_files" | grep -E '\.(js|ts|jsx|tsx|vue)$' || true)
+    if [ -n "$staged_code" ]; then
+        # Only lint staged files
+        if command -v npx &> /dev/null && [ -f ".eslintrc.js" ] || [ -f ".eslintrc.json" ] || [ -f ".eslintrc" ]; then
+            echo "Linting staged files..."
+            if echo "$staged_code" | xargs npx eslint --quiet 2>/dev/null; then
+                echo -e "${GREEN}✓${NC} Lint passed"
+            else
+                echo -e "${YELLOW}⚠${NC} Lint warnings (not blocking)"
+            fi
+        fi
+    fi
+fi
+
+if [ $failed -eq 1 ]; then
+    echo ""
+    echo -e "${RED}Pre-commit checks failed. Fix issues or use --no-verify to bypass.${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}✓ Pre-commit checks passed${NC}"
+exit 0
+HOOK
+    
+    chmod +x .git/hooks/pre-commit
+    
+    echo -e "${GREEN}✓ Pre-commit hook installed${NC}"
+    echo ""
+    echo "The hook will check:"
+    echo "  • request-log.md updates (warning)"
+    echo "  • console.log statements (warning)"
+    echo "  • Tests (if runBeforeCommit: true in config.json)"
+    echo "  • Lint (if eslint configured)"
+    echo ""
+    echo "To bypass: git commit --no-verify"
+    echo "To remove: ./scripts/flow setup-hooks uninstall"
+}
+
+uninstall_hooks() {
+    if [ -f ".git/hooks/pre-commit" ]; then
+        # Check if it's our hook
+        if grep -q "Wogi Flow" .git/hooks/pre-commit 2>/dev/null; then
+            rm .git/hooks/pre-commit
+            echo -e "${GREEN}✓ Pre-commit hook removed${NC}"
+        else
+            echo -e "${YELLOW}Pre-commit hook exists but wasn't installed by Wogi Flow${NC}"
+            echo "Remove manually if desired: rm .git/hooks/pre-commit"
+        fi
+    else
+        echo "No pre-commit hook installed"
+    fi
+}
+
+check_status() {
+    echo -e "${CYAN}Hook Status${NC}"
+    echo ""
+    
+    if [ ! -d ".git" ]; then
+        echo -e "${YELLOW}Not a git repository${NC}"
+        exit 0
+    fi
+    
+    if [ -f ".git/hooks/pre-commit" ]; then
+        if grep -q "Wogi Flow" .git/hooks/pre-commit 2>/dev/null; then
+            echo -e "${GREEN}✓${NC} Wogi Flow pre-commit hook installed"
+        else
+            echo -e "${YELLOW}○${NC} Pre-commit hook exists (not Wogi Flow)"
+        fi
+    else
+        echo -e "${YELLOW}○${NC} No pre-commit hook installed"
+    fi
+}
+
+case "${1:-}" in
+    install)
+        install_hooks
+        ;;
+    uninstall)
+        uninstall_hooks
+        ;;
+    status)
+        check_status
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        show_help
+        ;;
+esac

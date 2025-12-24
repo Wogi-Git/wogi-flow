@@ -1,0 +1,162 @@
+#!/bin/bash
+
+# Wogi Flow - Standup Summary Generator
+# Generates daily standup from request-log and task status
+
+set -e
+
+WORKFLOW_DIR=".workflow"
+REQUEST_LOG="$WORKFLOW_DIR/state/request-log.md"
+READY_JSON="$WORKFLOW_DIR/state/ready.json"
+PROGRESS_MD="$WORKFLOW_DIR/state/progress.md"
+
+# Colors
+CYAN='\033[0;36m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+# Get date range (default: last 24 hours)
+DAYS=${1:-1}
+SINCE=$(date -d "$DAYS days ago" +%Y-%m-%d 2>/dev/null || date -v-${DAYS}d +%Y-%m-%d)
+
+echo -e "${CYAN}═══════════════════════════════════════${NC}"
+echo -e "${CYAN}        STANDUP SUMMARY${NC}"
+echo -e "${CYAN}═══════════════════════════════════════${NC}"
+echo ""
+echo "Period: Last $DAYS day(s) (since $SINCE)"
+echo ""
+
+# What was done (from request-log)
+echo -e "${GREEN}✅ COMPLETED${NC}"
+echo "─────────────────────────────────────"
+
+if [ -f "$REQUEST_LOG" ]; then
+    # Extract entries from the time period
+    recent_entries=$(grep -A5 "^### R-" "$REQUEST_LOG" | grep -A5 "$SINCE" 2>/dev/null || true)
+    
+    if [ -n "$recent_entries" ]; then
+        # Parse and display
+        grep "^### R-" "$REQUEST_LOG" | while read -r line; do
+            date_in_entry=$(echo "$line" | grep -oE "[0-9]{4}-[0-9]{2}-[0-9]{2}" || true)
+            if [[ "$date_in_entry" > "$SINCE" ]] || [[ "$date_in_entry" == "$SINCE" ]]; then
+                entry_id=$(echo "$line" | grep -oE "R-[0-9]+")
+                echo "  • $entry_id"
+            fi
+        done
+        
+        # Count by type
+        echo ""
+        new_count=$(grep -c "Type.*: new" "$REQUEST_LOG" 2>/dev/null || echo 0)
+        fix_count=$(grep -c "Type.*: fix" "$REQUEST_LOG" 2>/dev/null || echo 0)
+        change_count=$(grep -c "Type.*: change" "$REQUEST_LOG" 2>/dev/null || echo 0)
+        
+        echo "  Summary: $new_count new, $fix_count fixes, $change_count changes"
+    else
+        echo "  No logged work in this period"
+    fi
+else
+    echo "  No request-log found"
+fi
+
+echo ""
+
+# What's in progress (from ready.json)
+echo -e "${YELLOW}🔄 IN PROGRESS${NC}"
+echo "─────────────────────────────────────"
+
+if [ -f "$READY_JSON" ]; then
+    in_progress=$(python3 -c "
+import json
+with open('$READY_JSON') as f:
+    data = json.load(f)
+    for task in data.get('inProgress', []):
+        if isinstance(task, dict):
+            print(f\"  • {task.get('id', 'unknown')}: {task.get('title', 'No title')}\")
+        else:
+            print(f\"  • {task}\")
+" 2>/dev/null || echo "  Unable to parse ready.json")
+    
+    if [ -n "$in_progress" ]; then
+        echo "$in_progress"
+    else
+        echo "  Nothing currently in progress"
+    fi
+else
+    echo "  No ready.json found"
+fi
+
+echo ""
+
+# What's next (from ready.json)
+echo -e "${CYAN}📋 UP NEXT${NC}"
+echo "─────────────────────────────────────"
+
+if [ -f "$READY_JSON" ]; then
+    ready=$(python3 -c "
+import json
+with open('$READY_JSON') as f:
+    data = json.load(f)
+    ready_tasks = data.get('ready', [])[:3]  # Top 3
+    for task in ready_tasks:
+        if isinstance(task, dict):
+            print(f\"  • {task.get('id', 'unknown')}: {task.get('title', 'No title')}\")
+        else:
+            print(f\"  • {task}\")
+" 2>/dev/null || echo "  Unable to parse ready.json")
+    
+    if [ -n "$ready" ]; then
+        echo "$ready"
+    else
+        echo "  No tasks ready"
+    fi
+fi
+
+echo ""
+
+# Blockers (from ready.json and progress.md)
+echo -e "${YELLOW}🚧 BLOCKERS${NC}"
+echo "─────────────────────────────────────"
+
+has_blockers=false
+
+if [ -f "$READY_JSON" ]; then
+    blocked=$(python3 -c "
+import json
+with open('$READY_JSON') as f:
+    data = json.load(f)
+    for task in data.get('blocked', []):
+        if isinstance(task, dict):
+            print(f\"  • {task.get('id', 'unknown')}: {task.get('reason', 'No reason')}\")
+        else:
+            print(f\"  • {task}\")
+" 2>/dev/null || true)
+    
+    if [ -n "$blocked" ]; then
+        echo "$blocked"
+        has_blockers=true
+    fi
+fi
+
+if [ "$has_blockers" = false ]; then
+    echo "  None 🎉"
+fi
+
+echo ""
+
+# Recent decisions (from feedback-patterns.md)
+if [ -f "$WORKFLOW_DIR/state/feedback-patterns.md" ]; then
+    recent_patterns=$(grep "$SINCE" "$WORKFLOW_DIR/state/feedback-patterns.md" 2>/dev/null || true)
+    if [ -n "$recent_patterns" ]; then
+        echo -e "${CYAN}📝 RECENT DECISIONS${NC}"
+        echo "─────────────────────────────────────"
+        echo "$recent_patterns"
+        echo ""
+    fi
+fi
+
+echo -e "${CYAN}═══════════════════════════════════════${NC}"
+echo ""
+echo "For full details:"
+echo "  • Request log: $REQUEST_LOG"
+echo "  • Progress: $PROGRESS_MD"

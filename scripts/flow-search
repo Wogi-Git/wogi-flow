@@ -1,0 +1,104 @@
+#!/bin/bash
+
+# Wogi Flow - Search Request Log
+# Search for entries by tag or keyword
+
+set -e
+
+WORKFLOW_DIR=".workflow"
+REQUEST_LOG="$WORKFLOW_DIR/state/request-log.md"
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+show_help() {
+    echo "Search Request Log"
+    echo ""
+    echo "Usage: flow search <query> [options]"
+    echo ""
+    echo "Options:"
+    echo "  -t, --tag      Search by tag (e.g., #screen:login)"
+    echo "  -r, --request  Search in request text"
+    echo "  -f, --file     Search in files changed"
+    echo "  -n, --limit    Limit results (default: 10)"
+    echo ""
+    echo "Examples:"
+    echo "  flow search \"#screen:login\""
+    echo "  flow search \"#component:Button\""
+    echo "  flow search \"password\" --request"
+    echo "  flow search \"LoginForm\" --file"
+    echo "  flow search \"#feature:auth\" --limit 20"
+}
+
+if [ -z "$1" ] || [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+    show_help
+    exit 0
+fi
+
+QUERY="$1"
+LIMIT=10
+SEARCH_TYPE="all"
+
+# Parse options
+shift
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -t|--tag)
+            SEARCH_TYPE="tag"
+            ;;
+        -r|--request)
+            SEARCH_TYPE="request"
+            ;;
+        -f|--file)
+            SEARCH_TYPE="file"
+            ;;
+        -n|--limit)
+            shift
+            LIMIT="$1"
+            ;;
+        *)
+            ;;
+    esac
+    shift
+done
+
+if [ ! -f "$REQUEST_LOG" ]; then
+    echo -e "${RED}Error: No request-log found${NC}"
+    exit 1
+fi
+
+echo -e "${CYAN}Searching for: $QUERY${NC}"
+echo ""
+
+# Search and display results
+results=$(grep -B1 -A6 "$QUERY" "$REQUEST_LOG" 2>/dev/null | head -n $((LIMIT * 8)) || true)
+
+if [ -n "$results" ]; then
+    echo "$results" | while IFS= read -r line; do
+        if [[ "$line" == "### R-"* ]]; then
+            echo -e "${GREEN}$line${NC}"
+        elif [[ "$line" == "**Type"* ]]; then
+            echo -e "${YELLOW}$line${NC}"
+        elif [[ "$line" == "**Tags"* ]]; then
+            echo -e "${CYAN}$line${NC}"
+        else
+            echo "$line"
+        fi
+    done
+    echo ""
+    
+    count=$(grep -c "$QUERY" "$REQUEST_LOG" 2>/dev/null || echo "0")
+    echo -e "Found: ${GREEN}$count${NC} matching entries"
+else
+    echo -e "${YELLOW}No results found for: $QUERY${NC}"
+    echo ""
+    echo "Try searching for:"
+    echo "  #screen:[name]"
+    echo "  #component:[name]"
+    echo "  #feature:[name]"
+    echo "  #bug:[id]"
+fi

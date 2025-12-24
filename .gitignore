@@ -1,0 +1,23 @@
+# Wogi Flow - .gitignore for the REPO itself
+# This is what GitHub should ignore when hosting the framework
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Node (if any tooling added later)
+node_modules/
+
+# Temp files
+*.tmp
+*.temp
+*.log
+
+# Note: When users install Wogi Flow in their projects,
+# they should use .gitignore-project instead (rename it)

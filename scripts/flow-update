@@ -1,0 +1,346 @@
+#!/bin/bash
+
+# Wogi Flow - Update Script
+# Updates framework files without touching project data
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_URL="https://github.com/Wogi-Git/wogi-flow"
+TEMP_DIR=$(mktemp -d)
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+RED='\033[0;31m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+# Files/directories to UPDATE (framework)
+UPDATE_PATHS=(
+    "CLAUDE.md"
+    "README.md"
+    "scripts"
+    "agents"
+    "templates"
+    ".claude/commands"
+    "skills"
+)
+
+# Files/directories to PRESERVE (project data) - never touch these
+PRESERVE_PATHS=(
+    ".workflow/config.json"
+    ".workflow/state"
+    ".workflow/changes"
+    ".workflow/bugs"
+    ".workflow/corrections"
+    ".workflow/archive"
+    ".workflow/specs"
+    ".workflow/tests"
+    ".claude/rules"
+    ".claude/skills"
+)
+
+# Config keys to preserve when merging config.json
+PRESERVE_CONFIG_KEYS=(
+    "projectName"
+    "skills.installed"
+)
+
+print_header() {
+    echo -e "${CYAN}"
+    echo "╔═══════════════════════════════════════════════════════════════╗"
+    echo "║                  Wogi Flow Updater                            ║"
+    echo "╚═══════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+}
+
+get_current_version() {
+    if [ -f "$PROJECT_ROOT/.wogi-version" ]; then
+        cat "$PROJECT_ROOT/.wogi-version"
+    else
+        echo "unknown"
+    fi
+}
+
+get_latest_version() {
+    curl -s "https://api.github.com/repos/Wogi-Git/wogi-flow/releases/latest" | \
+        grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' || echo "unknown"
+}
+
+check_for_updates() {
+    local current=$(get_current_version)
+    local latest=$(get_latest_version)
+    
+    echo -e "Current version: ${BOLD}$current${NC}"
+    echo -e "Latest version:  ${BOLD}$latest${NC}"
+    echo ""
+    
+    if [ "$current" = "$latest" ]; then
+        echo -e "${GREEN}✓ You're on the latest version!${NC}"
+        return 1
+    fi
+    
+    return 0
+}
+
+backup_config() {
+    echo -e "${CYAN}Backing up configuration...${NC}"
+    
+    if [ -f "$PROJECT_ROOT/.workflow/config.json" ]; then
+        cp "$PROJECT_ROOT/.workflow/config.json" "$TEMP_DIR/config.backup.json"
+        echo -e "${GREEN}✓${NC} Config backed up"
+    fi
+    
+    # Backup any custom rules
+    if [ -d "$PROJECT_ROOT/.claude/rules" ] && [ "$(ls -A $PROJECT_ROOT/.claude/rules 2>/dev/null)" ]; then
+        cp -r "$PROJECT_ROOT/.claude/rules" "$TEMP_DIR/rules.backup"
+        echo -e "${GREEN}✓${NC} Custom rules backed up"
+    fi
+    
+    # Backup installed skills customizations
+    if [ -d "$PROJECT_ROOT/.claude/skills" ] && [ "$(ls -A $PROJECT_ROOT/.claude/skills 2>/dev/null)" ]; then
+        cp -r "$PROJECT_ROOT/.claude/skills" "$TEMP_DIR/skills.backup"
+        echo -e "${GREEN}✓${NC} Installed skills backed up"
+    fi
+}
+
+download_latest() {
+    echo -e "${CYAN}Downloading latest version...${NC}"
+    
+    local branch="${1:-main}"
+    
+    # Try to get latest release, fall back to main branch
+    if curl -sL "${REPO_URL}/archive/refs/heads/${branch}.tar.gz" -o "$TEMP_DIR/wogi-flow.tar.gz"; then
+        echo -e "${GREEN}✓${NC} Downloaded from ${branch} branch"
+    else
+        echo -e "${RED}✗ Failed to download${NC}"
+        exit 1
+    fi
+    
+    # Extract
+    tar -xzf "$TEMP_DIR/wogi-flow.tar.gz" -C "$TEMP_DIR"
+    
+    # Find extracted directory (might be wogi-flow-main or wogi-flow-vX.X.X)
+    EXTRACTED_DIR=$(find "$TEMP_DIR" -maxdepth 1 -type d -name "wogi-flow*" | head -1)
+    
+    if [ -z "$EXTRACTED_DIR" ]; then
+        echo -e "${RED}✗ Could not find extracted files${NC}"
+        exit 1
+    fi
+    
+    echo -e "${GREEN}✓${NC} Extracted to $EXTRACTED_DIR"
+}
+
+update_framework_files() {
+    echo -e "${CYAN}Updating framework files...${NC}"
+    
+    for path in "${UPDATE_PATHS[@]}"; do
+        local src="$EXTRACTED_DIR/$path"
+        local dest="$PROJECT_ROOT/$path"
+        
+        if [ -e "$src" ]; then
+            # Create parent directory if needed
+            mkdir -p "$(dirname "$dest")"
+            
+            # Remove old and copy new
+            rm -rf "$dest"
+            cp -r "$src" "$dest"
+            
+            echo -e "${GREEN}✓${NC} Updated: $path"
+        fi
+    done
+    
+    # Make scripts executable
+    chmod +x "$PROJECT_ROOT/scripts/"* 2>/dev/null || true
+}
+
+merge_config() {
+    echo -e "${CYAN}Merging configuration...${NC}"
+    
+    local old_config="$TEMP_DIR/config.backup.json"
+    local new_config="$EXTRACTED_DIR/.workflow/config.json"
+    local dest_config="$PROJECT_ROOT/.workflow/config.json"
+    
+    if [ ! -f "$old_config" ]; then
+        # No old config, just use new one
+        cp "$new_config" "$dest_config"
+        echo -e "${GREEN}✓${NC} New config installed"
+        return
+    fi
+    
+    # Merge configs using Python (preserve project values, add new keys)
+    python3 << EOF
+import json
+
+with open('$old_config', 'r') as f:
+    old = json.load(f)
+
+with open('$new_config', 'r') as f:
+    new = json.load(f)
+
+def deep_merge(base, updates, preserve_keys=None):
+    """Merge updates into base, preserving specified keys from base"""
+    preserve_keys = preserve_keys or []
+    result = base.copy()
+    
+    for key, value in updates.items():
+        full_key = key
+        
+        if key in result:
+            if isinstance(value, dict) and isinstance(result[key], dict):
+                # Recursively merge dicts
+                result[key] = deep_merge(result[key], value)
+            elif full_key not in preserve_keys:
+                # Update value (unless in preserve list)
+                result[key] = value
+        else:
+            # Add new key
+            result[key] = value
+    
+    return result
+
+# Keys to preserve from old config
+preserve = ${PRESERVE_CONFIG_KEYS[@]+"${PRESERVE_CONFIG_KEYS[@]}"}
+
+# Merge: start with old, add new keys, preserve project-specific values
+merged = deep_merge(old, new)
+
+# Always preserve these from old
+merged['projectName'] = old.get('projectName', '')
+if 'skills' in old and 'installed' in old['skills']:
+    merged['skills']['installed'] = old['skills']['installed']
+
+# Update version
+merged['version'] = new.get('version', merged.get('version', '3.0'))
+
+with open('$dest_config', 'w') as f:
+    json.dump(merged, f, indent=2)
+
+print('Config merged successfully')
+EOF
+    
+    echo -e "${GREEN}✓${NC} Config merged (new options added, project data preserved)"
+}
+
+restore_customizations() {
+    echo -e "${CYAN}Restoring customizations...${NC}"
+    
+    # Restore custom rules (merge with new defaults)
+    if [ -d "$TEMP_DIR/rules.backup" ]; then
+        mkdir -p "$PROJECT_ROOT/.claude/rules"
+        cp -r "$TEMP_DIR/rules.backup/"* "$PROJECT_ROOT/.claude/rules/" 2>/dev/null || true
+        echo -e "${GREEN}✓${NC} Custom rules restored"
+    fi
+    
+    # Restore installed skills (don't overwrite with placeholders)
+    if [ -d "$TEMP_DIR/skills.backup" ]; then
+        for skill_dir in "$TEMP_DIR/skills.backup/"*/; do
+            skill_name=$(basename "$skill_dir")
+            # Only restore if it's not a placeholder (has actual content)
+            if [ -d "$skill_dir/commands" ] || [ -d "$skill_dir/templates" ]; then
+                mkdir -p "$PROJECT_ROOT/.claude/skills"
+                cp -r "$skill_dir" "$PROJECT_ROOT/.claude/skills/"
+                echo -e "${GREEN}✓${NC} Restored skill: $skill_name"
+            fi
+        done
+    fi
+}
+
+update_version_file() {
+    local version=$(cat "$EXTRACTED_DIR/.wogi-version" 2>/dev/null || echo "3.0.0")
+    echo "$version" > "$PROJECT_ROOT/.wogi-version"
+    echo -e "${GREEN}✓${NC} Version updated to $version"
+}
+
+cleanup() {
+    rm -rf "$TEMP_DIR"
+}
+
+print_completion() {
+    echo ""
+    echo -e "${GREEN}╔═══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║           ✅ Wogi Flow updated successfully!                  ║${NC}"
+    echo -e "${GREEN}╚═══════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${BOLD}What was updated:${NC}"
+    for path in "${UPDATE_PATHS[@]}"; do
+        echo "  • $path"
+    done
+    echo ""
+    echo -e "${BOLD}What was preserved:${NC}"
+    echo "  • Project configuration"
+    echo "  • All workflow state (tasks, logs, history)"
+    echo "  • Custom rules"
+    echo "  • Installed skills"
+    echo ""
+    echo -e "${YELLOW}Tip:${NC} Run /wogi-health to verify everything is working."
+}
+
+# Main
+main() {
+    print_header
+    
+    local branch="main"
+    local force=false
+    
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --branch)
+                branch="$2"
+                shift 2
+                ;;
+            --force)
+                force=true
+                shift
+                ;;
+            --check)
+                check_for_updates
+                exit $?
+                ;;
+            --help|-h)
+                echo "Usage: flow update [options]"
+                echo ""
+                echo "Options:"
+                echo "  --check       Check for updates without installing"
+                echo "  --branch NAME Use specific branch (default: main)"
+                echo "  --force       Update even if on latest version"
+                echo "  --help        Show this help"
+                exit 0
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+    
+    # Check for updates unless forced
+    if [ "$force" = false ]; then
+        if ! check_for_updates; then
+            read -p "Update anyway? (y/n): " confirm
+            if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+                echo "Update cancelled."
+                cleanup
+                exit 0
+            fi
+        fi
+    fi
+    
+    echo ""
+    
+    trap cleanup EXIT
+    
+    backup_config
+    download_latest "$branch"
+    update_framework_files
+    merge_config
+    restore_customizations
+    update_version_file
+    
+    print_completion
+}
+
+main "$@"

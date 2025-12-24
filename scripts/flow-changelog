@@ -1,0 +1,85 @@
+#!/bin/bash
+
+# Wogi Flow - Generate Changelog
+
+set -e
+
+WORKFLOW_DIR=".workflow"
+REQUEST_LOG="$WORKFLOW_DIR/state/request-log.md"
+OUTPUT="${1:-CHANGELOG.md}"
+
+# Colors
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+echo -e "${CYAN}Generating changelog from request-log...${NC}"
+echo ""
+
+if [ ! -f "$REQUEST_LOG" ]; then
+    echo "No request-log found"
+    exit 1
+fi
+
+# Generate changelog
+cat > "$OUTPUT" << 'HEADER'
+# Changelog
+
+All notable changes to this project, generated from the request log.
+
+HEADER
+
+python3 << EOF >> "$OUTPUT"
+import re
+from collections import defaultdict
+from datetime import datetime
+
+# Parse request log
+entries = defaultdict(list)
+
+with open('$REQUEST_LOG') as f:
+    content = f.read()
+
+# Match entries
+pattern = r'### (R-\d+) \| ([\d-]+ [\d:]+).*?\n\*\*Type\*\*: (\w+).*?\n\*\*Tags\*\*: ([^\n]+).*?\n\*\*Request\*\*: "([^"]+)".*?\n\*\*Result\*\*: ([^\n]+)'
+
+for match in re.finditer(pattern, content, re.DOTALL):
+    entry_id, timestamp, entry_type, tags, request, result = match.groups()
+    
+    # Parse date
+    try:
+        date = timestamp.split()[0]
+    except:
+        date = "Unknown"
+    
+    entries[entry_type].append({
+        'id': entry_id,
+        'date': date,
+        'request': request,
+        'result': result,
+        'tags': tags
+    })
+
+# Output by type
+type_headers = {
+    'new': 'Added',
+    'change': 'Changed',
+    'fix': 'Fixed',
+    'refactor': 'Refactored'
+}
+
+print("## [Unreleased]")
+print()
+
+for entry_type, header in type_headers.items():
+    if entries[entry_type]:
+        print(f"### {header}")
+        for entry in entries[entry_type]:
+            tags = entry['tags'].replace('#', '').replace(':', '/').strip()
+            print(f"- {entry['result']} ({entry['id']})")
+        print()
+EOF
+
+echo -e "${GREEN}✓${NC} Generated: $OUTPUT"
+echo ""
+echo "Review and edit as needed."

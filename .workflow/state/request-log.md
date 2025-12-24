@@ -1,0 +1,15 @@
+# Request Log
+
+Automatic log of all requests that changed files. Searchable by tags.
+
+**Search examples:**
+```bash
+grep -A5 "#screen:login" .workflow/state/request-log.md
+grep -A5 "#component:Button" .workflow/state/request-log.md
+grep -A5 "Type: fix" .workflow/state/request-log.md
+```
+
+---
+
+<!-- Entries below. Format: R-001, R-002, etc. -->
+
