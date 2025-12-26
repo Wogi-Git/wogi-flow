@@ -129,7 +129,16 @@ Always check `qualityGates` section and ensure required gates pass before markin
 ./scripts/flow context TASK-X     # Load task context
 ./scripts/flow export-profile     # Export workflow config for team
 ./scripts/flow import-profile     # Import team config
+
+# Components
 ./scripts/flow update-map         # Add/scan components
+./scripts/flow map-index          # Show component index
+./scripts/flow map-index scan     # Rescan codebase
+./scripts/flow map-sync           # Compare index with app-map
+
+# Code Traces
+./scripts/flow trace "prompt"     # Generate code trace
+./scripts/flow trace list         # List saved traces
 ```
 
 ## Slash Commands
@@ -172,6 +181,17 @@ When user types these commands, execute the corresponding action immediately.
 | `/wogi-map-add [name] [path] [variants]` | Add component to app-map.md. Create detail file in `.workflow/state/components/`. |
 | `/wogi-map-scan [dir]` | Scan directory for component files. Compare with app-map. Report unmapped components. |
 | `/wogi-map-check` | Check if mapped components still exist in codebase. Report drift. |
+| `/wogi-map-index` | Show auto-generated component index summary. |
+| `/wogi-map-index scan` | Rescan codebase and regenerate component-index.json. |
+| `/wogi-map-sync` | Compare auto-generated index with curated app-map. Show what's missing, what's stale. Offer to update. |
+
+### Code Traces
+
+| Command | Action |
+|---------|--------|
+| `/wogi-trace [prompt]` | Generate task-focused code trace. Analyzes codebase to show execution flow, components involved, mermaid diagram. Saves to `.workflow/traces/`. |
+| `/wogi-trace list` | List all saved traces. |
+| `/wogi-trace [name]` | Load and show an existing trace. |
 
 ### Search & Context
 
@@ -591,12 +611,59 @@ When browser testing is needed:
 | **Workflow config** | `.workflow/config.json` | Session start |
 | Task queue | `.workflow/state/ready.json` | Session start |
 | Request history | `.workflow/state/request-log.md` | Session start, after changes |
-| Component index | `.workflow/state/app-map.md` | Before creating components |
+| Component registry (curated) | `.workflow/state/app-map.md` | Before creating components |
+| Component index (auto) | `.workflow/state/component-index.json` | Auto-generated, for discovery |
 | Component details | `.workflow/state/components/` | When working on component |
 | Project rules | `.workflow/state/decisions.md` | Session start |
 | Feedback patterns | `.workflow/state/feedback-patterns.md` | After learning |
 | Handoff notes | `.workflow/state/progress.md` | Session start/end |
+| Code traces | `.workflow/traces/` | When analyzing flows |
 | Browser test flows | `.workflow/tests/flows/` | When testing |
+
+## Component Management (Hybrid Approach)
+
+Two layers work together:
+
+### 1. `app-map.md` - Curated (Human-maintained)
+- Rich descriptions and usage guidance
+- "When to use which variant"
+- Key components only
+- May lag behind codebase
+
+### 2. `component-index.json` - Auto-generated
+- Always current (after scan)
+- All components found
+- No context, just paths and exports
+- Use for discovery
+
+### Workflow
+1. Run `/wogi-map-index scan` to refresh the auto-index
+2. Run `/wogi-map-sync` to compare with curated app-map
+3. Add important missing components to app-map with descriptions
+4. Remove stale entries from app-map
+
+## Code Traces
+
+Generate task-focused documentation of how code flows work:
+
+```bash
+./scripts/flow trace "user authentication flow"
+./scripts/flow trace "payment processing"
+./scripts/flow trace "how data gets from form to database"
+```
+
+Traces include:
+- Flow overview (high-level summary)
+- Execution steps (files, lines, code snippets)
+- Mermaid diagram (visual flowchart)
+- Related files
+- Security/performance notes
+
+Use traces for:
+- Understanding before editing
+- Onboarding to new areas of codebase
+- Debugging complex flows
+- Documentation
 
 ## Modifying Workflow Instructions
 

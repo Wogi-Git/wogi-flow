@@ -50,6 +50,14 @@ show_help() {
     echo ""
     echo "Components:"
     echo "  update-map           Add/scan components in app map"
+    echo "  map-index            Auto-generate component index"
+    echo "  map-index scan       Rescan codebase"
+    echo "  map-sync             Compare index with app-map"
+    echo ""
+    echo "Code Traces:"
+    echo "  trace \"<prompt>\"     Generate task-focused code trace"
+    echo "  trace list           List saved traces"
+    echo "  trace show <n>    Show a saved trace"
     echo ""
     echo "Search & Context:"
     echo "  search <query>       Search request-log by tag/keyword"
@@ -118,6 +126,15 @@ case "${1:-}" in
         ;;
     update-map)
         "$SCRIPT_DIR/flow-update-map" "${@:2}"
+        ;;
+    map-index)
+        "$SCRIPT_DIR/flow-map-index" "${@:2}"
+        ;;
+    map-sync)
+        "$SCRIPT_DIR/flow-map-sync" "${@:2}"
+        ;;
+    trace)
+        "$SCRIPT_DIR/flow-trace" "${@:2}"
         ;;
     search)
         "$SCRIPT_DIR/flow-search" "${@:2}"

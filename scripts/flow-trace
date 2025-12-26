@@ -1,0 +1,204 @@
+#!/bin/bash
+
+# Wogi Flow - Code Trace Generator
+# Generate task-focused code traces
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+WORKFLOW_DIR="$PROJECT_ROOT/.workflow"
+TRACES_DIR="$WORKFLOW_DIR/traces"
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+RED='\033[0;31m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
+
+show_help() {
+    echo "Wogi Flow - Code Trace"
+    echo ""
+    echo "Generate task-focused code flow traces"
+    echo ""
+    echo "Usage:"
+    echo "  flow trace \"<prompt>\"    Generate new trace"
+    echo "  flow trace list          List saved traces"
+    echo "  flow trace show <name>   Show saved trace"
+    echo "  flow trace delete <name> Delete a trace"
+    echo ""
+    echo "Examples:"
+    echo "  flow trace \"user authentication flow\""
+    echo "  flow trace \"how payment processing works\""
+    echo "  flow trace \"data flow from form to database\""
+    echo ""
+}
+
+list_traces() {
+    echo -e "\n${BOLD}📍 Saved Traces${NC}\n"
+    
+    if [ ! -d "$TRACES_DIR" ] || [ -z "$(ls -A "$TRACES_DIR" 2>/dev/null | grep -v '.gitkeep')" ]; then
+        echo -e "${DIM}No traces saved yet.${NC}"
+        echo ""
+        echo "Create one with: flow trace \"<prompt>\""
+        echo ""
+        return
+    fi
+    
+    echo "| Name | Created | Query |"
+    echo "|------|---------|-------|"
+    
+    for file in "$TRACES_DIR"/*.md; do
+        [ -f "$file" ] || continue
+        [ "$(basename "$file")" = ".gitkeep" ] && continue
+        
+        name=$(basename "$file" .md)
+        created=$(head -20 "$file" | grep -E "^> Generated:" | sed 's/> Generated: //' || echo "unknown")
+        query=$(head -20 "$file" | grep -E "^> Query:" | sed 's/> Query: //' | cut -c1-40 || echo "")
+        
+        echo "| $name | $created | $query |"
+    done
+    
+    echo ""
+}
+
+show_trace() {
+    local name="$1"
+    local file="$TRACES_DIR/${name}.md"
+    
+    # Try with .md extension if not found
+    if [ ! -f "$file" ]; then
+        file="$TRACES_DIR/${name}"
+    fi
+    
+    if [ ! -f "$file" ]; then
+        echo -e "${RED}Trace not found: $name${NC}"
+        echo ""
+        echo "Available traces:"
+        list_traces
+        exit 1
+    fi
+    
+    cat "$file"
+}
+
+delete_trace() {
+    local name="$1"
+    local file="$TRACES_DIR/${name}.md"
+    
+    if [ ! -f "$file" ]; then
+        echo -e "${RED}Trace not found: $name${NC}"
+        exit 1
+    fi
+    
+    rm "$file"
+    echo -e "${GREEN}✓${NC} Deleted trace: $name"
+}
+
+generate_trace() {
+    local query="$1"
+    
+    # Generate filename from query
+    local filename=$(echo "$query" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//' | cut -c1-50)
+    local filepath="$TRACES_DIR/${filename}.md"
+    
+    echo -e "${CYAN}Generating trace: $query${NC}"
+    echo ""
+    
+    # Create trace template
+    cat > "$filepath" << EOF
+# Code Trace: $query
+
+> Generated: $(date '+%Y-%m-%d %H:%M')
+> Query: "$query"
+> Status: PENDING - Run /wogi-trace to complete
+
+## Instructions for AI
+
+Analyze the codebase to trace: **$query**
+
+Generate the following sections:
+
+### 1. Flow Overview
+High-level summary of how this feature/flow works (2-3 sentences)
+
+### 2. Execution Flow
+For each step in the flow:
+- **File**: path/to/file.ts
+- **Lines**: XX-YY
+- **Role**: What this step does
+- Key code snippet (3-5 lines)
+
+### 3. Diagram
+\`\`\`mermaid
+flowchart LR
+    A[Step 1] --> B[Step 2]
+    B --> C[Step 3]
+\`\`\`
+
+### 4. Related Files
+Table of other files that might be relevant
+
+### 5. Notes
+Any security, performance, or architecture notes
+
+---
+
+## Search Hints
+
+To find relevant files, search for:
+- Entry points: routes, handlers, components
+- Keywords from query: $(echo "$query" | tr ' ' '\n' | grep -E '^[a-zA-Z]{3,}$' | tr '\n' ', ')
+- Related patterns: service, controller, hook, util
+
+EOF
+
+    echo -e "${GREEN}✓${NC} Trace template created: $filepath"
+    echo ""
+    echo -e "${BOLD}Next step:${NC}"
+    echo "  Use Claude/AI to complete the trace by analyzing the codebase"
+    echo ""
+    echo "  In Claude, say:"
+    echo -e "  ${CYAN}\"Complete the trace at $filepath by analyzing the codebase for: $query\"${NC}"
+    echo ""
+    echo "  Or use the slash command:"
+    echo -e "  ${CYAN}/wogi-trace $filename${NC}"
+    echo ""
+}
+
+# Ensure traces directory exists
+mkdir -p "$TRACES_DIR"
+
+# Main
+case "${1:-}" in
+    "")
+        show_help
+        ;;
+    list)
+        list_traces
+        ;;
+    show)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Please specify trace name${NC}"
+            exit 1
+        fi
+        show_trace "$2"
+        ;;
+    delete|rm)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Please specify trace name${NC}"
+            exit 1
+        fi
+        delete_trace "$2"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        # Treat as query
+        generate_trace "$*"
+        ;;
+esac

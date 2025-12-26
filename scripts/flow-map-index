@@ -1,0 +1,348 @@
+#!/bin/bash
+
+# Wogi Flow - Component Index Scanner
+# Auto-generates component index from codebase
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+WORKFLOW_DIR="$PROJECT_ROOT/.workflow"
+INDEX_FILE="$WORKFLOW_DIR/state/component-index.json"
+CONFIG_FILE="$WORKFLOW_DIR/config.json"
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+RED='\033[0;31m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
+
+show_help() {
+    echo "Wogi Flow - Component Index"
+    echo ""
+    echo "Usage: flow map-index [command]"
+    echo ""
+    echo "Commands:"
+    echo "  (none)    Show index summary"
+    echo "  scan      Rescan and regenerate index"
+    echo "  full      Show full index details"
+    echo "  json      Output raw JSON"
+    echo ""
+}
+
+get_config_value() {
+    local key="$1"
+    local default="$2"
+    python3 -c "
+import json
+try:
+    with open('$CONFIG_FILE', 'r') as f:
+        config = json.load(f)
+    keys = '$key'.split('.')
+    val = config
+    for k in keys:
+        val = val.get(k, {})
+    print(val if val else '$default')
+except:
+    print('$default')
+" 2>/dev/null
+}
+
+scan_codebase() {
+    echo -e "${CYAN}Scanning codebase...${NC}"
+    
+    # Get directories from config
+    local dirs=$(python3 -c "
+import json
+try:
+    with open('$CONFIG_FILE', 'r') as f:
+        config = json.load(f)
+    dirs = config.get('componentIndex', {}).get('directories', ['src/components', 'src/hooks', 'src/services'])
+    print(' '.join(dirs))
+except:
+    print('src/components src/hooks src/services')
+" 2>/dev/null)
+    
+    local ignore_patterns=$(python3 -c "
+import json
+try:
+    with open('$CONFIG_FILE', 'r') as f:
+        config = json.load(f)
+    patterns = config.get('componentIndex', {}).get('ignore', ['*.test.*', '*.spec.*'])
+    print(' '.join(patterns))
+except:
+    print('*.test.* *.spec.* *.stories.*')
+" 2>/dev/null)
+    
+    # Build find command excludes
+    local excludes=""
+    for pattern in $ignore_patterns; do
+        excludes="$excludes -not -name '$pattern'"
+    done
+    
+    # Create Python script to scan and categorize
+    python3 << EOF
+import os
+import json
+import re
+from datetime import datetime
+from pathlib import Path
+
+PROJECT_ROOT = "$PROJECT_ROOT"
+INDEX_FILE = "$INDEX_FILE"
+DIRS = "$dirs".split()
+IGNORE = "$ignore_patterns".split()
+
+def should_ignore(filepath):
+    name = os.path.basename(filepath)
+    for pattern in IGNORE:
+        pattern = pattern.replace('*', '.*')
+        if re.match(pattern, name):
+            return True
+    return False
+
+def get_exports(filepath):
+    """Extract export names from file"""
+    exports = []
+    try:
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+            
+        # Match various export patterns
+        patterns = [
+            r'export\s+(?:default\s+)?(?:function|class|const|let|var)\s+(\w+)',
+            r'export\s+{\s*([^}]+)\s*}',
+            r'export\s+default\s+(\w+)',
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, content)
+            for match in matches:
+                if isinstance(match, str):
+                    # Handle export { A, B, C }
+                    for name in match.split(','):
+                        name = name.strip().split(' as ')[0].strip()
+                        if name and name not in exports:
+                            exports.append(name)
+    except:
+        pass
+    
+    return exports[:5]  # Limit to 5 exports
+
+def categorize(filepath, name):
+    """Determine category based on path and name"""
+    path_lower = filepath.lower()
+    name_lower = name.lower()
+    
+    if '/components/' in path_lower or name_lower.endswith('.component'):
+        return 'components'
+    elif '/pages/' in path_lower or '/app/' in path_lower and '/api/' not in path_lower:
+        return 'pages'
+    elif name_lower.startswith('use') or '/hooks/' in path_lower:
+        return 'hooks'
+    elif '.service' in name_lower or '/services/' in path_lower:
+        return 'services'
+    elif '.module' in name_lower or '/modules/' in path_lower:
+        return 'modules'
+    elif '/utils/' in path_lower or '/lib/' in path_lower or '/helpers/' in path_lower:
+        return 'utils'
+    elif '/api/' in path_lower:
+        return 'api'
+    else:
+        return 'other'
+
+def scan():
+    index = {
+        'lastScan': datetime.now().isoformat(),
+        'scanConfig': {
+            'directories': DIRS,
+            'ignore': IGNORE
+        },
+        'components': [],
+        'pages': [],
+        'hooks': [],
+        'services': [],
+        'modules': [],
+        'utils': [],
+        'api': [],
+        'other': []
+    }
+    
+    extensions = {'.tsx', '.jsx', '.ts', '.js', '.vue'}
+    
+    for scan_dir in DIRS:
+        full_dir = os.path.join(PROJECT_ROOT, scan_dir)
+        if not os.path.exists(full_dir):
+            continue
+            
+        for root, dirs, files in os.walk(full_dir):
+            # Skip node_modules, __tests__, etc
+            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['node_modules', '__tests__', '__mocks__', 'dist', 'build']]
+            
+            for file in files:
+                filepath = os.path.join(root, file)
+                rel_path = os.path.relpath(filepath, PROJECT_ROOT)
+                
+                # Check extension
+                ext = os.path.splitext(file)[1]
+                if ext not in extensions:
+                    continue
+                
+                # Check ignore patterns
+                if should_ignore(filepath):
+                    continue
+                
+                # Get name without extension
+                name = os.path.splitext(file)[0]
+                if name in ['index', 'types', 'constants', 'styles']:
+                    # Use parent directory name
+                    name = os.path.basename(os.path.dirname(filepath))
+                
+                # Categorize
+                category = categorize(rel_path, name)
+                
+                # Get exports
+                exports = get_exports(filepath)
+                
+                entry = {
+                    'name': name,
+                    'path': rel_path,
+                    'exports': exports
+                }
+                
+                index[category].append(entry)
+    
+    # Sort each category
+    for cat in ['components', 'pages', 'hooks', 'services', 'modules', 'utils', 'api', 'other']:
+        index[cat] = sorted(index[cat], key=lambda x: x['name'].lower())
+    
+    # Remove empty categories except core ones
+    if not index['other']:
+        del index['other']
+    if not index['api']:
+        del index['api']
+    
+    # Save
+    with open(INDEX_FILE, 'w') as f:
+        json.dump(index, f, indent=2)
+    
+    # Print summary
+    total = sum(len(index.get(cat, [])) for cat in ['components', 'pages', 'hooks', 'services', 'modules', 'utils'])
+    print(f"Scanned {len(DIRS)} directories")
+    print(f"Found {total} items")
+    
+    return index
+
+scan()
+EOF
+    
+    echo -e "${GREEN}✓${NC} Index updated"
+}
+
+show_summary() {
+    if [ ! -f "$INDEX_FILE" ]; then
+        echo -e "${YELLOW}No index found. Run: flow map-index scan${NC}"
+        exit 1
+    fi
+    
+    python3 << EOF
+import json
+from datetime import datetime
+
+with open('$INDEX_FILE', 'r') as f:
+    index = json.load(f)
+
+last_scan = index.get('lastScan', 'Never')
+if last_scan != 'Never':
+    try:
+        dt = datetime.fromisoformat(last_scan.replace('Z', '+00:00'))
+        last_scan = dt.strftime('%Y-%m-%d %H:%M')
+    except:
+        pass
+
+print("\n📦 Component Index")
+print(f"\nLast scan: {last_scan}")
+print()
+print("| Category   | Count |")
+print("|------------|-------|")
+
+total = 0
+for cat in ['components', 'pages', 'hooks', 'services', 'modules', 'utils']:
+    count = len(index.get(cat, []))
+    total += count
+    if count > 0:
+        print(f"| {cat.capitalize():<10} | {count:>5} |")
+
+print(f"\nTotal: {total} items")
+print("\nRun: flow map-index full   (for details)")
+print("Run: flow map-index scan   (to refresh)")
+EOF
+}
+
+show_full() {
+    if [ ! -f "$INDEX_FILE" ]; then
+        echo -e "${YELLOW}No index found. Run: flow map-index scan${NC}"
+        exit 1
+    fi
+    
+    python3 << EOF
+import json
+
+with open('$INDEX_FILE', 'r') as f:
+    index = json.load(f)
+
+print("\n📦 Component Index (Full)\n")
+
+for cat in ['components', 'pages', 'hooks', 'services', 'modules', 'utils']:
+    items = index.get(cat, [])
+    if not items:
+        continue
+    
+    print(f"## {cat.capitalize()} ({len(items)})\n")
+    print("| Name | Path | Exports |")
+    print("|------|------|---------|")
+    
+    for item in items[:50]:  # Limit display
+        name = item['name']
+        path = item['path']
+        exports = ', '.join(item.get('exports', [])[:3])
+        if len(item.get('exports', [])) > 3:
+            exports += '...'
+        print(f"| {name} | {path} | {exports} |")
+    
+    if len(items) > 50:
+        print(f"\n... and {len(items) - 50} more\n")
+    print()
+EOF
+}
+
+show_json() {
+    if [ ! -f "$INDEX_FILE" ]; then
+        echo "{}"
+        exit 1
+    fi
+    cat "$INDEX_FILE"
+}
+
+# Main
+case "${1:-}" in
+    scan)
+        scan_codebase
+        show_summary
+        ;;
+    full)
+        show_full
+        ;;
+    json)
+        show_json
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        show_summary
+        ;;
+esac

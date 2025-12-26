@@ -6,6 +6,8 @@ A self-improving AI development workflow for experienced developers and PMs.
 
 - **Self-Improving**: Workflow learns from your feedback and updates its own instructions
 - **Component-Aware**: Tracks all components to prevent duplication
+- **Hybrid Component Index**: Auto-generated index + curated registry with sync detection
+- **Code Traces**: Task-focused flow documentation with diagrams
 - **Request Logging**: Every change is logged and searchable
 - **Quality Gates**: Configurable mandatory steps per task type
 - **Profile Sharing**: Export refined workflows for your team
@@ -102,6 +104,50 @@ After onboarding, the AI has full context about your project and can:
 - Create features that fit your patterns
 - Fix bugs knowing your conventions
 - Suggest improvements based on your goals
+
+## Component Index (Hybrid Approach)
+
+Wogi Flow uses two layers for component tracking:
+
+### 1. Curated `app-map.md`
+Human-maintained with rich context:
+```markdown
+| Component | Variants | Description |
+|-----------|----------|-------------|
+| Button | primary, secondary, ghost | Main action button |
+```
+
+### 2. Auto-generated `component-index.json`
+Machine-generated, always current:
+```bash
+./scripts/flow map-index scan   # Scan codebase
+./scripts/flow map-sync         # Compare with app-map
+```
+
+The sync command shows what's in your codebase but missing from app-map, and what's in app-map but no longer exists.
+
+## Code Traces
+
+Generate task-focused documentation of how code flows work:
+
+```bash
+./scripts/flow trace "user authentication flow"
+./scripts/flow trace "payment processing"
+./scripts/flow trace "how errors propagate"
+```
+
+Traces include:
+- High-level flow overview
+- Execution steps with file/line references
+- Mermaid diagrams
+- Related files
+- Security/performance notes
+
+Use traces for:
+- **Understanding before editing** - Know what you're changing
+- **Onboarding** - Learn new areas of codebase fast
+- **Debugging** - Trace data flow through system
+- **Documentation** - Save and share with team
 
 ## Core Concepts
 

@@ -1,0 +1,201 @@
+#!/bin/bash
+
+# Wogi Flow - App Map Sync
+# Compare auto-generated index with curated app-map
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+WORKFLOW_DIR="$PROJECT_ROOT/.workflow"
+INDEX_FILE="$WORKFLOW_DIR/state/component-index.json"
+APPMAP_FILE="$WORKFLOW_DIR/state/app-map.md"
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+RED='\033[0;31m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
+
+show_help() {
+    echo "Wogi Flow - App Map Sync"
+    echo ""
+    echo "Compare auto-generated index with curated app-map"
+    echo ""
+    echo "Usage: flow map-sync"
+    echo ""
+    echo "This will:"
+    echo "  1. Compare component-index.json with app-map.md"
+    echo "  2. Show items in codebase but not in app-map"
+    echo "  3. Show items in app-map but not in codebase (stale)"
+    echo "  4. Offer to update app-map"
+    echo ""
+}
+
+check_files() {
+    if [ ! -f "$INDEX_FILE" ]; then
+        echo -e "${YELLOW}No component index found.${NC}"
+        echo "Running scan first..."
+        "$SCRIPT_DIR/flow-map-index" scan
+    fi
+    
+    if [ ! -f "$APPMAP_FILE" ]; then
+        echo -e "${RED}No app-map.md found at $APPMAP_FILE${NC}"
+        exit 1
+    fi
+}
+
+sync_maps() {
+    python3 << 'EOF'
+import json
+import re
+import os
+from datetime import datetime
+
+INDEX_FILE = os.environ.get('INDEX_FILE', '.workflow/state/component-index.json')
+APPMAP_FILE = os.environ.get('APPMAP_FILE', '.workflow/state/app-map.md')
+
+# Load index
+with open(INDEX_FILE, 'r') as f:
+    index = json.load(f)
+
+# Load app-map and extract component names
+with open(APPMAP_FILE, 'r') as f:
+    appmap_content = f.read()
+
+# Extract names from app-map tables
+# Pattern matches: | ComponentName | ... |
+appmap_names = set()
+appmap_paths = {}
+
+table_pattern = r'\|\s*([A-Za-z][A-Za-z0-9_-]*)\s*\|'
+path_pattern = r'\|\s*([A-Za-z][A-Za-z0-9_-]*)\s*\|[^|]*\|[^|]*\|\s*([^\s|]+)\s*\|'
+
+for match in re.finditer(table_pattern, appmap_content):
+    name = match.group(1)
+    # Skip table headers
+    if name.lower() not in ['component', 'screen', 'name', 'hook', 'service', 'module', 'route', 'path', 'description', 'variants', 'type']:
+        appmap_names.add(name.lower())
+
+# Also try to extract paths for stale detection
+for match in re.finditer(path_pattern, appmap_content):
+    name = match.group(1).lower()
+    path = match.group(2)
+    if name not in ['component', 'screen', 'name', 'path']:
+        appmap_paths[name] = path
+
+# Get all names from index
+index_names = {}
+for category in ['components', 'pages', 'hooks', 'services', 'modules', 'utils']:
+    for item in index.get(category, []):
+        name_lower = item['name'].lower()
+        index_names[name_lower] = {
+            'name': item['name'],
+            'path': item['path'],
+            'category': category
+        }
+
+# Find differences
+in_code_not_map = []
+in_map_not_code = []
+in_sync = []
+
+for name_lower, info in index_names.items():
+    if name_lower in appmap_names:
+        in_sync.append(info['name'])
+    else:
+        in_code_not_map.append(info)
+
+for name_lower in appmap_names:
+    if name_lower not in index_names:
+        path = appmap_paths.get(name_lower, 'unknown path')
+        in_map_not_code.append({'name': name_lower, 'path': path})
+
+# Output
+last_scan = index.get('lastScan', 'unknown')
+try:
+    dt = datetime.fromisoformat(last_scan.replace('Z', '+00:00'))
+    last_scan = dt.strftime('%Y-%m-%d')
+except:
+    pass
+
+print("\n🔄 App Map Sync")
+print()
+print(f"Comparing component-index.json (scanned: {last_scan})")
+print(f"           with app-map.md")
+print()
+print("━" * 55)
+
+if in_code_not_map:
+    print()
+    print("📥 IN CODEBASE, NOT IN APP-MAP (consider adding):")
+    print()
+    
+    # Group by category
+    by_category = {}
+    for item in in_code_not_map:
+        cat = item['category']
+        if cat not in by_category:
+            by_category[cat] = []
+        by_category[cat].append(item)
+    
+    for cat, items in sorted(by_category.items()):
+        print(f"  {cat.capitalize()}:")
+        for item in items[:10]:
+            print(f"    • {item['name']} ({item['path']})")
+        if len(items) > 10:
+            print(f"    ... and {len(items) - 10} more")
+        print()
+
+print("━" * 55)
+
+if in_map_not_code:
+    print()
+    print("📤 IN APP-MAP, NOT IN CODEBASE (possibly stale):")
+    print()
+    for item in in_map_not_code[:10]:
+        print(f"    • {item['name']} (was at {item['path']})")
+    if len(in_map_not_code) > 10:
+        print(f"    ... and {len(in_map_not_code) - 10} more")
+    print()
+    print("━" * 55)
+
+print()
+print(f"✅ IN SYNC: {len(in_sync)} items match")
+print()
+print("━" * 55)
+print()
+
+# Summary
+missing_count = len(in_code_not_map)
+stale_count = len(in_map_not_code)
+
+if missing_count == 0 and stale_count == 0:
+    print("🎉 App map is fully in sync with codebase!")
+else:
+    print("Suggestions:")
+    if missing_count > 0:
+        print(f"  • Add {missing_count} missing items: /wogi-map-add")
+    if stale_count > 0:
+        print(f"  • Review {stale_count} possibly stale entries")
+print()
+EOF
+}
+
+# Export paths for Python
+export INDEX_FILE
+export APPMAP_FILE
+
+# Main
+case "${1:-}" in
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        check_files
+        sync_maps
+        ;;
+esac

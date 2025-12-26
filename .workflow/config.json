@@ -1,5 +1,5 @@
 {
-  "version": "1.0",
+  "version": "1.1",
   "projectName": "",
   
   "workflow": {
@@ -71,7 +71,19 @@
   "skills": {
     "installed": []
   },
-  
+
+  "componentIndex": {
+    "autoScan": true,
+    "scanOn": ["sessionStart"],
+    "directories": ["src/components", "src/hooks", "src/services", "src/pages", "src/modules", "app"],
+    "ignore": ["*.test.*", "*.spec.*", "*.stories.*", "index.ts", "index.js", "__tests__", "__mocks__"]
+  },
+
+  "traces": {
+    "saveTo": ".workflow/traces",
+    "generateDiagrams": true
+  },
+
   "agents": {
     "enabled": ["orchestrator", "story-writer", "developer", "reviewer", "tester"],
     "optional": ["accessibility", "security", "performance", "docs", "design-system", "onboarding"]
