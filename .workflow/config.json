@@ -92,6 +92,27 @@
     "generateDiagrams": true
   },
 
+  "validation": {
+    "afterFileEdit": {
+      "enabled": false,
+      "commands": {
+        "*.ts": ["npx tsc --noEmit"],
+        "*.tsx": ["npx tsc --noEmit", "npx eslint {file} --fix"],
+        "*.js": ["npx eslint {file} --fix"],
+        "*.jsx": ["npx eslint {file} --fix"]
+      },
+      "fixErrorsBeforeContinuing": true
+    },
+    "afterTaskComplete": {
+      "enabled": true,
+      "commands": ["npm run lint", "npm run typecheck"]
+    },
+    "beforeCommit": {
+      "enabled": true,
+      "commands": ["npm run lint", "npm run typecheck", "npm run test"]
+    }
+  },
+
   "agents": {
     "enabled": ["orchestrator", "story-writer", "developer", "reviewer", "tester"],
     "optional": ["accessibility", "security", "performance", "docs", "design-system", "onboarding"]

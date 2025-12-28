@@ -1,0 +1,168 @@
+#!/bin/bash
+
+# Wogi Flow - File Watcher
+# Runs validation automatically when files change
+# Usage: ./scripts/flow-watch (run in separate terminal)
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+RED='\033[0;31m'
+DIM='\033[2m'
+NC='\033[0m'
+
+show_help() {
+    echo "Wogi Flow - File Watcher"
+    echo ""
+    echo "Automatically runs validation when files change."
+    echo "Run this in a separate terminal alongside Claude Code."
+    echo ""
+    echo "Usage: flow watch [options]"
+    echo ""
+    echo "Options:"
+    echo "  --dir DIR      Directory to watch (default: src)"
+    echo "  --ext EXT      Extensions to watch (default: ts,tsx,js,jsx)"
+    echo "  --no-lint      Skip eslint"
+    echo "  --no-types     Skip typecheck"
+    echo "  --help         Show this help"
+    echo ""
+}
+
+WATCH_DIR="src"
+EXTENSIONS="ts,tsx,js,jsx"
+RUN_LINT=true
+RUN_TYPES=true
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --dir)
+            WATCH_DIR="$2"
+            shift 2
+            ;;
+        --ext)
+            EXTENSIONS="$2"
+            shift 2
+            ;;
+        --no-lint)
+            RUN_LINT=false
+            shift
+            ;;
+        --no-types)
+            RUN_TYPES=false
+            shift
+            ;;
+        --help|-h)
+            show_help
+            exit 0
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+# Check for required tools
+check_requirements() {
+    if ! command -v npx &> /dev/null; then
+        echo -e "${RED}npx not found. Please install Node.js${NC}"
+        exit 1
+    fi
+
+    # Check for nodemon or fswatch or inotifywait
+    if command -v nodemon &> /dev/null; then
+        WATCHER="nodemon"
+    elif command -v fswatch &> /dev/null; then
+        WATCHER="fswatch"
+    elif command -v inotifywait &> /dev/null; then
+        WATCHER="inotify"
+    else
+        echo -e "${YELLOW}No file watcher found. Installing nodemon...${NC}"
+        npm install -g nodemon
+        WATCHER="nodemon"
+    fi
+}
+
+run_validation() {
+    local file="$1"
+    echo ""
+    echo -e "${CYAN}━━━ File Changed: $file ━━━${NC}"
+    echo ""
+
+    local has_errors=false
+
+    # TypeScript check
+    if [ "$RUN_TYPES" = true ]; then
+        echo -e "${CYAN}Running typecheck...${NC}"
+        if ! npx tsc --noEmit 2>&1 | head -30; then
+            has_errors=true
+        else
+            echo -e "${GREEN}✓ Types OK${NC}"
+        fi
+    fi
+
+    # ESLint
+    if [ "$RUN_LINT" = true ] && [ -n "$file" ]; then
+        echo -e "${CYAN}Running eslint...${NC}"
+        if ! npx eslint "$file" --fix 2>&1 | head -20; then
+            has_errors=true
+        else
+            echo -e "${GREEN}✓ Lint OK${NC}"
+        fi
+    fi
+
+    if [ "$has_errors" = true ]; then
+        echo -e "${RED}━━━ Errors Found ━━━${NC}"
+    else
+        echo -e "${GREEN}━━━ All Checks Passed ━━━${NC}"
+    fi
+    echo ""
+}
+
+start_watching() {
+    echo -e "${CYAN}"
+    echo "╔═══════════════════════════════════════════════════════════════╗"
+    echo "║              Wogi Flow - File Watcher                         ║"
+    echo "╚═══════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    echo "Watching: $WATCH_DIR"
+    echo "Extensions: $EXTENSIONS"
+    echo "Typecheck: $RUN_TYPES"
+    echo "Lint: $RUN_LINT"
+    echo ""
+    echo -e "${DIM}Press Ctrl+C to stop${NC}"
+    echo ""
+
+    case $WATCHER in
+        nodemon)
+            npx nodemon \
+                --watch "$WATCH_DIR" \
+                --ext "$EXTENSIONS" \
+                --exec "bash -c 'echo \"Change detected\" && npx tsc --noEmit 2>&1 | head -20 && echo \"\" '"
+            ;;
+        fswatch)
+            fswatch -r "$WATCH_DIR" | while read file; do
+                if [[ "$file" =~ \.(ts|tsx|js|jsx)$ ]]; then
+                    run_validation "$file"
+                fi
+            done
+            ;;
+        inotify)
+            inotifywait -m -r -e modify,create "$WATCH_DIR" --format '%w%f' | while read file; do
+                if [[ "$file" =~ \.(ts|tsx|js|jsx)$ ]]; then
+                    run_validation "$file"
+                fi
+            done
+            ;;
+    esac
+}
+
+check_requirements
+start_watching

@@ -73,6 +73,46 @@ This instruction applies to all agents and sub-tasks. Do not create ad-hoc files
 
 If you need to track something new, add it to an existing file or propose updating the workflow structure.
 
+## Auto-Validation Hooks (CRITICAL)
+
+To prevent error accumulation and appear smarter, follow these validation rules automatically:
+
+### After EVERY File Edit
+
+Immediately after editing any TypeScript/JavaScript file, run validation:
+```bash
+# For .ts/.tsx files
+npx tsc --noEmit 2>&1 | head -20
+
+# For .ts/.tsx/.js/.jsx files
+npx eslint [file-you-just-edited] --fix
+```
+
+**Rules:**
+- Do NOT edit another file until the current file passes validation
+- Do NOT ask permission to run these checks - just run them
+- Fix ALL errors before moving on
+- If stuck after 3 attempts, report the issue
+
+This is non-negotiable. It prevents cascading errors and reduces wasted tokens.
+
+### After Task Completion
+
+Before marking any task done, run:
+```bash
+npm run lint
+npm run typecheck
+npm run test # if tests exist
+```
+
+### Why This Matters
+
+AI agents appear "dumb" when they accumulate errors across files. By validating after each edit:
+1. Errors are caught immediately when context is fresh
+2. Fixes are small and targeted
+3. The final result is usually correct on first try
+4. Less back-and-forth with the user
+
 ## Task Execution Rules (ALWAYS FOLLOW)
 
 **These rules apply to ALL task work, whether user says:**

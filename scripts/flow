@@ -47,6 +47,7 @@ show_help() {
     echo "  init                 Initialize workflow (legacy)"
     echo "  setup-hooks          Install/manage git hooks"
     echo "  archive              Archive old request-log entries"
+    echo "  watch                Run file watcher for auto-validation"
     echo ""
     echo "Components:"
     echo "  update-map           Add/scan components in app map"
@@ -153,6 +154,9 @@ case "${1:-}" in
         ;;
     archive)
         "$SCRIPT_DIR/flow-archive" "${@:2}"
+        ;;
+    watch)
+        "$SCRIPT_DIR/flow-watch" "${@:2}"
         ;;
     version|--version|-v)
         show_version
