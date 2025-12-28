@@ -259,7 +259,7 @@ generate_config() {
     
     cat > "$WORKFLOW_DIR/config.json" << EOF
 {
-  "version": "1.0",
+  "version": "1.2",
   "projectName": "$PROJECT_NAME",
   
   "workflow": {

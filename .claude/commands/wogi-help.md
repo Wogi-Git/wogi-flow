@@ -5,7 +5,7 @@ Usage: `/wogi-help`
 ## Output
 
 ```
-🚀 Wogi Flow v1.0 - Command Reference
+🚀 Wogi Flow v1.2 - Command Reference
 
 ═══════════════════════════════════════════════════════════════
 SETUP & ONBOARDING

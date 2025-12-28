@@ -41,7 +41,7 @@ echo -e "${YELLOW}Creating state files...${NC}"
 if [ ! -f "$WORKFLOW_DIR/config.json" ]; then
     cat > "$WORKFLOW_DIR/config.json" << 'EOF'
 {
-  "version": "1.0",
+  "version": "1.2",
   "projectName": "",
   "mandatorySteps": {
     "afterTask": [],
