@@ -1,9 +1,11 @@
-# Wogi Flow v1.0
+# Wogi Flow v1.2
 
 A self-improving AI development workflow for experienced developers and PMs.
 
 ## What Makes It Different
 
+- **Self-Completing Tasks**: `/wogi-start` runs until the task is actually done - no manual `/wogi-done` needed
+- **Autonomous Loops**: `/wogi-loop` for ad-hoc work that continues until completion criteria are met
 - **Self-Improving**: Workflow learns from your feedback and updates its own instructions
 - **Component-Aware**: Tracks all components to prevent duplication
 - **Hybrid Component Index**: Auto-generated index + curated registry with sync detection
@@ -151,11 +153,68 @@ Use traces for:
 
 ## Core Concepts
 
+### Self-Completing Tasks (New in v1.2)
+
+When you run `/wogi-start TASK-XXX`, it now runs a **self-completing loop**:
+
+```
+/wogi-start TASK-012
+    ↓
+Load context (story, app-map, decisions)
+    ↓
+Decompose into TodoWrite checklist (from acceptance criteria)
+    ↓
+┌─────────────────────────────────────────┐
+│ FOR EACH scenario:                      │
+│   → Mark in_progress                    │
+│   → Implement                           │
+│   → Self-verify (did it actually work?) │
+│   → If broken: fix and retry            │
+│   → Mark completed                      │
+└─────────────────────────────────────────┘
+    ↓
+Run quality gates (must all pass)
+    ↓
+Update request-log, app-map, ready.json
+    ↓
+Commit → Task complete
+```
+
+**No need to run `/wogi-done`** - the task completes itself when truly done.
+
+Options:
+- `--no-loop` - Just load context, don't auto-complete (old behavior)
+- `--pause-between` - Ask for confirmation between scenarios
+- `--max-retries N` - Limit retry attempts per scenario (default: 5)
+
+### Autonomous Loops for Ad-Hoc Work (New in v1.2)
+
+For work that isn't a structured task (refactors, migrations, batch operations):
+
+```bash
+/wogi-loop "Migrate all fetch() calls to use apiClient" --done-when "No fetch() calls remain, tests pass"
+```
+
+Same self-completing philosophy, but for free-form prompts. Inspired by [Ralph Wiggum](https://github.com/anthropics/claude-code/tree/main/plugins/ralph-wiggum).
+
+Options:
+- `--done-when "criteria"` - Required. When to stop.
+- `--max-iterations N` - Safety limit (default: 20)
+- `--verify-command "cmd"` - Shell command to verify completion
+- `--pause-every N` - Pause for confirmation every N iterations
+
+**When to use which:**
+| Situation | Command |
+|-----------|---------|
+| Task in ready.json with acceptance criteria | `/wogi-start TASK-XXX` |
+| Ad-hoc refactor or migration | `/wogi-loop "prompt" --done-when "criteria"` |
+| Quick one-off fix | Just do it directly |
+
 ### Task Execution Rules (Always Apply)
 
 **These rules apply regardless of how you start a task:**
 - Using `/wogi-start TASK-X`
-- Saying "work on TASK-X"  
+- Saying "work on TASK-X"
 - Saying "implement the login feature"
 - Any other way of requesting work
 
@@ -273,8 +332,9 @@ Type these directly in Claude chat for quick actions:
 | Command | Description |
 |---------|-------------|
 | `/wogi-ready` | Display all tasks organized by status. Shows ready tasks with priority, in-progress tasks, and blocked tasks with reasons. Recommends what to work on next. |
-| `/wogi-start [id]` | Start working on a task. Moves it to inProgress, loads the full story context including acceptance criteria, technical notes, and related components from app-map. |
-| `/wogi-done [id]` | Complete a task. Runs quality gates from config.json, verifies tests pass, updates ready.json, ensures request-log entry exists, and commits changes. |
+| `/wogi-start [id]` | **Self-completing loop.** Loads context, decomposes into TodoWrite checklist from acceptance criteria, implements each scenario with self-verification, runs quality gates, auto-commits when truly done. Options: `--no-loop` (old behavior), `--pause-between`, `--max-retries N`. |
+| `/wogi-loop "prompt"` | **Autonomous loop for ad-hoc work.** Continues until `--done-when` criteria met. For refactors, migrations, batch operations. Options: `--max-iterations N`, `--verify-command "cmd"`, `--pause-every N`. |
+| `/wogi-done [id]` | Manual completion (optional). Usually not needed since `/wogi-start` auto-completes. Use for force-completing stuck tasks or work done outside the loop. |
 | `/wogi-bulk` | Execute multiple tasks in sequence. Orders by dependencies and priority, follows all workflow rules for each task, compacts proactively between tasks. Options: `--auto` (unattended), `--plan` (dry run). |
 | `/wogi-status` | Full project overview. Shows task counts by status, active features, open bugs, mapped components count, git branch and uncommitted changes, and recent activity from request-log. |
 | `/wogi-deps [id]` | Show dependency tree for a task. Displays what the task depends on (with their status) and what other tasks are blocked waiting for this one. |
@@ -617,6 +677,50 @@ After 3+ similar corrections → Claude suggests promoting to permanent instruct
   }
 }
 ```
+
+## Changelog
+
+### v1.2.0 - Self-Completing Loops
+- **Self-completing `/wogi-start`**: Tasks now run in a loop until truly done
+  - Decomposes acceptance criteria into TodoWrite checklist
+  - Self-verifies each scenario before marking complete
+  - Retries on failure automatically
+  - Runs quality gates before completion
+  - Auto-commits when done
+  - Options: `--no-loop`, `--pause-between`, `--max-retries N`
+- **New `/wogi-loop` command**: Autonomous loops for ad-hoc work
+  - For refactors, migrations, batch operations
+  - Continues until `--done-when` criteria met
+  - Options: `--max-iterations N`, `--verify-command "cmd"`
+  - Inspired by [Ralph Wiggum](https://github.com/anthropics/claude-code/tree/main/plugins/ralph-wiggum)
+- **`/wogi-done` now optional**: Only needed for force-completing or old behavior
+- **New config section**: `loops` settings in config.json
+
+### v1.1.0 - Hybrid Component Index & Code Traces
+- **Hybrid component index**: Auto-generated `component-index.json` + curated `app-map.md`
+  - `/wogi-map-index` - Show auto-generated index
+  - `/wogi-map-index scan` - Rescan codebase
+  - `/wogi-map-sync` - Compare index with app-map, suggest updates
+- **Code traces**: Task-focused flow documentation
+  - `/wogi-trace "prompt"` - Generate code trace with Mermaid diagrams
+  - `/wogi-trace list` - List saved traces
+  - Saved to `.workflow/traces/`
+- **New CLI commands**: `flow map-index`, `flow map-sync`, `flow trace`
+- **New state file**: `.workflow/state/component-index.json`
+- **New directory**: `.workflow/traces/`
+
+### v1.01 - Bug Fixes
+- Fixed `flow-update` script bugs for smoother framework updates
+
+### v1.0.0 - Initial Release
+- Core workflow with task management, stories, quality gates
+- Component registry (app-map.md)
+- Request logging
+- Self-improving feedback loop
+- Skills system (NestJS, React, Python)
+- Profile export/import for teams
+- Browser testing support
+- Onboarding wizard for existing projects
 
 ## License
 

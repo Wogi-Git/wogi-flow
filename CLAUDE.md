@@ -1,6 +1,6 @@
 # Project Instructions
 
-You are an AI development assistant using the Wogi Flow methodology v1.0. This is a self-improving workflow that learns from feedback and adapts to your team's preferences.
+You are an AI development assistant using the Wogi Flow methodology v1.2. This is a self-improving workflow that learns from feedback and adapts to your team's preferences.
 
 ## Getting Started
 
@@ -150,8 +150,9 @@ When user types these commands, execute the corresponding action immediately.
 | Command | Action |
 |---------|--------|
 | `/wogi-ready` | Read `ready.json`, show tasks organized by status (ready, in progress, blocked). Summarize what's available to work on. |
-| `/wogi-start [id]` | Move task to inProgress in `ready.json`. Load the task's story/context from `.workflow/changes/`. Show acceptance criteria. |
-| `/wogi-done [id]` | Check quality gates from `config.json`. Verify tests pass. Update `ready.json`. Ensure request-log entry exists. Commit changes. |
+| `/wogi-start [id]` | **Self-completing loop.** Load context, decompose into TodoWrite checklist, implement each scenario with self-verification, run quality gates, auto-complete when truly done. Use `--no-loop` for old behavior. |
+| `/wogi-done [id]` | Manual completion (optional). Check quality gates, update ready.json, commit. Usually not needed since `/wogi-start` auto-completes. |
+| `/wogi-loop "prompt"` | **Autonomous loop for ad-hoc work.** Continues until `--done-when` criteria met. For refactors, migrations, batch work. Options: `--max-iterations N`, `--verify-command "cmd"`. |
 | `/wogi-bulk` | Execute multiple tasks in sequence. Order by dependencies + priority. Follow all Task Execution Rules for each. Compact between tasks. Options: number, task IDs, --auto, --plan. |
 | `/wogi-status` | Show project overview: task counts, active features, bugs, component count, git status, recent request-log entries. |
 | `/wogi-deps [id]` | Find the task in tasks.json, show what it depends on and what depends on it. |
@@ -557,25 +558,64 @@ Before completing a task, check `config.json` quality gates:
 
 **Don't close task until all required gates pass.**
 
-## Working on Tasks
+## Working on Tasks (Self-Completing Loop)
 
-### Starting
-1. Move to `inProgress` in ready.json
-2. Check config for task-type requirements
-3. Load relevant specs only
+When you start a task with `/wogi-start TASK-XXX`, it runs a **self-completing loop** that continues until the task is truly done. You don't need to manually run `/wogi-done`.
 
-### During
-1. Follow decisions.md patterns
-2. Check app-map before creating components
-3. Log significant changes
-4. Commit frequently
+### The Loop
+```
+/wogi-start TASK-XXX
+    ↓
+Load context (story, app-map, decisions)
+    ↓
+Decompose into TodoWrite checklist (from acceptance criteria)
+    ↓
+┌─────────────────────────────────────────┐
+│ FOR EACH scenario:                      │
+│   → Mark in_progress                    │
+│   → Implement                           │
+│   → Self-verify (did it actually work?) │
+│   → If broken: fix and retry            │
+│   → Mark completed                      │
+└─────────────────────────────────────────┘
+    ↓
+Run quality gates (must all pass)
+    ↓
+Update request-log, app-map, ready.json
+    ↓
+Commit → Task complete
+```
 
-### Completing
-1. Run quality gates from config.json
-2. Verify all required steps done
-3. Update request-log
-4. Update app-map if needed
-5. Commit
+### Key Behaviors
+
+1. **TodoWrite is mandatory** - Every acceptance criteria becomes a tracked todo
+2. **Self-verification is mandatory** - Don't mark done without confirming it works
+3. **Retry on failure** - If something breaks, fix it before moving on
+4. **Quality gates block completion** - Task isn't done until gates pass
+5. **Progress is preserved** - Commits after each scenario, safe to stop mid-task
+
+### Options
+- `--no-loop` - Just load context, don't auto-complete (old behavior)
+- `--pause-between` - Ask confirmation between scenarios
+- `--max-retries N` - Limit retry attempts (default: 5)
+
+## Ad-Hoc Work with /wogi-loop
+
+For work that isn't a structured task (refactors, migrations, batch operations):
+
+```
+/wogi-loop "Migrate all fetch() to apiClient" --done-when "No fetch() calls remain, tests pass"
+```
+
+Same self-completing philosophy, but for free-form prompts instead of structured tasks.
+
+### When to Use Which
+
+| Situation | Command |
+|-----------|---------|
+| Task in ready.json with acceptance criteria | `/wogi-start TASK-XXX` |
+| Ad-hoc refactor or migration | `/wogi-loop "prompt" --done-when "criteria"` |
+| Quick one-off fix (no loop needed) | Just do it directly |
 
 ## Handling Feedback
 

@@ -1,4 +1,9 @@
-Complete a task. Provide the task ID: `/wogi-done TASK-XXX`
+Complete a task manually. Provide the task ID: `/wogi-done TASK-XXX`
+
+**Note:** This is usually not needed. `/wogi-start` now auto-completes tasks when all acceptance criteria pass and quality gates are met. Use `/wogi-done` only if:
+- You used `--no-loop` with `/wogi-start`
+- You want to force-complete a stuck task
+- You're completing work done outside the loop
 
 Steps:
 1. Read `.workflow/config.json` for quality gates
