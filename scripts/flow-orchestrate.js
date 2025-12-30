@@ -715,15 +715,61 @@ class Validator {
     return { success: false, message: `File not found: ${filePath}` };
   }
 
-  static typescriptCheck() {
+  /**
+   * Finds the nearest directory containing a tsconfig.json.
+   * Walks up from the file's directory to find the right TypeScript project root.
+   * Essential for monorepos where tsconfig is in apps/web/, apps/api/, etc.
+   */
+  static findTsConfigDir(filePath) {
+    if (!filePath) return PROJECT_ROOT;
+
+    let dir = path.dirname(filePath);
+    while (dir && dir !== path.dirname(dir)) { // Stop at filesystem root
+      const tsconfig = path.join(dir, 'tsconfig.json');
+      if (fs.existsSync(tsconfig)) {
+        return dir;
+      }
+      // Also check for package.json as fallback (workspace root)
+      const packageJson = path.join(dir, 'package.json');
+      if (fs.existsSync(packageJson)) {
+        // If this package has a tsconfig, use it
+        if (fs.existsSync(path.join(dir, 'tsconfig.json'))) {
+          return dir;
+        }
+      }
+      dir = path.dirname(dir);
+    }
+    return PROJECT_ROOT;
+  }
+
+  static typescriptCheck(filePath) {
     try {
+      // Find the nearest tsconfig directory (for monorepo support)
+      const cwd = this.findTsConfigDir(filePath);
+      const tsconfigPath = path.join(cwd, 'tsconfig.json');
+
+      // Check if tsconfig exists in this directory
+      if (!fs.existsSync(tsconfigPath)) {
+        log('dim', `   ⚠️ No tsconfig.json found, skipping TypeScript check`);
+        return { success: true, message: 'TypeScript check skipped (no tsconfig.json)' };
+      }
+
+      if (cwd !== PROJECT_ROOT) {
+        log('dim', `   📁 Running tsc from: ${path.relative(PROJECT_ROOT, cwd) || '.'}`);
+      }
+
       execSync('npx tsc --noEmit', {
         encoding: 'utf-8',
+        cwd,
         stdio: ['pipe', 'pipe', 'pipe']
       });
       return { success: true, message: 'TypeScript check passed' };
     } catch (e) {
       const stderr = e.stderr || e.stdout || e.message;
+      // Filter out help text (indicates no tsconfig found)
+      if (stderr.includes('COMMON COMMANDS') || stderr.includes('tsc: The TypeScript Compiler')) {
+        return { success: true, message: 'TypeScript check skipped (tsc could not find project)' };
+      }
       return {
         success: false,
         message: stderr.split('\n').slice(0, 10).join('\n')
@@ -733,8 +779,11 @@ class Validator {
 
   static eslintCheck(filePath) {
     try {
+      // Also find the right directory for eslint config
+      const cwd = this.findTsConfigDir(filePath);
       execSync(`npx eslint "${filePath}" --fix`, {
         encoding: 'utf-8',
+        cwd,
         stdio: ['pipe', 'pipe', 'pipe']
       });
       return { success: true, message: 'ESLint check passed' };
@@ -757,7 +806,7 @@ class Validator {
           result = this.fileExists(filePath);
           break;
         case 'typescript-check':
-          result = this.typescriptCheck();
+          result = this.typescriptCheck(filePath);  // Now passes filePath
           break;
         case 'eslint-check':
           result = this.eslintCheck(filePath);
@@ -947,6 +996,60 @@ ${step.description || ''}
     const resultsPath = path.join(STATE_DIR, 'hybrid-results.json');
     fs.writeFileSync(resultsPath, JSON.stringify(results, null, 2));
   }
+
+  /**
+   * Loads project context from app-map.md and config.
+   * Returns context that can be used in templates.
+   */
+  loadProjectContext() {
+    const context = {
+      importPatterns: '',
+      availableComponents: '',
+      typeLocations: ''
+    };
+
+    // Try to load from app-map.md
+    const appMapPath = path.join(STATE_DIR, 'app-map.md');
+    if (fs.existsSync(appMapPath)) {
+      try {
+        const appMap = fs.readFileSync(appMapPath, 'utf-8');
+
+        // Extract component sections
+        const componentMatch = appMap.match(/## Components[\s\S]*?(?=##|$)/i);
+        if (componentMatch) {
+          context.availableComponents = componentMatch[0].trim();
+        }
+
+        // Extract screens/features
+        const screensMatch = appMap.match(/## Screens[\s\S]*?(?=##|$)/i);
+        if (screensMatch) {
+          context.availableComponents += '\n\n' + screensMatch[0].trim();
+        }
+      } catch (e) {
+        log('dim', `   ⚠️ Could not parse app-map.md: ${e.message}`);
+      }
+    }
+
+    // Try to load from config
+    const configPath = path.join(WORKFLOW_DIR, 'config.json');
+    if (fs.existsSync(configPath)) {
+      try {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+
+        if (config.hybrid?.importPatterns) {
+          context.importPatterns = config.hybrid.importPatterns;
+        }
+
+        if (config.hybrid?.typeLocations) {
+          context.typeLocations = config.hybrid.typeLocations;
+        }
+      } catch (e) {
+        // Ignore config parse errors
+      }
+    }
+
+    return context;
+  }
 }
 
 // ============================================================
@@ -1087,7 +1190,11 @@ class Orchestrator {
     }
 
     const templateName = step.template || step.type;
-    let params = { ...step.params, ...context };
+
+    // Load project-specific context from app-map and config
+    const projectContext = this.state.loadProjectContext();
+
+    let params = { ...step.params, ...context, ...projectContext };
 
     if (step.type === 'modify-file' && step.params?.path) {
       const filePath = step.params.path;

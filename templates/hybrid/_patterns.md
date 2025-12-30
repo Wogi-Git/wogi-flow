@@ -19,3 +19,27 @@ Run `./scripts/flow templates generate` to populate this file with real examples
 3. Aliased imports (@/ or ~/)
 4. Relative imports
 5. Type imports (with `type` keyword)
+
+## Project-Specific Import Patterns
+
+{{#if importPatterns}}
+{{importPatterns}}
+{{else}}
+Use the import patterns you see in the existing file or context.
+{{/if}}
+
+## Available Shared Components
+
+{{#if availableComponents}}
+These components exist in this project. Use them instead of creating new ones:
+{{availableComponents}}
+{{/if}}
+
+## Type Locations
+
+{{#if typeLocations}}
+{{typeLocations}}
+{{else}}
+- Feature types: Typically in `./types.ts` or `../api/types.ts` relative to the feature
+- Shared types: `@/types/` or `src/types/`
+{{/if}}
