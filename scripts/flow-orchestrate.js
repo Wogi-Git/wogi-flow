@@ -183,6 +183,106 @@ class LocalLLM {
 }
 
 // ============================================================
+// Code Extraction
+// ============================================================
+
+/**
+ * Extracts clean code from LLM response.
+ * Handles:
+ * - Thinking/reasoning preamble
+ * - </think> tags (from models that use thinking tokens)
+ * - Markdown code blocks
+ * - Trailing explanations
+ */
+function extractCodeFromResponse(response, modelName = '') {
+  if (!response || typeof response !== 'string') {
+    return response;
+  }
+
+  const rawResponse = response;
+  let code = response;
+
+  // 1. Remove everything before </think> tag if present
+  const thinkEndMatch = code.match(/<\/think>\s*/i);
+  if (thinkEndMatch) {
+    code = code.slice(thinkEndMatch.index + thinkEndMatch[0].length);
+  }
+
+  // 2. Extract from markdown code blocks if present
+  const codeBlockMatch = code.match(/```(?:typescript|tsx|ts|javascript|jsx|js)?\s*\n([\s\S]*?)```/);
+  if (codeBlockMatch) {
+    code = codeBlockMatch[1];
+  } else {
+    // Also try to remove any remaining markdown code block markers
+    code = code.replace(/^```(?:typescript|tsx|javascript|jsx|ts|js)?\n/gm, '');
+    code = code.replace(/\n```$/gm, '');
+    code = code.replace(/^```$/gm, '');
+  }
+
+  // 3. Find first valid TypeScript/JavaScript line
+  const validStartPatterns = [
+    /^import\s/m,
+    /^export\s/m,
+    /^const\s/m,
+    /^let\s/m,
+    /^var\s/m,
+    /^function\s/m,
+    /^async\s+function\s/m,
+    /^class\s/m,
+    /^interface\s/m,
+    /^type\s/m,
+    /^enum\s/m,
+    /^declare\s/m,
+    /^\/\*\*/m,  // JSDoc comment
+    /^\/\*[^*]/m, // Block comment
+    /^\/\//m,    // Single line comment at start
+    /^'use /m,   // 'use strict' or 'use client'
+    /^"use /m,
+  ];
+
+  let earliestMatch = -1;
+  for (const pattern of validStartPatterns) {
+    const match = code.search(pattern);
+    if (match !== -1 && (earliestMatch === -1 || match < earliestMatch)) {
+      earliestMatch = match;
+    }
+  }
+
+  if (earliestMatch > 0) {
+    code = code.slice(earliestMatch);
+  }
+
+  // 4. Remove trailing explanations (text after the last closing brace/semicolon followed by blank lines and prose)
+  // Look for patterns like "}\n\nBut maybe..." or ";\n\nThat should..."
+  const trailingMatch = code.match(/(\}|\;)\s*\n\s*\n+[A-Z][a-z]/);
+  if (trailingMatch) {
+    code = code.slice(0, trailingMatch.index + 1);
+  }
+
+  code = code.trim();
+
+  // Debug logging
+  if (process.env.DEBUG_HYBRID) {
+    console.log('\n--- RAW LLM RESPONSE (first 500 chars) ---');
+    console.log(rawResponse.slice(0, 500));
+    console.log('\n--- EXTRACTED CODE (first 500 chars) ---');
+    console.log(code.slice(0, 500));
+    console.log('---\n');
+  }
+
+  return code;
+}
+
+/**
+ * Validates if the extracted code looks like valid TypeScript/JavaScript
+ */
+function isValidCode(code) {
+  if (!code || code.length < 10) return false;
+  // Check if starts with valid TS/JS
+  return /^(import|export|const|let|var|function|async|class|interface|type|enum|declare|\/\*\*|\/\*|\/\/|'use |"use )/.test(code.trim());
+}
+
+// ============================================================
 // Template Engine
 // ============================================================
 
@@ -722,15 +822,16 @@ class Orchestrator {
   }
 
   cleanOutput(output) {
-    let cleaned = output;
+    // Use the comprehensive extraction function
+    const extracted = extractCodeFromResponse(output, this.config.model);
 
-    cleaned = cleaned.replace(/^```(?:typescript|tsx|javascript|jsx|ts|js)?\n/gm, '');
-    cleaned = cleaned.replace(/\n```$/gm, '');
-    cleaned = cleaned.replace(/^```$/gm, '');
+    // If extraction didn't produce valid code, log a warning
+    if (!isValidCode(extracted)) {
+      log('yellow', '   ⚠️ Warning: Extracted output may not be valid code');
+      log('dim', `      First 100 chars: ${extracted.slice(0, 100).replace(/\n/g, '\\n')}`);
+    }
 
-    cleaned = cleaned.trim();
-
-    return cleaned;
+    return extracted;
   }
 
   printSummary(results) {
