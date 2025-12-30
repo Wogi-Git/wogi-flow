@@ -13,6 +13,7 @@ Whether user says `/wogi-start`, "work on X", or just describes what they want -
 2. Check `decisions.md` - Follow established patterns
 3. Check `request-log.md` - See related past work
 4. Load acceptance criteria - Know what "done" means
+5. **Check for relevant skills** - Load skill knowledge if working on files that match a skill's patterns (e.g., `*.module.ts` → nestjs skill)
 
 ### After Completing:
 1. Update `request-log.md` - Log the change with tags
@@ -29,16 +30,52 @@ cat .workflow/config.json          # Know mandatory steps
 cat .workflow/state/request-log.md # What was done
 cat .workflow/state/app-map.md     # What components exist
 cat .workflow/state/decisions.md   # Coding patterns
+ls skills/                         # Check available skills
 ```
+
+## Using Skills (IMPORTANT)
+
+Skills contain accumulated knowledge about specific frameworks/patterns. **Use them.**
+
+### When to Load a Skill
+
+Match file types to skills:
+- `*.module.ts`, `*.controller.ts`, `*.service.ts` → `nestjs` skill
+- `*.tsx`, `*.jsx`, `use*.ts` → `react` skill (when available)
+
+### What to Load
+
+When a skill applies to your task:
+
+```bash
+cat skills/[name]/skill.md                    # Quick reference
+cat skills/[name]/knowledge/patterns.md       # What works
+cat skills/[name]/knowledge/anti-patterns.md  # What to avoid
+cat skills/[name]/rules/conventions.md        # Coding rules
+```
+
+### Using Skill Commands
+
+If a skill provides commands, use them:
+- `/nestjs-scaffold users` instead of manually creating module structure
+- `/nestjs-entity User` instead of writing entity boilerplate
+
+### After Working with a Skill
+
+If you learn something new (fix a bug, discover a pattern), update the skill:
+- Add to `knowledge/learnings.md` - what you learned
+- Add to `knowledge/patterns.md` - if it's a reusable pattern
+- Add to `knowledge/anti-patterns.md` - if it's something to avoid
 
 ## Responsibilities
 
 1. **Implementation** - Clean, maintainable code
 2. **Component Reuse** - Check app-map first
-3. **Request Logging** - Log every change
-4. **Quality Gates** - Follow config.json requirements
-5. **Storybook Stories** - Generate if enabled in config
-6. **Self-Improvement** - Update instructions when corrected
+3. **Skill Usage** - Load and follow relevant skills
+4. **Request Logging** - Log every change
+5. **Quality Gates** - Follow config.json requirements
+6. **Storybook Stories** - Generate if enabled in config
+7. **Self-Improvement** - Update instructions when corrected
 
 ## Component Reuse (CRITICAL)
 
@@ -145,11 +182,14 @@ Run all required checks.
 
 1. Read task and specs
 2. Check app-map for reusable components
-3. Follow decisions.md patterns
-4. Implement with frequent commits
-5. Log changes to request-log
-6. Run quality gates from config.json
-7. Update app-map if created components
+3. **Load relevant skills** - Check `skills/` for matching patterns
+4. Follow decisions.md patterns
+5. **Follow skill patterns** - Use patterns.md, avoid anti-patterns.md
+6. Implement with frequent commits
+7. Log changes to request-log
+8. Run quality gates from config.json
+9. Update app-map if created components
+10. **Update skill knowledge** - If you learned something new
 
 ## Commits
 
@@ -166,5 +206,7 @@ From config.json qualityGates, plus:
 - [ ] Components reused where possible
 - [ ] app-map updated if new components
 - [ ] request-log entry added
+- [ ] **Skill patterns followed** (if applicable)
+- [ ] **Skill knowledge updated** (if learned something new)
 - [ ] Tests pass
 - [ ] Changes committed

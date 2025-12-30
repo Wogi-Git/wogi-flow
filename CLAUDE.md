@@ -128,12 +128,22 @@ AI agents appear "dumb" when they accumulate errors across files. By validating 
 2. Check `decisions.md` for coding patterns to follow
 3. Check `request-log.md` for related past work
 4. Load the task's acceptance criteria (from story or tasks.json)
+5. **Check for relevant skills** - Match file types to installed skills:
+   - List skills: `ls skills/` or check `config.json → skills.installed`
+   - If skill exists for this work (e.g., `nestjs` for `.module.ts` files):
+     - Load `skills/[name]/skill.md` for quick reference
+     - Load `skills/[name]/knowledge/patterns.md` for what works
+     - Load `skills/[name]/knowledge/anti-patterns.md` to avoid known mistakes
 
 ### While Working:
 1. Follow acceptance criteria exactly
 2. Use existing components from app-map
 3. Follow patterns from decisions.md
-4. Create tests as specified in test strategy
+4. **Follow skill patterns** - If a skill applies:
+   - Use code patterns from `knowledge/patterns.md`
+   - Avoid anti-patterns from `knowledge/anti-patterns.md`
+   - Use skill commands when available (e.g., `/nestjs-scaffold`)
+5. Create tests as specified in test strategy
 
 ### After Completing ANY Task:
 1. **Update request-log.md** - Log what was done with tags
