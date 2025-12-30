@@ -26,14 +26,24 @@ import React from 'react'
 ```
 
 CORRECT OUTPUT:
-import React from 'react'
+import { useState } from 'react';
 
 ## CRITICAL IMPORT RULES
+
+### React Imports (IMPORTANT)
+- ❌ NEVER: `import React from 'react'` - Not needed with React 17+ JSX transform, causes TS6133 error
+- ❌ NEVER: `import * as React from 'react'` - Same issue
+- ✅ CORRECT: `import { useState, useCallback, useMemo } from 'react'` - Import only what you need
+
+### Type Imports in Feature Folders
+- ❌ WRONG: `import type { X } from '../types'` - Types are in api folder
+- ❌ WRONG: `import type { X } from './types'` - Same issue
+- ✅ CORRECT: `import type { X } from '../api/types'` - Correct path
 
 **NEVER INVENT IMPORTS.** Only use imports that:
 1. Are explicitly listed in the "Available Imports" section below
 2. Are shown in the current file content (for modify-file tasks)
-3. Are standard React/library imports (react, styled-components, etc.)
+3. Are standard library imports (react hooks, styled-components, etc.)
 
 **If you're unsure about an import path:**
 - DON'T USE IT
@@ -41,15 +51,16 @@ import React from 'react'
 - Use a TODO comment: `// TODO: import X from '?'`
 
 **Common WRONG patterns to avoid:**
+- ❌ `import React from 'react'` - Causes unused variable error
 - ❌ `import { useXxx } from '@/hooks/useXxx'` - No global hooks folder
 - ❌ `import { Xxx } from '@/components/Xxx'` - Unless explicitly listed
-- ❌ `import type { Xxx } from '@/types/xxx'` - Use relative imports
+- ❌ `import type { Xxx } from '@/types/xxx'` - Use relative imports in features
 
 **CORRECT patterns:**
-- ✅ `import { useState, useCallback } from 'react'`
+- ✅ `import { useState, useCallback } from 'react'` - Named imports only
 - ✅ `import styled from 'styled-components'`
 - ✅ `import type { Xxx } from '../api/types'` - Relative to feature
-- ✅ `import type { Xxx } from './types'` - Same directory
+- ✅ `import { IconName } from 'lucide-react'` - Icon library
 
 ## Code Rules
 

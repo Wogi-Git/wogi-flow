@@ -447,6 +447,91 @@ function isValidCode(code) {
 }
 
 // ============================================================
+// Auto-Correction for Common LLM Mistakes
+// ============================================================
+
+/**
+ * Auto-corrects common LLM mistakes in generated code.
+ * Runs before file write to fix predictable errors.
+ *
+ * Common mistakes:
+ * 1. `import React from 'react'` - Unnecessary with React 17+ JSX transform
+ * 2. Wrong import paths in features (../types vs ../api/types)
+ * 3. Hallucinated component imports
+ */
+function autoCorrectCode(code, filePath, projectConfig = {}) {
+  if (!code || typeof code !== 'string') {
+    return { corrected: code, corrections: [] };
+  }
+
+  let corrected = code;
+  const corrections = [];
+
+  // 1. Remove unnecessary React import (React 17+ with JSX transform)
+  // This causes TS6133: 'React' is declared but its value is never read
+
+  // Case A: Just "import React from 'react'" - remove entirely
+  const reactOnlyImport = /^import React from ['"]react['"];?\s*\n?/m;
+  if (reactOnlyImport.test(corrected)) {
+    corrected = corrected.replace(reactOnlyImport, '');
+    corrections.push('Removed unused React import (React 17+ JSX transform)');
+  }
+
+  // Case B: "import React, { useState, ... } from 'react'" - keep named imports only
+  const reactCombinedImport = /^import React,\s*(\{[^}]+\})\s+from\s+(['"]react['"])/m;
+  if (reactCombinedImport.test(corrected)) {
+    corrected = corrected.replace(reactCombinedImport, 'import $1 from $2');
+    corrections.push('Removed React from combined import');
+  }
+
+  // Case C: "import * as React from 'react'" - remove entirely
+  const reactNamespaceImport = /^import \* as React from ['"]react['"];?\s*\n?/m;
+  if (reactNamespaceImport.test(corrected)) {
+    corrected = corrected.replace(reactNamespaceImport, '');
+    corrections.push('Removed namespace React import');
+  }
+
+  // 2. Fix common import path mistakes for features
+  if (filePath && filePath.includes('/features/')) {
+    // ../types -> ../api/types (common pattern in feature folders)
+    if (/from ['"]\.\.\/types['"]/.test(corrected)) {
+      corrected = corrected.replace(/from ['"]\.\.\/types['"]/g, "from '../api/types'");
+      corrections.push('Fixed: ../types → ../api/types');
+    }
+
+    // ./types -> ../api/types (when in a subdirectory of feature)
+    if (/from ['"]\.\/types['"]/.test(corrected) && filePath.includes('/components/')) {
+      corrected = corrected.replace(/from ['"]\.\/types['"]/g, "from '../../api/types'");
+      corrections.push('Fixed: ./types → ../../api/types');
+    }
+  }
+
+  // 3. Fix double-quoted imports to single quotes (style consistency)
+  // Only if the file predominantly uses single quotes
+  const singleQuoteCount = (corrected.match(/from '/g) || []).length;
+  const doubleQuoteCount = (corrected.match(/from "/g) || []).length;
+  if (singleQuoteCount > doubleQuoteCount && doubleQuoteCount > 0) {
+    corrected = corrected.replace(/from "([^"]+)"/g, "from '$1'");
+    if (doubleQuoteCount > 0) {
+      corrections.push('Normalized import quotes to single quotes');
+    }
+  }
+
+  // 4. Remove empty import statements (artifact of removing React)
+  corrected = corrected.replace(/^import\s*\{\s*\}\s*from\s*['"][^'"]+['"];?\s*\n?/gm, '');
+
+  // 5. Fix multiple consecutive blank lines (cleanup)
+  corrected = corrected.replace(/\n{3,}/g, '\n\n');
+
+  // Log corrections if any
+  if (corrections.length > 0 && typeof log === 'function') {
+    log('dim', `   🔧 Auto-corrected: ${corrections.join(', ')}`);
+  }
+
+  return { corrected: corrected.trim(), corrections };
+}
+
+// ============================================================
 // Context Management & Auto-Compaction
 // ============================================================
 
@@ -1281,7 +1366,13 @@ class Orchestrator {
         const duration = ((Date.now() - startTime) / 1000).toFixed(1);
         log('dim', `   Generated in ${duration}s`);
 
-        const cleanOutput = this.cleanOutput(output);
+        let cleanOutput = this.cleanOutput(output);
+
+        const outputPath = step.params?.path;
+
+        // Auto-correct common LLM mistakes (React imports, paths, etc.)
+        const { corrected: autoFixed } = autoCorrectCode(cleanOutput, outputPath);
+        cleanOutput = autoFixed;
 
         // CRITICAL: Validate code BEFORE writing to prevent file corruption
         const codeValidation = isValidCode(cleanOutput);
@@ -1294,7 +1385,6 @@ class Orchestrator {
           continue; // Skip file write, retry
         }
 
-        const outputPath = step.params?.path;
         if (outputPath) {
           const dir = path.dirname(outputPath);
           if (!fs.existsSync(dir)) {
