@@ -119,6 +119,15 @@
     },
     "templates": {
       "directory": "templates/hybrid"
+    },
+    "projectContext": {
+      "uiFramework": null,
+      "componentPaths": {},
+      "typePaths": {
+        "features": "../api/types"
+      },
+      "doNotImport": ["React"],
+      "noExternalUtils": true
     }
   },
 

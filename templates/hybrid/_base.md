@@ -2,6 +2,8 @@
 
 You are generating code for this project.
 
+## Project UI Framework: {{uiFramework}}
+
 ## CRITICAL OUTPUT RULES
 
 1. Output ONLY valid code - no explanations, no markdown
@@ -30,18 +32,34 @@ import { useState } from 'react';
 
 ## CRITICAL IMPORT RULES
 
+{{#if doNotImport}}
+### Forbidden Imports (DO NOT USE)
+DO NOT import these: {{doNotImport}}
+These are either unnecessary (React with JSX transform) or not available in this project.
+{{/if}}
+
 ### React Imports (IMPORTANT)
 - ❌ NEVER: `import React from 'react'` - Not needed with React 17+ JSX transform, causes TS6133 error
 - ❌ NEVER: `import * as React from 'react'` - Same issue
 - ✅ CORRECT: `import { useState, useCallback, useMemo } from 'react'` - Import only what you need
 
+{{#if availableComponents}}
+### Available Components (USE THESE EXACT IMPORTS)
+{{availableComponents}}
+{{/if}}
+
+{{#if typeLocations}}
+### Type Import Paths
+{{typeLocations}}
+{{else}}
 ### Type Imports in Feature Folders
 - ❌ WRONG: `import type { X } from '../types'` - Types are in api folder
 - ❌ WRONG: `import type { X } from './types'` - Same issue
 - ✅ CORRECT: `import type { X } from '../api/types'` - Correct path
+{{/if}}
 
 **NEVER INVENT IMPORTS.** Only use imports that:
-1. Are explicitly listed in the "Available Imports" section below
+1. Are explicitly listed in the "Available Components" section above
 2. Are shown in the current file content (for modify-file tasks)
 3. Are standard library imports (react hooks, styled-components, etc.)
 
@@ -53,13 +71,13 @@ import { useState } from 'react';
 **Common WRONG patterns to avoid:**
 - ❌ `import React from 'react'` - Causes unused variable error
 - ❌ `import { useXxx } from '@/hooks/useXxx'` - No global hooks folder
-- ❌ `import { Xxx } from '@/components/Xxx'` - Unless explicitly listed
-- ❌ `import type { Xxx } from '@/types/xxx'` - Use relative imports in features
+- ❌ `import { Xxx } from '@/components/ui/xxx'` - shadcn paths don't exist unless this is a shadcn project
+- ❌ `import { cn } from '@/lib/utils'` - Utility functions may not exist
 
 **CORRECT patterns:**
 - ✅ `import { useState, useCallback } from 'react'` - Named imports only
-- ✅ `import styled from 'styled-components'`
-- ✅ `import type { Xxx } from '../api/types'` - Relative to feature
+- ✅ `import styled from 'styled-components'` - If using styled-components
+- ✅ Use paths from "Available Components" section above
 - ✅ `import { IconName } from 'lucide-react'` - Icon library
 
 ## Code Rules

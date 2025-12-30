@@ -451,76 +451,130 @@ function isValidCode(code) {
 // ============================================================
 
 /**
+ * Gets project context from config for auto-correction and templates.
+ * Returns the projectContext section from config.json hybrid settings.
+ */
+function getProjectContext() {
+  try {
+    const config = loadConfig();
+    return config.hybrid?.projectContext || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+/**
  * Auto-corrects common LLM mistakes in generated code.
  * Runs before file write to fix predictable errors.
  *
- * Common mistakes:
- * 1. `import React from 'react'` - Unnecessary with React 17+ JSX transform
- * 2. Wrong import paths in features (../types vs ../api/types)
- * 3. Hallucinated component imports
+ * Uses config.json → hybrid.projectContext for project-specific corrections.
+ * Falls back to sensible defaults if no config exists.
  */
-function autoCorrectCode(code, filePath, projectConfig = {}) {
+function autoCorrectCode(code, filePath, projectConfig = null) {
   if (!code || typeof code !== 'string') {
     return { corrected: code, corrections: [] };
   }
 
+  // Load project context from config if not provided
+  const ctx = projectConfig?.projectContext || getProjectContext();
+
   let corrected = code;
   const corrections = [];
 
-  // 1. Remove unnecessary React import (React 17+ with JSX transform)
-  // This causes TS6133: 'React' is declared but its value is never read
-
-  // Case A: Just "import React from 'react'" - remove entirely
-  const reactOnlyImport = /^import React from ['"]react['"];?\s*\n?/m;
-  if (reactOnlyImport.test(corrected)) {
-    corrected = corrected.replace(reactOnlyImport, '');
-    corrections.push('Removed unused React import (React 17+ JSX transform)');
-  }
-
-  // Case B: "import React, { useState, ... } from 'react'" - keep named imports only
-  const reactCombinedImport = /^import React,\s*(\{[^}]+\})\s+from\s+(['"]react['"])/m;
-  if (reactCombinedImport.test(corrected)) {
-    corrected = corrected.replace(reactCombinedImport, 'import $1 from $2');
-    corrections.push('Removed React from combined import');
-  }
-
-  // Case C: "import * as React from 'react'" - remove entirely
-  const reactNamespaceImport = /^import \* as React from ['"]react['"];?\s*\n?/m;
-  if (reactNamespaceImport.test(corrected)) {
-    corrected = corrected.replace(reactNamespaceImport, '');
-    corrections.push('Removed namespace React import');
-  }
-
-  // 2. Fix common import path mistakes for features
-  if (filePath && filePath.includes('/features/')) {
-    // ../types -> ../api/types (common pattern in feature folders)
-    if (/from ['"]\.\.\/types['"]/.test(corrected)) {
-      corrected = corrected.replace(/from ['"]\.\.\/types['"]/g, "from '../api/types'");
-      corrections.push('Fixed: ../types → ../api/types');
+  // 1. Remove forbidden imports (from config, defaults to ['React'])
+  const doNotImport = ctx.doNotImport || ['React'];
+  for (const forbidden of doNotImport) {
+    // Case A: Default import - "import X from '...'"
+    const defaultImportRegex = new RegExp(`^import ${forbidden} from ['"][^'"]+['"];?\\s*\\n?`, 'gm');
+    if (defaultImportRegex.test(corrected)) {
+      corrected = corrected.replace(defaultImportRegex, '');
+      corrections.push(`Removed forbidden import: ${forbidden}`);
     }
 
-    // ./types -> ../api/types (when in a subdirectory of feature)
-    if (/from ['"]\.\/types['"]/.test(corrected) && filePath.includes('/components/')) {
-      corrected = corrected.replace(/from ['"]\.\/types['"]/g, "from '../../api/types'");
-      corrections.push('Fixed: ./types → ../../api/types');
+    // Case B: Combined with named imports - "import X, { y, z } from '...'"
+    const combinedImportRegex = new RegExp(`^import ${forbidden},\\s*(\\{[^}]+\\})\\s+from\\s+(['"][^'"]+['"])`, 'gm');
+    if (combinedImportRegex.test(corrected)) {
+      corrected = corrected.replace(combinedImportRegex, 'import $1 from $2');
+      corrections.push(`Removed ${forbidden} from combined import`);
+    }
+
+    // Case C: Namespace import - "import * as X from '...'"
+    const namespaceImportRegex = new RegExp(`^import \\* as ${forbidden} from ['"][^'"]+['"];?\\s*\\n?`, 'gm');
+    if (namespaceImportRegex.test(corrected)) {
+      corrected = corrected.replace(namespaceImportRegex, '');
+      corrections.push(`Removed namespace import: ${forbidden}`);
     }
   }
 
-  // 3. Fix double-quoted imports to single quotes (style consistency)
-  // Only if the file predominantly uses single quotes
+  // 2. Fix component paths based on config mappings
+  const componentPaths = ctx.componentPaths || {};
+
+  // Build reverse mapping from shadcn-style to project paths
+  // @/components/ui/button → project's Button path
+  const shadcnPattern = /@\/components\/ui\/(\w+)/g;
+  corrected = corrected.replace(shadcnPattern, (match, component) => {
+    const capitalName = component.charAt(0).toUpperCase() + component.slice(1);
+    const configPath = componentPaths[capitalName];
+    if (configPath) {
+      corrections.push(`Fixed import: ${match} → ${configPath}`);
+      return configPath;
+    }
+    return match; // Leave as-is if no mapping
+  });
+
+  // 3. Fix type paths for features (from config)
+  const typePaths = ctx.typePaths || { features: '../api/types' };
+  if (filePath && filePath.includes('/features/') && typePaths.features) {
+    const wrongPaths = ["'../types'", '"../types"', "'./types'", '"./types"'];
+    for (const wrong of wrongPaths) {
+      if (corrected.includes(wrong)) {
+        corrected = corrected.replace(new RegExp(wrong.replace(/['"]/g, '[\'"]'), 'g'), `'${typePaths.features}'`);
+        corrections.push('Fixed type import path');
+      }
+    }
+  }
+
+  // 4. Remove external utils if configured (noExternalUtils: true)
+  if (ctx.noExternalUtils && corrected.includes('@/lib/utils')) {
+    const hadFormatCurrency = corrected.includes('formatCurrency');
+    const hadCn = corrected.includes(' cn(') || corrected.includes(' cn`');
+
+    // Remove the import
+    corrected = corrected.replace(/^import.*from ['"]@\/lib\/utils['"];?\s*\n?/gm, '');
+    corrections.push('Removed @/lib/utils import');
+
+    // Inline formatCurrency if it was used
+    if (hadFormatCurrency) {
+      const formatCurrencyFn = `\nconst formatCurrency = (amount: number) =>\n  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);\n`;
+      // Insert after imports
+      const lastImportMatch = corrected.match(/^import[^;]+;?\s*\n/gm);
+      if (lastImportMatch) {
+        const lastImport = lastImportMatch[lastImportMatch.length - 1];
+        const insertPos = corrected.lastIndexOf(lastImport) + lastImport.length;
+        corrected = corrected.slice(0, insertPos) + formatCurrencyFn + corrected.slice(insertPos);
+      }
+      corrections.push('Inlined formatCurrency');
+    }
+
+    // Remove cn() usage - just use template literals or className directly
+    if (hadCn) {
+      corrected = corrected.replace(/cn\((['"`][^'"`]+['"`])\)/g, '$1');
+      corrections.push('Removed cn() wrapper');
+    }
+  }
+
+  // 5. Fix double-quoted imports to single quotes (style consistency)
   const singleQuoteCount = (corrected.match(/from '/g) || []).length;
   const doubleQuoteCount = (corrected.match(/from "/g) || []).length;
   if (singleQuoteCount > doubleQuoteCount && doubleQuoteCount > 0) {
     corrected = corrected.replace(/from "([^"]+)"/g, "from '$1'");
-    if (doubleQuoteCount > 0) {
-      corrections.push('Normalized import quotes to single quotes');
-    }
+    corrections.push('Normalized import quotes to single quotes');
   }
 
-  // 4. Remove empty import statements (artifact of removing React)
+  // 6. Remove empty import statements (artifact of removing imports)
   corrected = corrected.replace(/^import\s*\{\s*\}\s*from\s*['"][^'"]+['"];?\s*\n?/gm, '');
 
-  // 5. Fix multiple consecutive blank lines (cleanup)
+  // 7. Fix multiple consecutive blank lines (cleanup)
   corrected = corrected.replace(/\n{3,}/g, '\n\n');
 
   // Log corrections if any
@@ -529,6 +583,153 @@ function autoCorrectCode(code, filePath, projectConfig = {}) {
   }
 
   return { corrected: corrected.trim(), corrections };
+}
+
+// ============================================================
+// Project Auto-Detection (for wogi-init/wogi-onboard)
+// ============================================================
+
+/**
+ * Detects the UI framework used in the project by checking dependencies.
+ * @param {string} projectRoot - Root directory of the project
+ * @returns {string} - Framework name: 'styled-components', 'shadcn', 'mui', 'chakra', 'antd', or 'react'
+ */
+function detectUIFramework(projectRoot = PROJECT_ROOT) {
+  try {
+    const pkgJsonPath = path.join(projectRoot, 'package.json');
+    if (!fs.existsSync(pkgJsonPath)) {
+      return 'react';
+    }
+
+    const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'));
+    const deps = { ...pkgJson.dependencies, ...pkgJson.devDependencies };
+
+    // Check in priority order
+    if (deps['styled-components']) return 'styled-components';
+    if (deps['@shadcn/ui'] || deps['@radix-ui/react-slot']) return 'shadcn';
+    if (deps['@mui/material']) return 'mui';
+    if (deps['@chakra-ui/react']) return 'chakra';
+    if (deps['antd']) return 'antd';
+    if (deps['tailwindcss']) return 'tailwind';
+
+    return 'react'; // vanilla
+  } catch (e) {
+    return 'react';
+  }
+}
+
+/**
+ * Scans the components directory and builds a mapping of component names to import paths.
+ * @param {string} projectRoot - Root directory of the project
+ * @param {string[]} componentDirs - Directories to scan (relative to projectRoot)
+ * @returns {Object} - Mapping of ComponentName → import path
+ */
+function scanComponentPaths(projectRoot = PROJECT_ROOT, componentDirs = ['src/components']) {
+  const componentPaths = {};
+
+  for (const dir of componentDirs) {
+    const fullDir = path.join(projectRoot, dir);
+    if (!fs.existsSync(fullDir)) continue;
+
+    try {
+      const scanDir = (dirPath, aliasPath) => {
+        const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+
+        for (const entry of entries) {
+          if (entry.name.startsWith('.') || entry.name.startsWith('_')) continue;
+          if (entry.name.includes('.test.') || entry.name.includes('.spec.') || entry.name.includes('.stories.')) continue;
+
+          const entryPath = path.join(dirPath, entry.name);
+
+          if (entry.isDirectory()) {
+            // Check for index file or component file with same name
+            const indexFile = ['index.tsx', 'index.ts', 'index.jsx', 'index.js'].find(f =>
+              fs.existsSync(path.join(entryPath, f))
+            );
+
+            const componentFile = ['.tsx', '.ts', '.jsx', '.js'].find(ext =>
+              fs.existsSync(path.join(entryPath, entry.name + ext))
+            );
+
+            if (indexFile || componentFile) {
+              // This is a component directory
+              const componentName = entry.name;
+              const importPath = `${aliasPath}/${entry.name}`;
+              componentPaths[componentName] = importPath;
+            }
+
+            // Recurse into subdirectories
+            scanDir(entryPath, `${aliasPath}/${entry.name}`);
+          } else if (entry.isFile()) {
+            // Direct component file
+            const ext = path.extname(entry.name);
+            if (['.tsx', '.ts', '.jsx', '.js'].includes(ext)) {
+              const componentName = path.basename(entry.name, ext);
+              // Skip index files and lowercase filenames (likely utilities)
+              if (componentName === 'index' || componentName[0] === componentName[0].toLowerCase()) continue;
+
+              const importPath = `${aliasPath}/${componentName}`;
+              componentPaths[componentName] = importPath;
+            }
+          }
+        }
+      };
+
+      // Determine alias path (@/components or relative)
+      const aliasPath = dir.startsWith('src/') ? `@/${dir.slice(4)}` : `@/${dir}`;
+      scanDir(fullDir, aliasPath);
+    } catch (e) {
+      log('dim', `   ⚠️ Error scanning ${dir}: ${e.message}`);
+    }
+  }
+
+  return componentPaths;
+}
+
+/**
+ * Generates a full projectContext configuration by auto-detecting project settings.
+ * Can be called during wogi-init or wogi-onboard.
+ * @param {string} projectRoot - Root directory of the project
+ * @returns {Object} - projectContext configuration
+ */
+function generateProjectContext(projectRoot = PROJECT_ROOT) {
+  const uiFramework = detectUIFramework(projectRoot);
+
+  // Scan standard component directories
+  const componentDirs = ['src/components', 'components', 'src/shared', 'shared'];
+  const componentPaths = scanComponentPaths(projectRoot, componentDirs);
+
+  // Default type paths
+  const typePaths = {
+    features: '../api/types',
+    shared: '@/types'
+  };
+
+  // Default forbidden imports (React for React 17+)
+  const doNotImport = ['React'];
+
+  // NoExternalUtils depends on framework
+  const noExternalUtils = uiFramework !== 'shadcn';
+
+  return {
+    uiFramework,
+    componentPaths,
+    typePaths,
+    doNotImport,
+    noExternalUtils
+  };
+}
+
+// Export for CLI usage
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    detectUIFramework,
+    scanComponentPaths,
+    generateProjectContext,
+    autoCorrectCode,
+    extractCodeFromResponse,
+    isValidCode
+  };
 }
 
 // ============================================================
@@ -1116,19 +1317,68 @@ ${step.description || ''}
   }
 
   /**
-   * Loads project context from app-map.md and config.
+   * Loads project context from config.json and app-map.md.
    * Returns context that can be used in templates.
+   *
+   * Reads from:
+   * - config.json → hybrid.projectContext (primary source)
+   * - app-map.md (supplemental component info)
    */
   loadProjectContext() {
     const context = {
       importPatterns: '',
       availableComponents: '',
-      typeLocations: ''
+      typeLocations: '',
+      uiFramework: 'react',
+      projectContext: null
     };
 
-    // Try to load from app-map.md
+    // Try to load from config (primary source)
+    const configPath = path.join(WORKFLOW_DIR, 'config.json');
+    if (fs.existsSync(configPath)) {
+      try {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        const projectCtx = config.hybrid?.projectContext || {};
+
+        // Store raw project context for auto-correction
+        context.projectContext = projectCtx;
+
+        // UI Framework
+        if (projectCtx.uiFramework) {
+          context.uiFramework = projectCtx.uiFramework;
+        }
+
+        // Format component paths for template
+        if (projectCtx.componentPaths && Object.keys(projectCtx.componentPaths).length > 0) {
+          context.availableComponents = Object.entries(projectCtx.componentPaths)
+            .map(([name, path]) => `- ${name}: \`import { ${name} } from '${path}'\``)
+            .join('\n');
+        }
+
+        // Format type locations
+        if (projectCtx.typePaths) {
+          context.typeLocations = Object.entries(projectCtx.typePaths)
+            .map(([scope, path]) => `- In ${scope}: \`import type { X } from '${path}'\``)
+            .join('\n');
+        }
+
+        // Format forbidden imports
+        if (projectCtx.doNotImport?.length > 0) {
+          context.doNotImport = projectCtx.doNotImport.join(', ');
+        }
+
+        // Legacy support: importPatterns/typeLocations as strings
+        if (config.hybrid?.importPatterns) {
+          context.importPatterns = config.hybrid.importPatterns;
+        }
+      } catch (e) {
+        log('dim', `   ⚠️ Could not parse config.json: ${e.message}`);
+      }
+    }
+
+    // Supplement with app-map.md if available
     const appMapPath = path.join(STATE_DIR, 'app-map.md');
-    if (fs.existsSync(appMapPath)) {
+    if (fs.existsSync(appMapPath) && !context.availableComponents) {
       try {
         const appMap = fs.readFileSync(appMapPath, 'utf-8');
 
@@ -1145,24 +1395,6 @@ ${step.description || ''}
         }
       } catch (e) {
         log('dim', `   ⚠️ Could not parse app-map.md: ${e.message}`);
-      }
-    }
-
-    // Try to load from config
-    const configPath = path.join(WORKFLOW_DIR, 'config.json');
-    if (fs.existsSync(configPath)) {
-      try {
-        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-
-        if (config.hybrid?.importPatterns) {
-          context.importPatterns = config.hybrid.importPatterns;
-        }
-
-        if (config.hybrid?.typeLocations) {
-          context.typeLocations = config.hybrid.typeLocations;
-        }
-      } catch (e) {
-        // Ignore config parse errors
       }
     }
 
