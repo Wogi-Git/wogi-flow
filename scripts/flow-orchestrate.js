@@ -544,7 +544,21 @@ const compactionStrategies = {
  * Returns { prompt, wasCompacted, originalTokens, finalTokens }
  */
 function autoCompactPrompt(prompt, contextWindow, reserveForOutput = 2048) {
+  // Sanity check: never reserve more than 50% of context window
+  // This prevents the bug where maxTokens == contextWindow causing availableTokens = 0
+  const maxReserve = Math.floor(contextWindow / 2);
+  if (reserveForOutput > maxReserve) {
+    log('dim', `   📊 Capping output reserve from ${reserveForOutput} to ${maxReserve} tokens`);
+    reserveForOutput = maxReserve;
+  }
+
   const availableTokens = contextWindow - reserveForOutput;
+
+  // Another sanity check: ensure we have at least 1024 tokens for the prompt
+  if (availableTokens < 1024) {
+    log('yellow', `   ⚠️ Warning: Very low available tokens (${availableTokens}). Context: ${contextWindow}, Reserve: ${reserveForOutput}`);
+  }
+
   const originalTokens = estimateTokens(prompt);
 
   if (originalTokens <= availableTokens) {
@@ -1103,10 +1117,12 @@ class Orchestrator {
       try {
         // Auto-compact prompt if needed
         const contextWindow = this.llm.contextWindow || 4096;
+        // Reserve 30% of context for output, but cap at 2048 tokens
+        const reserveForOutput = Math.min(2048, Math.floor(contextWindow * 0.3));
         const { prompt: compactedPrompt, wasCompacted, usage } = autoCompactPrompt(
           prompt,
           contextWindow,
-          this.config.maxTokens // Reserve space for output
+          reserveForOutput
         );
 
         if (wasCompacted) {
