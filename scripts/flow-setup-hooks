@@ -29,6 +29,7 @@ show_help() {
     echo "  • app-map.md updated if new components"
     echo "  • No console.log in production code"
     echo "  • Tests pass (if configured in config.json)"
+    echo "  • Skill learning extraction (if skillLearning.enabled)"
 }
 
 install_hooks() {
@@ -113,6 +114,26 @@ if [ -f "package.json" ] && grep -q '"lint"' package.json 2>/dev/null; then
             else
                 echo -e "${YELLOW}⚠${NC} Lint warnings (not blocking)"
             fi
+        fi
+    fi
+fi
+
+# Check 5: Skill Learning (extract learnings before commit)
+if [ -f "$WORKFLOW_DIR/config.json" ]; then
+    skill_learning=$(python3 -c "
+import json
+with open('$WORKFLOW_DIR/config.json') as f:
+    config = json.load(f)
+sl = config.get('skillLearning', {})
+enabled = sl.get('enabled', False) and sl.get('autoExtract', False)
+trigger = sl.get('triggers', {}).get('onCommit', True)
+print('True' if enabled and trigger else 'False')
+" 2>/dev/null || echo "False")
+
+    if [ "$skill_learning" = "True" ]; then
+        echo "📚 Extracting skill learnings..."
+        if command -v node &> /dev/null && [ -f "scripts/flow-skill-learn.js" ]; then
+            node scripts/flow-skill-learn.js --trigger=commit 2>/dev/null || true
         fi
     fi
 fi

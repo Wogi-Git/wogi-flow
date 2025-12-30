@@ -56,15 +56,36 @@ echo ""
 # Update progress.md
 if [ -f "$WORKFLOW_DIR/state/progress.md" ]; then
     echo -e "${YELLOW}Updating progress.md...${NC}"
-    
+
     # Create backup
     cp "$WORKFLOW_DIR/state/progress.md" "$WORKFLOW_DIR/state/progress.md.bak"
-    
+
     # Update timestamp
     sed -i.tmp "s/## Last Updated.*/## Last Updated\n$(date +%Y-%m-%d\ %H:%M)/" "$WORKFLOW_DIR/state/progress.md" 2>/dev/null || true
     rm -f "$WORKFLOW_DIR/state/progress.md.tmp"
-    
+
     echo -e "${GREEN}✓ Progress updated${NC}"
+fi
+
+# Extract skill learnings
+if [ -f "$WORKFLOW_DIR/config.json" ]; then
+    skill_learning=$(python3 -c "
+import json
+with open('$WORKFLOW_DIR/config.json') as f:
+    config = json.load(f)
+sl = config.get('skillLearning', {})
+enabled = sl.get('enabled', False) and sl.get('autoExtract', False)
+print('True' if enabled else 'False')
+" 2>/dev/null || echo "False")
+
+    if [ "$skill_learning" = "True" ]; then
+        echo ""
+        echo -e "${YELLOW}Extracting skill learnings...${NC}"
+        if command -v node &> /dev/null && [ -f "scripts/flow-skill-learn.js" ]; then
+            node scripts/flow-skill-learn.js --trigger=session-end 2>/dev/null || true
+            echo -e "${GREEN}✓ Skills updated${NC}"
+        fi
+    fi
 fi
 
 echo ""

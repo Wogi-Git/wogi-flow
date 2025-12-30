@@ -583,6 +583,63 @@ Add to `.workflow/state/feedback-patterns.md`:
 | "Always use kebab-case" | decisions.md | 2024-01-15 |
 ```
 
+## Automatic Skill Learning (NON-NEGOTIABLE)
+
+Knowledge must never be lost. Skills are updated automatically at multiple trigger points, but you should also proactively update them when relevant.
+
+### When Skills Are Updated Automatically
+
+1. **Pre-commit hook** - Before every commit (if hooks enabled)
+2. **Session end** - When `/wogi-session-end` runs
+3. **Task completion** - After quality gates pass in `/wogi-start` loop
+
+### Your Responsibility
+
+After ANY of these events, consider updating relevant skills:
+
+1. **After fixing a mistake** - Add to skill's `knowledge/anti-patterns.md`
+2. **After successful task** - Add to skill's `knowledge/patterns.md`
+3. **After user correction** - Add to skill's `knowledge/learnings.md`
+
+### How to Update Skills Manually
+
+1. Identify the relevant skill (by file type, framework, pattern)
+2. Open `skills/[name]/knowledge/learnings.md`
+3. Add entry:
+   ```markdown
+   ### YYYY-MM-DD - Brief title
+
+   **Context**: What was being done
+   **Trigger**: manual
+   **Issue**: What went wrong (or worked well)
+   **Learning**: Pattern to remember
+   **Files**: Affected files
+   ```
+4. If pattern is an anti-pattern, also add to `anti-patterns.md`
+
+### No Relevant Skill?
+
+If the learning doesn't match any installed skill:
+1. Add to `feedback-patterns.md` with tag `#needs-skill`
+2. After 3+ entries with same tag, ASK USER if they want to create a skill
+3. If approved, run: `./scripts/flow skill-create <name>`
+
+**Note:** Updating EXISTING skills is automatic and expected. Creating NEW skills requires user approval.
+
+### Skill Structure
+
+```
+skills/[name]/
+├── skill.md              # Core definition (always load)
+├── knowledge/
+│   ├── learnings.md      # Session learnings (auto-updated)
+│   ├── patterns.md       # What works
+│   └── anti-patterns.md  # What to avoid
+├── rules/                # Coding conventions
+├── commands/             # Slash commands
+└── templates/            # Code templates
+```
+
 ## Natural Language Config Updates
 
 Users can say things like:

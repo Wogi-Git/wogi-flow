@@ -55,6 +55,11 @@ show_help() {
     echo "  map-index scan       Rescan codebase"
     echo "  map-sync             Compare index with app-map"
     echo ""
+    echo "Skills:"
+    echo "  skill-learn          Extract learnings from recent changes"
+    echo "  skill-create <name>  Create a new skill"
+    echo "  skill-create --list  List existing skills"
+    echo ""
     echo "Code Traces:"
     echo "  trace \"<prompt>\"     Generate task-focused code trace"
     echo "  trace list           List saved traces"
@@ -142,6 +147,12 @@ case "${1:-}" in
         ;;
     map-sync)
         "$SCRIPT_DIR/flow-map-sync" "${@:2}"
+        ;;
+    skill-learn)
+        node "$SCRIPT_DIR/flow-skill-learn.js" "${@:2}"
+        ;;
+    skill-create)
+        node "$SCRIPT_DIR/flow-skill-create.js" "${@:2}"
         ;;
     trace)
         "$SCRIPT_DIR/flow-trace" "${@:2}"
