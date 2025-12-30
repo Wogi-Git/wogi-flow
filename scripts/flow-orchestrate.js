@@ -73,7 +73,9 @@ function loadHybridConfig() {
     maxTokens: hybrid.settings?.maxTokens ?? 4096,
     maxRetries: hybrid.settings?.maxRetries ?? 2,
     timeout: hybrid.settings?.timeout ?? 120000,
-    autoExecute: hybrid.settings?.autoExecute ?? false
+    autoExecute: hybrid.settings?.autoExecute ?? false,
+    // Context window can be overridden in config, otherwise auto-detected from model
+    contextWindow: hybrid.settings?.contextWindow || null
   };
 }
 
@@ -84,9 +86,134 @@ function loadHybridConfig() {
 class LocalLLM {
   constructor(config) {
     this.config = config;
+    this.contextWindow = config.contextWindow || null; // Will be auto-detected
+    this.modelInfoFetched = false;
+  }
+
+  /**
+   * Fetches model info including context window from the provider.
+   * Called once on first generate() call.
+   */
+  async fetchModelInfo() {
+    if (this.modelInfoFetched) return;
+    this.modelInfoFetched = true;
+
+    try {
+      if (this.config.provider === 'ollama') {
+        const info = await this.ollamaShowModel();
+        if (info.contextLength) {
+          this.contextWindow = info.contextLength;
+          log('dim', `   📊 Model context window: ${this.contextWindow.toLocaleString()} tokens`);
+        }
+      } else {
+        // LM Studio / OpenAI-compatible
+        const info = await this.lmStudioGetModelInfo();
+        if (info.contextLength) {
+          this.contextWindow = info.contextLength;
+          log('dim', `   📊 Model context window: ${this.contextWindow.toLocaleString()} tokens`);
+        }
+      }
+    } catch (e) {
+      log('dim', `   ⚠️ Could not fetch model info: ${e.message}`);
+      // Fall back to default
+      if (!this.contextWindow) {
+        this.contextWindow = 4096;
+        log('dim', `   📊 Using default context window: ${this.contextWindow} tokens`);
+      }
+    }
+  }
+
+  /**
+   * Ollama: GET /api/show to get model parameters
+   */
+  async ollamaShowModel() {
+    return new Promise((resolve, reject) => {
+      const url = new URL('/api/show', this.config.endpoint);
+      const postData = JSON.stringify({ name: this.config.model });
+
+      const req = http.request(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(postData)
+        },
+        timeout: 10000
+      }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            // Ollama returns model_info with context_length or parameters.num_ctx
+            const contextLength =
+              parsed.model_info?.['context_length'] ||
+              parsed.model_info?.context_length ||
+              parsed.parameters?.num_ctx ||
+              parsed.details?.parameter_size && 4096; // fallback
+            resolve({ contextLength: contextLength || 4096 });
+          } catch (e) {
+            reject(new Error('Invalid response from Ollama /api/show'));
+          }
+        });
+      });
+
+      req.on('error', reject);
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error('Timeout fetching model info'));
+      });
+
+      req.write(postData);
+      req.end();
+    });
+  }
+
+  /**
+   * LM Studio: GET /v1/models to get model info
+   */
+  async lmStudioGetModelInfo() {
+    return new Promise((resolve, reject) => {
+      const url = new URL('/v1/models', this.config.endpoint);
+      const client = url.protocol === 'https:' ? https : http;
+
+      const req = client.request(url, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 10000
+      }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            // Find our model in the list
+            const model = parsed.data?.find(m =>
+              m.id === this.config.model ||
+              m.id?.includes(this.config.model)
+            );
+            // LM Studio may include context_length in model object
+            const contextLength = model?.context_length || model?.max_tokens || 4096;
+            resolve({ contextLength });
+          } catch (e) {
+            reject(new Error('Invalid response from /v1/models'));
+          }
+        });
+      });
+
+      req.on('error', reject);
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error('Timeout fetching model info'));
+      });
+
+      req.end();
+    });
   }
 
   async generate(prompt) {
+    // Fetch model info on first call
+    await this.fetchModelInfo();
+
     if (this.config.provider === 'ollama') {
       return this.ollamaGenerate(prompt);
     } else {
@@ -280,6 +407,178 @@ function isValidCode(code) {
   if (!code || code.length < 10) return false;
   // Check if starts with valid TS/JS
   return /^(import|export|const|let|var|function|async|class|interface|type|enum|declare|\/\*\*|\/\*|\/\/|'use |"use )/.test(code.trim());
+}
+
+// ============================================================
+// Context Management & Auto-Compaction
+// ============================================================
+
+/**
+ * Estimates token count from text.
+ * Uses ~4 characters per token as a rough estimate.
+ * This is conservative - actual tokenization varies by model.
+ */
+function estimateTokens(text) {
+  if (!text) return 0;
+  // Rough estimate: ~4 chars per token for English text/code
+  // Add extra for whitespace and special characters
+  return Math.ceil(text.length / 3.5);
+}
+
+/**
+ * Calculates context usage percentage
+ */
+function getContextUsage(promptTokens, contextWindow) {
+  if (!contextWindow) return 0;
+  return Math.round((promptTokens / contextWindow) * 100);
+}
+
+/**
+ * Smart prompt compaction strategies
+ */
+const compactionStrategies = {
+  /**
+   * Truncate file content to relevant sections
+   * Keeps imports, target area, and exports
+   */
+  truncateFileContent(content, maxLines = 200) {
+    const lines = content.split('\n');
+    if (lines.length <= maxLines) return content;
+
+    const imports = [];
+    const exports = [];
+    const middle = [];
+    let inImports = true;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (inImports && (line.startsWith('import ') || line.startsWith('from ') || line.trim() === '')) {
+        imports.push(line);
+      } else {
+        inImports = false;
+        if (line.startsWith('export ') && i > lines.length - 50) {
+          exports.push(line);
+        } else {
+          middle.push(line);
+        }
+      }
+    }
+
+    // Keep imports + first/last portions of middle + exports
+    const keepFromMiddle = maxLines - imports.length - exports.length;
+    const halfKeep = Math.floor(keepFromMiddle / 2);
+
+    const truncatedMiddle = [
+      ...middle.slice(0, halfKeep),
+      '',
+      `// ... ${middle.length - keepFromMiddle} lines truncated for context ...`,
+      '',
+      ...middle.slice(-halfKeep)
+    ];
+
+    return [...imports, ...truncatedMiddle, ...exports].join('\n');
+  },
+
+  /**
+   * Remove previous errors from retry prompt, keep only the latest
+   */
+  trimRetryErrors(prompt) {
+    const errorSections = prompt.split('## PREVIOUS ERROR');
+    if (errorSections.length <= 2) return prompt;
+
+    // Keep base prompt + only the latest error
+    return errorSections[0] + '## PREVIOUS ERROR' + errorSections[errorSections.length - 1];
+  },
+
+  /**
+   * Remove verbose template sections
+   */
+  trimTemplateVerbosity(prompt) {
+    // Remove example sections if prompt is too long
+    let trimmed = prompt.replace(/## Examples[\s\S]*?(?=##|$)/gi, '');
+    // Remove detailed explanations
+    trimmed = trimmed.replace(/\*\*Note:\*\*[\s\S]*?(?=\n\n|$)/gi, '');
+    return trimmed;
+  }
+};
+
+/**
+ * Auto-compacts a prompt to fit within context window.
+ * Returns { prompt, wasCompacted, originalTokens, finalTokens }
+ */
+function autoCompactPrompt(prompt, contextWindow, reserveForOutput = 2048) {
+  const availableTokens = contextWindow - reserveForOutput;
+  const originalTokens = estimateTokens(prompt);
+
+  if (originalTokens <= availableTokens) {
+    return {
+      prompt,
+      wasCompacted: false,
+      originalTokens,
+      finalTokens: originalTokens,
+      usage: getContextUsage(originalTokens, contextWindow)
+    };
+  }
+
+  log('yellow', `   ⚠️ Prompt too large (${originalTokens.toLocaleString()} tokens), compacting...`);
+
+  let compacted = prompt;
+
+  // Strategy 1: Trim retry errors
+  compacted = compactionStrategies.trimRetryErrors(compacted);
+  let tokens = estimateTokens(compacted);
+  if (tokens <= availableTokens) {
+    log('dim', `   📦 Trimmed retry errors: ${tokens.toLocaleString()} tokens`);
+    return { prompt: compacted, wasCompacted: true, originalTokens, finalTokens: tokens, usage: getContextUsage(tokens, contextWindow) };
+  }
+
+  // Strategy 2: Trim template verbosity
+  compacted = compactionStrategies.trimTemplateVerbosity(compacted);
+  tokens = estimateTokens(compacted);
+  if (tokens <= availableTokens) {
+    log('dim', `   📦 Trimmed template verbosity: ${tokens.toLocaleString()} tokens`);
+    return { prompt: compacted, wasCompacted: true, originalTokens, finalTokens: tokens, usage: getContextUsage(tokens, contextWindow) };
+  }
+
+  // Strategy 3: Truncate file content in the prompt
+  // Find content between ``` markers and truncate
+  const codeBlockRegex = /```[\s\S]*?```/g;
+  compacted = compacted.replace(codeBlockRegex, (match) => {
+    const content = match.slice(3, -3); // Remove ``` markers
+    if (content.split('\n').length > 100) {
+      const truncated = compactionStrategies.truncateFileContent(content, 100);
+      return '```' + truncated + '```';
+    }
+    return match;
+  });
+
+  // Also check for {{currentContent}} style blocks
+  const currentContentMatch = compacted.match(/{{currentContent}}[\s\S]*?(?=##|$)/);
+  if (currentContentMatch && currentContentMatch[0].length > 5000) {
+    const lines = currentContentMatch[0].split('\n');
+    const truncated = compactionStrategies.truncateFileContent(lines.slice(1).join('\n'), 150);
+    compacted = compacted.replace(currentContentMatch[0], '{{currentContent}}\n' + truncated + '\n\n');
+  }
+
+  tokens = estimateTokens(compacted);
+  log('dim', `   📦 Truncated file content: ${tokens.toLocaleString()} tokens`);
+
+  // If still too large, do aggressive truncation
+  if (tokens > availableTokens) {
+    const ratio = availableTokens / tokens;
+    const targetLength = Math.floor(compacted.length * ratio * 0.9); // 10% safety margin
+    compacted = compacted.slice(0, targetLength) + '\n\n[Content truncated to fit context window]';
+    tokens = estimateTokens(compacted);
+    log('yellow', `   ⚠️ Aggressive truncation: ${tokens.toLocaleString()} tokens`);
+  }
+
+  return {
+    prompt: compacted,
+    wasCompacted: true,
+    originalTokens,
+    finalTokens: tokens,
+    usage: getContextUsage(tokens, contextWindow)
+  };
 }
 
 // ============================================================
@@ -756,11 +1055,34 @@ class Orchestrator {
       return result;
     }
 
+    // Show initial context info
+    const initialTokens = estimateTokens(prompt);
+    log('dim', `   Prompt size: ~${initialTokens.toLocaleString()} tokens`);
+
     for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
       result.attempts = attempt + 1;
       log('dim', `   Attempt ${attempt + 1}/${this.config.maxRetries + 1}...`);
 
       try {
+        // Auto-compact prompt if needed
+        const contextWindow = this.llm.contextWindow || 4096;
+        const { prompt: compactedPrompt, wasCompacted, usage } = autoCompactPrompt(
+          prompt,
+          contextWindow,
+          this.config.maxTokens // Reserve space for output
+        );
+
+        if (wasCompacted) {
+          prompt = compactedPrompt;
+        }
+
+        // Log context usage
+        if (usage > 80) {
+          log('yellow', `   ⚠️ Context usage: ${usage}%`);
+        } else if (process.env.DEBUG_HYBRID) {
+          log('dim', `   Context usage: ${usage}%`);
+        }
+
         const startTime = Date.now();
         const output = await this.llm.generate(prompt);
         const duration = ((Date.now() - startTime) / 1000).toFixed(1);
