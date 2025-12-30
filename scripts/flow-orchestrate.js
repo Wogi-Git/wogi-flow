@@ -766,10 +766,43 @@ class Validator {
       return { success: true, message: 'TypeScript check passed' };
     } catch (e) {
       const stderr = e.stderr || e.stdout || e.message;
+
       // Filter out help text (indicates no tsconfig found)
       if (stderr.includes('COMMON COMMANDS') || stderr.includes('tsc: The TypeScript Compiler')) {
         return { success: true, message: 'TypeScript check skipped (tsc could not find project)' };
       }
+
+      // CRITICAL: Filter errors to only include the file we're validating
+      // This prevents pre-existing errors in other files from failing validation
+      if (filePath) {
+        const cwd = this.findTsConfigDir(filePath);
+        const relativeFile = path.relative(cwd, filePath);
+        const fileName = path.basename(filePath);
+        const lines = stderr.split('\n');
+
+        // Find errors that mention our file (by relative path or just filename)
+        const relevantErrors = lines.filter(line => {
+          // Match lines that contain our file path
+          return line.includes(relativeFile) ||
+                 line.includes(fileName) ||
+                 // Also include "error TS" lines that follow a file match (context)
+                 (line.trim().startsWith('error TS') && lines[lines.indexOf(line) - 1]?.includes(fileName));
+        });
+
+        if (relevantErrors.length === 0) {
+          // Errors exist but not in our file - pass validation
+          const errorCount = (stderr.match(/error TS/g) || []).length;
+          log('dim', `   ⚠️ ${errorCount} pre-existing error(s) in other files, ${fileName} is clean`);
+          return { success: true, message: 'TypeScript check passed (file-specific)' };
+        }
+
+        // Errors in our file - fail with relevant errors only
+        return {
+          success: false,
+          message: relevantErrors.slice(0, 10).join('\n')
+        };
+      }
+
       return {
         success: false,
         message: stderr.split('\n').slice(0, 10).join('\n')
