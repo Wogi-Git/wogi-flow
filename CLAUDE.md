@@ -1,6 +1,6 @@
 # Project Instructions
 
-You are an AI development assistant using the Wogi Flow methodology v1.2. This is a self-improving workflow that learns from feedback and adapts to your team's preferences.
+You are an AI development assistant using the Wogi Flow methodology v1.3. This is a self-improving workflow that learns from feedback and adapts to your team's preferences.
 
 ## Getting Started
 
@@ -62,6 +62,7 @@ Don't load everything at session start. Instead:
 - `progress.md` - Session handoff notes
 - `feedback-patterns.md` - Learning log
 - `components/` - Component detail files
+- `hybrid-session.json` - Hybrid mode session state (if hybrid enabled)
 
 **NEVER create additional files in `.workflow/state/`**
 
@@ -179,6 +180,15 @@ Always check `qualityGates` section and ensure required gates pass before markin
 # Code Traces
 ./scripts/flow trace "prompt"     # Generate code trace
 ./scripts/flow trace list         # List saved traces
+
+# Hybrid Mode (Claude plans, local LLM executes)
+./scripts/flow hybrid enable      # Enable hybrid mode
+./scripts/flow hybrid disable     # Disable hybrid mode
+./scripts/flow hybrid status      # Show hybrid configuration
+./scripts/flow hybrid execute     # Execute a plan file
+./scripts/flow hybrid rollback    # Rollback last execution
+./scripts/flow hybrid test        # Test hybrid installation
+./scripts/flow templates generate # Generate project templates
 ```
 
 ## Slash Commands
@@ -280,6 +290,16 @@ When user types these commands, execute the corresponding action immediately.
 | `/wogi-rules` | List all coding rules from `.claude/rules/` and installed skills. |
 | `/wogi-rules [name]` | View specific rule file. |
 | `/wogi-rules add [name]` | Create new rule file. |
+
+### Hybrid Mode (Token Savings)
+
+| Command | Action |
+|---------|--------|
+| `/wogi-hybrid-setup` | **Full setup for new projects.** Generates project-specific templates by analyzing codebase, then runs interactive setup to configure local LLM. Run this first after updating to v1.3! |
+| `/wogi-hybrid` | Enable hybrid mode. Runs interactive setup to detect local LLM providers (Ollama, LM Studio), select model, and configure. Saves 85-95% tokens. |
+| `/wogi-hybrid-off` | Disable hybrid mode. Returns to normal Claude-only execution. |
+| `/wogi-hybrid-status` | Show current hybrid mode configuration: provider, model, endpoint, and session state. |
+| `/wogi-hybrid-edit` | Edit the current execution plan before running. Add/remove/modify steps. |
 
 ### Planning & Documentation
 
@@ -744,6 +764,104 @@ Use traces for:
 - Onboarding to new areas of codebase
 - Debugging complex flows
 - Documentation
+
+## Hybrid Mode (Claude Plans, Local LLM Executes)
+
+Hybrid mode saves 85-95% of tokens by having Claude create execution plans that are executed by a local LLM (Ollama or LM Studio).
+
+### How It Works
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Claude    │ ──▶ │    Plan     │ ──▶ │  Local LLM  │
+│  (Planner)  │     │   (JSON)    │     │ (Executor)  │
+└─────────────┘     └─────────────┘     └─────────────┘
+     │                                        │
+     │         ┌─────────────────┐           │
+     └────────▶│   Escalation    │◀──────────┘
+               │  (if needed)    │
+               └─────────────────┘
+```
+
+1. You give Claude a task
+2. Claude creates a detailed plan with templates
+3. You review and approve (or modify/cancel)
+4. Local LLM executes each step
+5. Claude handles any failures (escalation)
+
+### Enable Hybrid Mode
+
+```bash
+./scripts/flow hybrid enable
+# or use slash command:
+/wogi-hybrid
+```
+
+The setup wizard:
+1. Detects available providers (Ollama, LM Studio)
+2. Lists available models
+3. Tests the connection
+4. Saves configuration
+
+### Recommended Models
+
+- **NVIDIA Nemotron 3 Nano** - Best instruction following
+- **Qwen3-Coder 30B** - Best code quality
+- **DeepSeek Coder** - Good balance
+
+### Token Savings
+
+| Task Size | Normal Mode | Hybrid Mode | Savings |
+|-----------|-------------|-------------|---------|
+| Small (3 files) | ~8,000 | ~1,200 | 85% |
+| Medium (8 files) | ~20,000 | ~1,800 | 91% |
+| Large (15+ files) | ~45,000 | ~2,500 | 94% |
+
+### Configuration
+
+In `config.json`:
+```json
+{
+  "hybrid": {
+    "enabled": true,
+    "provider": "ollama",
+    "providerEndpoint": "http://localhost:11434",
+    "model": "nemotron-3-nano",
+    "settings": {
+      "temperature": 0.7,
+      "maxTokens": 4096,
+      "maxRetries": 2,
+      "timeout": 120000,
+      "autoExecute": false
+    }
+  }
+}
+```
+
+### Templates
+
+Hybrid mode uses templates in `templates/hybrid/` to guide the local LLM:
+- `_base.md` - Universal rules
+- `_patterns.md` - Project-specific patterns (auto-generated)
+- `create-component.md` - Component creation
+- `create-hook.md` - Hook creation
+- `create-service.md` - Service creation
+- `modify-file.md` - File modification
+- `fix-bug.md` - Bug fixing
+
+Generate project-specific templates:
+```bash
+./scripts/flow templates generate
+```
+
+### Rollback
+
+If execution fails or produces unwanted results:
+```bash
+./scripts/flow hybrid rollback
+```
+
+This removes created files and restores modified files.
 
 ## Modifying Workflow Instructions
 

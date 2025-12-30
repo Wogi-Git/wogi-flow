@@ -1,9 +1,10 @@
-# Wogi Flow v1.2
+# Wogi Flow v1.3
 
 A self-improving AI development workflow for experienced developers and PMs.
 
 ## What Makes It Different
 
+- **Hybrid Mode (NEW)**: Claude plans, local LLM executes - save 85-95% tokens
 - **Self-Completing Tasks**: `/wogi-start` runs until the task is actually done - no manual `/wogi-done` needed
 - **Autonomous Loops**: `/wogi-loop` for ad-hoc work that continues until completion criteria are met
 - **Self-Improving**: Workflow learns from your feedback and updates its own instructions
@@ -150,6 +151,90 @@ Use traces for:
 - **Onboarding** - Learn new areas of codebase fast
 - **Debugging** - Trace data flow through system
 - **Documentation** - Save and share with team
+
+## Hybrid Mode (New in v1.3)
+
+Save 85-95% of tokens by having Claude create execution plans that are executed by a local LLM (Ollama or LM Studio).
+
+### How It Works
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Claude    │ ──▶ │    Plan     │ ──▶ │  Local LLM  │
+│  (Planner)  │     │   (JSON)    │     │ (Executor)  │
+└─────────────┘     └─────────────┘     └─────────────┘
+     │                                        │
+     │         ┌─────────────────┐           │
+     └────────▶│   Escalation    │◀──────────┘
+               │  (if needed)    │
+               └─────────────────┘
+```
+
+1. **You give Claude a task** - "Add user authentication"
+2. **Claude creates a plan** - Detailed steps with templates
+3. **You review and approve** - Or modify/cancel
+4. **Local LLM executes** - Each step runs locally (FREE)
+5. **Claude handles failures** - Escalates only if local LLM fails
+
+### Enable Hybrid Mode
+
+```bash
+./scripts/flow hybrid enable
+# or use slash command:
+/wogi-hybrid
+```
+
+The setup wizard detects local LLM providers, lists models, tests connection, and saves configuration.
+
+### Requirements
+
+1. **Local LLM Provider** - Either:
+   - [Ollama](https://ollama.ai/) - `ollama serve`
+   - [LM Studio](https://lmstudio.ai/) - Enable local server
+
+2. **Recommended Models**:
+   - NVIDIA Nemotron 3 Nano (`ollama pull nemotron-3-nano`)
+   - Qwen3-Coder 30B (`ollama pull qwen3-coder:30b`)
+   - DeepSeek Coder (`ollama pull deepseek-coder:33b`)
+
+### Token Savings
+
+| Task Size | Normal Mode | Hybrid Mode | Savings |
+|-----------|-------------|-------------|---------|
+| Small (3 files) | ~8,000 | ~1,200 | 85% |
+| Medium (8 files) | ~20,000 | ~1,800 | 91% |
+| Large (15+ files) | ~45,000 | ~2,500 | 94% |
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `/wogi-hybrid-setup` | **Full setup** - generates templates + configures local LLM (run this first!) |
+| `/wogi-hybrid` | Enable hybrid mode with interactive setup |
+| `/wogi-hybrid-off` | Disable hybrid mode |
+| `/wogi-hybrid-status` | Show current configuration |
+| `/wogi-hybrid-edit` | Edit plan before execution |
+
+### CLI Commands
+
+```bash
+./scripts/flow hybrid enable      # Enable with setup wizard
+./scripts/flow hybrid disable     # Disable hybrid mode
+./scripts/flow hybrid status      # Show configuration
+./scripts/flow hybrid execute     # Execute a plan file
+./scripts/flow hybrid rollback    # Rollback last execution
+./scripts/flow hybrid test        # Test installation
+./scripts/flow templates generate # Generate project templates
+```
+
+### Rollback
+
+If something goes wrong:
+```bash
+./scripts/flow hybrid rollback
+```
+
+This removes created files and restores modified files.
 
 ## Core Concepts
 
@@ -679,6 +764,18 @@ After 3+ similar corrections → Claude suggests promoting to permanent instruct
 ```
 
 ## Changelog
+
+### v1.3.0 - Hybrid Mode
+- **Hybrid Mode**: Claude plans, local LLM executes - save 85-95% tokens
+  - Supports Ollama and LM Studio providers
+  - Interactive setup wizard (`/wogi-hybrid`)
+  - Automatic validation after each step
+  - Rollback support for failed executions
+  - Escalation to Claude when local LLM fails
+- **New slash commands**: `/wogi-hybrid-setup`, `/wogi-hybrid`, `/wogi-hybrid-off`, `/wogi-hybrid-status`, `/wogi-hybrid-edit`
+- **New CLI commands**: `flow hybrid [enable|disable|status|execute|rollback|test]`, `flow templates generate`
+- **Template system**: Project-specific templates for local LLM
+- **New state file**: `hybrid-session.json` for tracking hybrid execution
 
 ### v1.2.0 - Self-Completing Loops
 - **Self-completing `/wogi-start`**: Tasks now run in a loop until truly done

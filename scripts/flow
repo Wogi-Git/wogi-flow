@@ -71,6 +71,15 @@ show_help() {
     echo "Docs:"
     echo "  changelog            Generate changelog from request-log"
     echo ""
+    echo "Hybrid Mode:"
+    echo "  hybrid enable        Enable hybrid mode (Claude plans, local LLM executes)"
+    echo "  hybrid disable       Disable hybrid mode"
+    echo "  hybrid status        Show hybrid mode status"
+    echo "  hybrid execute       Execute a plan file"
+    echo "  hybrid rollback      Rollback last execution"
+    echo "  hybrid test          Test hybrid mode installation"
+    echo "  templates generate   Generate project-specific templates"
+    echo ""
     echo "Options:"
     echo "  help, --help, -h     Show this help"
     echo "  version, --version   Show version"
@@ -157,6 +166,44 @@ case "${1:-}" in
         ;;
     watch)
         "$SCRIPT_DIR/flow-watch" "${@:2}"
+        ;;
+    hybrid)
+        case "${2:-status}" in
+            setup)
+                echo "🔧 Setting up Hybrid Mode..."
+                echo ""
+                echo "Step 1: Generating project templates..."
+                node "$SCRIPT_DIR/flow-templates.js" generate
+                echo ""
+                echo "Step 2: Configuring local LLM..."
+                node "$SCRIPT_DIR/flow-hybrid-interactive.js"
+                ;;
+            enable)
+                node "$SCRIPT_DIR/flow-hybrid-interactive.js"
+                ;;
+            disable)
+                jq '.hybrid.enabled = false' "$PROJECT_ROOT/.workflow/config.json" > /tmp/cfg.tmp && mv /tmp/cfg.tmp "$PROJECT_ROOT/.workflow/config.json"
+                echo "✅ Hybrid mode disabled"
+                ;;
+            status)
+                jq '.hybrid' "$PROJECT_ROOT/.workflow/config.json"
+                ;;
+            execute)
+                node "$SCRIPT_DIR/flow-orchestrate.js" "$3"
+                ;;
+            rollback)
+                node "$SCRIPT_DIR/flow-orchestrate.js" --rollback
+                ;;
+            test)
+                node "$SCRIPT_DIR/flow-hybrid-test.js"
+                ;;
+            *)
+                echo "Usage: flow hybrid [enable|disable|status|execute|rollback|test]"
+                ;;
+        esac
+        ;;
+    templates)
+        node "$SCRIPT_DIR/flow-templates.js" "${2:-generate}"
         ;;
     version|--version|-v)
         show_version

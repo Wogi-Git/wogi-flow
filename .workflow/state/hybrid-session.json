@@ -1,0 +1,10 @@
+{
+  "sessionId": null,
+  "startedAt": null,
+  "autoExecute": false,
+  "currentPlan": null,
+  "executedSteps": [],
+  "failedSteps": [],
+  "pendingSteps": [],
+  "totalTokensSaved": 0
+}
