@@ -733,6 +733,402 @@ if (typeof module !== 'undefined' && module.exports) {
 }
 
 // ============================================================
+// Project Context Generator - Claude creates once, Local LLM reuses
+// ============================================================
+
+/**
+ * Generates and caches a comprehensive project context document.
+ * This context is generated once (expensive) and reused for all steps (free).
+ *
+ * The context includes:
+ * - Type definitions from the project
+ * - Theme structure and correct access paths
+ * - Component patterns from existing code
+ * - Available components list
+ * - Critical rules and conventions
+ */
+class ProjectContextGenerator {
+  constructor(projectRoot = PROJECT_ROOT) {
+    this.projectRoot = projectRoot;
+    this.contextPath = path.join(projectRoot, '.workflow/state/hybrid-context.md');
+    this.cacheMaxAge = 60 * 60 * 1000; // 1 hour
+  }
+
+  /**
+   * Check if we have a valid cached context (less than 1 hour old)
+   */
+  hasValidCache() {
+    try {
+      if (!fs.existsSync(this.contextPath)) return false;
+      const stats = fs.statSync(this.contextPath);
+      const ageMs = Date.now() - stats.mtimeMs;
+      return ageMs < this.cacheMaxAge;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Get cached context or null
+   */
+  getCachedContext() {
+    if (!this.hasValidCache()) return null;
+    try {
+      return fs.readFileSync(this.contextPath, 'utf-8');
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Save generated context to cache
+   */
+  saveContext(context) {
+    try {
+      const dir = path.dirname(this.contextPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(this.contextPath, context);
+    } catch (e) {
+      log('yellow', `   ⚠️ Could not cache context: ${e.message}`);
+    }
+  }
+
+  /**
+   * Simple glob implementation using fs
+   */
+  globSync(pattern) {
+    const results = [];
+    const basePath = this.projectRoot;
+
+    // Handle simple patterns like 'apps/web/src/features/*/api/types.ts'
+    const parts = pattern.split('/');
+    const searchDir = (currentPath, remainingParts) => {
+      if (remainingParts.length === 0) {
+        if (fs.existsSync(currentPath)) results.push(currentPath);
+        return;
+      }
+
+      const [current, ...rest] = remainingParts;
+
+      if (current === '*' || current === '**') {
+        // Wildcard - search all directories
+        try {
+          const entries = fs.readdirSync(currentPath, { withFileTypes: true });
+          for (const entry of entries) {
+            if (entry.isDirectory()) {
+              searchDir(path.join(currentPath, entry.name), rest);
+              if (current === '**') {
+                // ** also searches deeper
+                searchDir(path.join(currentPath, entry.name), remainingParts);
+              }
+            } else if (rest.length === 0) {
+              // Check if file matches
+              results.push(path.join(currentPath, entry.name));
+            }
+          }
+        } catch {}
+      } else if (current.includes('*')) {
+        // Pattern like *.tsx
+        try {
+          const regex = new RegExp('^' + current.replace(/\*/g, '.*') + '$');
+          const entries = fs.readdirSync(currentPath, { withFileTypes: true });
+          for (const entry of entries) {
+            if (regex.test(entry.name)) {
+              if (entry.isDirectory()) {
+                searchDir(path.join(currentPath, entry.name), rest);
+              } else if (rest.length === 0) {
+                results.push(path.join(currentPath, entry.name));
+              }
+            }
+          }
+        } catch {}
+      } else {
+        // Exact match
+        const nextPath = path.join(currentPath, current);
+        if (fs.existsSync(nextPath)) {
+          searchDir(nextPath, rest);
+        }
+      }
+    };
+
+    searchDir(basePath, parts);
+    return results.map(p => path.relative(basePath, p));
+  }
+
+  /**
+   * Read file with line limit
+   */
+  readFile(filePath, maxLines = 100) {
+    try {
+      const fullPath = path.join(this.projectRoot, filePath);
+      if (!fs.existsSync(fullPath)) return null;
+      const content = fs.readFileSync(fullPath, 'utf-8');
+      return content.split('\n').slice(0, maxLines).join('\n');
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Gather raw project files for context generation
+   */
+  gatherProjectFiles() {
+    const files = {};
+
+    // 1. Find and read type files
+    const typePatterns = [
+      'apps/web/src/features/*/api/types.ts',
+      'apps/api/src/**/dto/*.ts',
+      'src/types/*.ts',
+      'src/features/*/api/types.ts',
+      'src/*/types.ts',
+    ];
+
+    for (const pattern of typePatterns) {
+      const matches = this.globSync(pattern);
+      for (const match of matches.slice(0, 5)) { // Limit to 5 type files
+        const content = this.readFile(match, 150);
+        if (content) files[match] = content;
+      }
+    }
+
+    // 2. Read theme file
+    const themePaths = [
+      'apps/web/src/styles/theme.ts',
+      'src/styles/theme.ts',
+      'src/theme.ts',
+      'src/theme/index.ts',
+      'styles/theme.ts',
+    ];
+    for (const tp of themePaths) {
+      const content = this.readFile(tp, 200);
+      if (content) {
+        files[tp] = content;
+        break;
+      }
+    }
+
+    // 3. Read sample components (2-3 examples)
+    const componentPatterns = [
+      'apps/web/src/components/*.tsx',
+      'apps/web/src/features/*/components/*.tsx',
+      'src/components/*.tsx',
+      'src/features/*/components/*.tsx',
+    ];
+
+    let componentCount = 0;
+    for (const pattern of componentPatterns) {
+      if (componentCount >= 3) break;
+      const matches = this.globSync(pattern)
+        .filter(f => !f.includes('.spec') && !f.includes('.test') && !f.includes('index'));
+      for (const match of matches.slice(0, 2)) {
+        const content = this.readFile(match, 80);
+        if (content) {
+          files[match] = content;
+          componentCount++;
+        }
+        if (componentCount >= 3) break;
+      }
+    }
+
+    // 4. Read component index files
+    const indexPatterns = [
+      'apps/web/src/components/index.ts',
+      'apps/web/src/features/*/components/index.ts',
+      'src/components/index.ts',
+      'src/features/*/components/index.ts',
+    ];
+    for (const pattern of indexPatterns) {
+      const matches = this.globSync(pattern);
+      for (const match of matches.slice(0, 3)) {
+        const content = this.readFile(match, 50);
+        if (content) files[match] = content;
+      }
+    }
+
+    return files;
+  }
+
+  /**
+   * Generate smart context from project files
+   * This is the fallback when Claude API is not available
+   */
+  generateSmartContext(projectFiles) {
+    let context = '# Project Context for Code Generation\n\n';
+    context += '> This context is auto-generated from your project files.\n';
+    context += '> Local LLM: Use this as your primary reference.\n\n';
+
+    // Extract types
+    context += '## 1. Type Definitions\n\n';
+    let hasTypes = false;
+    for (const [filePath, content] of Object.entries(projectFiles)) {
+      if (filePath.includes('types')) {
+        context += `### From \`${filePath}\`\n\`\`\`typescript\n${content}\n\`\`\`\n\n`;
+        hasTypes = true;
+      }
+    }
+    if (!hasTypes) {
+      context += '_No type files found. Define types inline._\n\n';
+    }
+
+    // Extract theme info
+    context += '## 2. Theme Path Cheatsheet\n\n';
+    let hasTheme = false;
+    for (const [filePath, content] of Object.entries(projectFiles)) {
+      if (filePath.includes('theme')) {
+        context += `### Theme Structure (from \`${filePath}\`)\n`;
+        context += '```typescript\n' + content + '\n```\n\n';
+        hasTheme = true;
+
+        // Add explicit path guidance
+        context += `### CORRECT Theme Paths (MUST use these exact paths)
+| What | ❌ WRONG | ✅ CORRECT |
+|------|----------|-----------|
+| Primary color | \`theme.colors.primary\` | \`theme.colors.primary.main\` |
+| Success color | \`theme.colors.success\` | \`theme.colors.status.success\` |
+| Warning color | \`theme.colors.warning\` | \`theme.colors.status.warning\` |
+| Error color | \`theme.colors.error\` | \`theme.colors.status.error\` |
+| Border color | \`theme.colors.border\` | \`theme.colors.border.light\` |
+| Text color | \`theme.colors.text\` | \`theme.colors.text.primary\` |
+| Spacing | \`theme.spacing.4\` | \`theme.spacing[4]\` |
+| Font size | \`theme.fontSize.lg\` | \`theme.fontSize.lg\` or \`theme.fontSize['2xl']\` |
+
+`;
+        break;
+      }
+    }
+    if (!hasTheme) {
+      context += '_No theme file found._\n\n';
+    }
+
+    // Extract component patterns
+    context += '## 3. Component Patterns\n\n';
+    let sampleShown = false;
+    for (const [filePath, content] of Object.entries(projectFiles)) {
+      if (filePath.includes('components/') && filePath.endsWith('.tsx') && !sampleShown) {
+        context += `### Sample Component Pattern (from \`${filePath}\`)\n`;
+        context += 'Follow this exact pattern for new components:\n';
+        context += '```typescript\n' + content + '\n```\n\n';
+        sampleShown = true;
+      }
+    }
+    if (!sampleShown) {
+      context += '_No sample components found._\n\n';
+    }
+
+    // Add existing components
+    context += '## 4. Available Components (DO NOT recreate these)\n\n';
+    let hasComponents = false;
+    for (const [filePath, content] of Object.entries(projectFiles)) {
+      if (filePath.endsWith('index.ts') && filePath.includes('components')) {
+        context += `### From \`${filePath}\`\n\`\`\`typescript\n${content}\n\`\`\`\n\n`;
+        hasComponents = true;
+      }
+    }
+    if (!hasComponents) {
+      context += '_No component index files found._\n\n';
+    }
+
+    // Add critical rules
+    context += `## 5. Critical Rules (MUST FOLLOW)
+
+### Import Rules
+| Rule | ❌ WRONG | ✅ CORRECT |
+|------|----------|-----------|
+| React imports | \`import React from 'react'\` | \`import { useState, useCallback } from 'react'\` |
+| Type imports (features) | \`from '../types'\` | \`from '../api/types'\` |
+| Type imports (features) | \`from './types'\` | \`from '../api/types'\` |
+| Inventing imports | \`import { X } from '@/utils/X'\` | Only import what exists |
+
+### Styled Components Rules
+| Rule | Example |
+|------|---------|
+| Transient props | \`$active\`, \`$variant\`, \`$size\` (prefix with $) |
+| Theme in template | \`\${({ theme }) => theme.colors.primary.main}\` |
+| DisplayName | \`ComponentName.displayName = 'ComponentName'\` |
+
+### Export Rules
+| Rule | Example |
+|------|---------|
+| Named exports | \`export function ComponentName() {}\` |
+| Type exports | \`export interface Props {}\` or \`export type X = ...\` |
+| Props interface | Name it \`ComponentNameProps\` |
+
+## 6. Import Path Conventions
+
+| Type | Path Pattern |
+|------|-------------|
+| Shared components | \`@/components/ComponentName\` |
+| Feature components | \`../components/ComponentName\` or \`./ComponentName\` |
+| Types in features | \`../api/types\` |
+| Shared types | \`@/types/...\` |
+| Icons | \`lucide-react\` |
+
+---
+
+**Remember:** If you're unsure about an import, DON'T INVENT IT. Use inline code or a TODO comment.
+
+`;
+
+    return context;
+  }
+
+  /**
+   * Minimal context fallback when no project files found
+   */
+  getMinimalContext() {
+    return `# Project Context for Code Generation
+
+## Critical Rules
+
+### Imports
+- ❌ NEVER: \`import React from 'react'\` - causes TS6133 unused variable error
+- ✅ CORRECT: \`import { useState, useCallback } from 'react'\`
+
+### Type Imports in Features
+- ❌ WRONG: \`from '../types'\` or \`from './types'\`
+- ✅ CORRECT: \`from '../api/types'\`
+
+### Styled Components
+- ✅ Use transient props: \`$active\`, \`$variant\` (with $ prefix)
+- ✅ Theme access: \`theme.colors.primary.main\` (not \`theme.colors.primary\`)
+- ✅ Add displayName: \`Component.displayName = 'Component'\`
+
+### Exports
+- ✅ Use named exports: \`export function ComponentName\`
+- ✅ Define Props interface: \`interface ComponentNameProps {}\`
+`;
+  }
+
+  /**
+   * Generate or retrieve project context
+   */
+  getOrGenerateContext() {
+    // Check cache first
+    const cached = this.getCachedContext();
+    if (cached) {
+      return { context: cached, fromCache: true };
+    }
+
+    // Gather project files
+    const projectFiles = this.gatherProjectFiles();
+
+    if (Object.keys(projectFiles).length === 0) {
+      const minimal = this.getMinimalContext();
+      return { context: minimal, fromCache: false };
+    }
+
+    // Generate context from files
+    const context = this.generateSmartContext(projectFiles);
+
+    // Cache it
+    this.saveContext(context);
+
+    return { context, fromCache: false };
+  }
+}
+
+// ============================================================
 // Context Management & Auto-Compaction
 // ============================================================
 
@@ -1414,6 +1810,28 @@ class Orchestrator {
     this.rollback = new RollbackManager();
     this.state = new StateManager();
     this.completedSteps = new Set();
+
+    // Project context generator - generates once, reuses for all steps
+    this.contextGenerator = new ProjectContextGenerator(PROJECT_ROOT);
+    this.projectContext = null;
+  }
+
+  /**
+   * Ensures project context is loaded (from cache or generated)
+   * Called once before executing any steps - local LLM tokens are FREE
+   */
+  async ensureProjectContext() {
+    const { context, fromCache } = this.contextGenerator.getOrGenerateContext();
+    this.projectContext = context;
+
+    if (fromCache) {
+      log('dim', '📋 Using cached project context');
+    } else {
+      log('green', '✅ Generated and cached project context');
+    }
+
+    const contextTokens = estimateTokens(context);
+    log('dim', `   Context size: ~${contextTokens.toLocaleString()} tokens (prepended to each step - FREE)`);
   }
 
   async executePlan(plan) {
@@ -1427,6 +1845,10 @@ class Orchestrator {
       escalateToCloud: [],
       tokensSaved: plan.estimatedTokensSaved || 0
     };
+
+    // Generate project context ONCE before executing any steps
+    // This context is prepended to each step's prompt (local LLM tokens are FREE)
+    await this.ensureProjectContext();
 
     this.state.updateHybridSession({
       currentPlan: plan.planId,
@@ -1563,9 +1985,15 @@ class Orchestrator {
       return result;
     }
 
+    // PREPEND PROJECT CONTEXT - Local LLM tokens are FREE
+    // This gives the LLM comprehensive knowledge about types, theme, patterns
+    if (this.projectContext) {
+      prompt = this.projectContext + '\n\n---\n\n# Step Instructions\n\n' + prompt;
+    }
+
     // Show initial context info
     const initialTokens = estimateTokens(prompt);
-    log('dim', `   Prompt size: ~${initialTokens.toLocaleString()} tokens`);
+    log('dim', `   Prompt size: ~${initialTokens.toLocaleString()} tokens (includes project context - FREE)`);
 
     for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
       result.attempts = attempt + 1;
