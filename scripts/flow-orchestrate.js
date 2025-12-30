@@ -19,6 +19,14 @@ const http = require('http');
 const https = require('https');
 const readline = require('readline');
 
+// Import complexity assessment module
+const {
+  assessTaskComplexity,
+  TOKEN_BUDGETS,
+  getDefaultTokens,
+  clampTokens
+} = require('./flow-complexity');
+
 // ============================================================
 // Configuration
 // ============================================================
@@ -1129,6 +1137,122 @@ class ProjectContextGenerator {
 }
 
 // ============================================================
+// Hybrid Metrics Logging
+// ============================================================
+
+/**
+ * Logs token estimation metrics for accuracy tracking.
+ * Saves to .workflow/state/hybrid-metrics.json
+ *
+ * @param {Object} plan - The executed plan
+ * @param {Object} executionResult - Result of execution
+ * @param {Object} complexity - Complexity assessment
+ */
+function logTokenMetrics(plan, executionResult, complexity) {
+  const config = loadConfig();
+  const logMetrics = config.hybrid?.settings?.tokenEstimation?.logMetrics;
+
+  if (!logMetrics) return;
+
+  const metricsPath = path.join(STATE_DIR, 'hybrid-metrics.json');
+
+  // Load existing metrics or create new array
+  let metrics = [];
+  if (fs.existsSync(metricsPath)) {
+    try {
+      metrics = JSON.parse(fs.readFileSync(metricsPath, 'utf-8'));
+    } catch {
+      metrics = [];
+    }
+  }
+
+  // Add new metric entry
+  const entry = {
+    timestamp: new Date().toISOString(),
+    planId: plan.planId || 'unknown',
+    task: plan.task || 'unknown',
+    complexity: {
+      level: complexity?.level || 'unknown',
+      estimatedTokens: complexity?.estimatedTokens || 0,
+      reasoning: complexity?.reasoning || ''
+    },
+    execution: {
+      success: executionResult.success,
+      stepsCompleted: executionResult.steps?.filter(s => s.success).length || 0,
+      stepsTotal: executionResult.steps?.length || 0,
+      escalated: executionResult.escalateToCloud?.length > 0,
+      escalatedSteps: executionResult.escalateToCloud?.map(s => s.id) || []
+    }
+  };
+
+  metrics.push(entry);
+
+  // Keep only last 100 entries to prevent file bloat
+  if (metrics.length > 100) {
+    metrics = metrics.slice(-100);
+  }
+
+  // Save metrics
+  try {
+    fs.writeFileSync(metricsPath, JSON.stringify(metrics, null, 2));
+  } catch (e) {
+    log('yellow', `   ⚠️ Could not save metrics: ${e.message}`);
+  }
+}
+
+/**
+ * Displays complexity assessment to the user
+ */
+function displayComplexityAssessment(complexity) {
+  log('white', '\n' + '─'.repeat(60));
+  log('cyan', '                 COMPLEXITY ASSESSMENT');
+  log('white', '─'.repeat(60));
+
+  const levelColors = {
+    small: 'green',
+    medium: 'yellow',
+    large: 'yellow',
+    xl: 'red'
+  };
+
+  log(levelColors[complexity.level] || 'white', `\n   Level: ${complexity.level.toUpperCase()}`);
+  log('white', `   Estimated Tokens: ${complexity.estimatedTokens.toLocaleString()}`);
+  log('dim', `   Range: ${complexity.budget.min.toLocaleString()} - ${complexity.budget.max.toLocaleString()}`);
+  log('dim', `\n   Reasoning: ${complexity.reasoning}`);
+
+  // Show key factors
+  if (complexity.factors.complexityKeywords?.length > 0) {
+    log('dim', `   Keywords: ${complexity.factors.complexityKeywords.slice(0, 5).join(', ')}`);
+  }
+
+  log('white', '');
+}
+
+/**
+ * Gets token estimation settings from config
+ */
+function getTokenEstimationSettings() {
+  try {
+    const config = loadConfig();
+    return {
+      enabled: config.hybrid?.settings?.tokenEstimation?.enabled ?? true,
+      minTokens: config.hybrid?.settings?.tokenEstimation?.minTokens ?? 1000,
+      maxTokens: config.hybrid?.settings?.tokenEstimation?.maxTokens ?? 8000,
+      defaultLevel: config.hybrid?.settings?.tokenEstimation?.defaultLevel ?? 'medium',
+      logMetrics: config.hybrid?.settings?.tokenEstimation?.logMetrics ?? true
+    };
+  } catch {
+    return {
+      enabled: true,
+      minTokens: 1000,
+      maxTokens: 8000,
+      defaultLevel: 'medium',
+      logMetrics: true
+    };
+  }
+}
+
+// ============================================================
 // Context Management & Auto-Compaction
 // ============================================================
 
@@ -1814,6 +1938,9 @@ class Orchestrator {
     // Project context generator - generates once, reuses for all steps
     this.contextGenerator = new ProjectContextGenerator(PROJECT_ROOT);
     this.projectContext = null;
+
+    // Complexity assessment for the current plan
+    this.planComplexity = null;
   }
 
   /**
@@ -1846,6 +1973,33 @@ class Orchestrator {
       tokensSaved: plan.estimatedTokensSaved || 0
     };
 
+    // Assess task complexity for token estimation
+    const tokenSettings = getTokenEstimationSettings();
+    if (tokenSettings.enabled) {
+      this.planComplexity = assessTaskComplexity({
+        title: plan.task,
+        description: plan.description || plan.task,
+        // Include step info in complexity assessment
+        technicalNotes: plan.steps?.map(s => s.title || s.type).join(', ')
+      });
+
+      // Display complexity assessment
+      displayComplexityAssessment(this.planComplexity);
+
+      // Warn if task might be too complex for hybrid mode
+      if (this.planComplexity.level === 'xl') {
+        log('yellow', '   ⚠️ This task is very complex. Consider breaking into smaller tasks.');
+        log('yellow', '      Proceeding with maximum token budget...\n');
+      }
+    } else {
+      log('dim', '   Token estimation disabled, using default budget');
+      this.planComplexity = {
+        level: tokenSettings.defaultLevel,
+        estimatedTokens: getDefaultTokens(tokenSettings.defaultLevel),
+        reasoning: 'Token estimation disabled'
+      };
+    }
+
     // Generate project context ONCE before executing any steps
     // This context is prepended to each step's prompt (local LLM tokens are FREE)
     await this.ensureProjectContext();
@@ -1860,7 +2014,8 @@ class Orchestrator {
     log('cyan', '═'.repeat(60));
     log('white', `\nTask: ${plan.task}`);
     log('white', `Steps: ${plan.steps.length}`);
-    log('white', `Model: ${this.config.model}\n`);
+    log('white', `Model: ${this.config.model}`);
+    log('dim', `Token Budget: ${this.planComplexity.estimatedTokens.toLocaleString()} (${this.planComplexity.level})\n`);
 
     const steps = plan.steps;
 
@@ -1936,6 +2091,9 @@ class Orchestrator {
     });
 
     this.state.saveResults(results);
+
+    // Log metrics for accuracy tracking
+    logTokenMetrics(plan, results, this.planComplexity);
 
     if (results.success) {
       this.rollback.clearCheckpoint();

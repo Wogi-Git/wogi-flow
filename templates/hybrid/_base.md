@@ -90,6 +90,17 @@ These are either unnecessary (React with JSX transform) or not available in this
 6. Match the project's naming conventions exactly.
 7. Define types inline if unsure about import path.
 
+## Token Budget
+
+This prompt has been sized to match task complexity:
+- **Small** (1-2k tokens): Single file, simple change
+- **Medium** (2-4k tokens): Multi-file, moderate complexity
+- **Large** (4-6k tokens): Many files, complex logic, tests
+- **XL** (6-8k tokens): Architectural changes, extensive boilerplate
+
+Your output should be appropriately detailed. Simple tasks need concise output.
+Complex tasks may require more thorough implementations.
+
 ## Validation
 
 After you output code, it will be automatically validated:

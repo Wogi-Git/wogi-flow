@@ -115,7 +115,14 @@
       "maxRetries": 2,
       "timeout": 120000,
       "autoExecute": false,
-      "createBranch": false
+      "createBranch": false,
+      "tokenEstimation": {
+        "enabled": true,
+        "minTokens": 1000,
+        "maxTokens": 8000,
+        "defaultLevel": "medium",
+        "logMetrics": true
+      }
     },
     "templates": {
       "directory": "templates/hybrid"
