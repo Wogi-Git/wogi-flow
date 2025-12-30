@@ -401,12 +401,49 @@ function extractCodeFromResponse(response, modelName = '') {
 }
 
 /**
- * Validates if the extracted code looks like valid TypeScript/JavaScript
+ * Validates if the extracted code looks like valid TypeScript/JavaScript.
+ * Returns { valid: boolean, reason?: string }
  */
 function isValidCode(code) {
-  if (!code || code.length < 10) return false;
-  // Check if starts with valid TS/JS
-  return /^(import|export|const|let|var|function|async|class|interface|type|enum|declare|\/\*\*|\/\*|\/\/|'use |"use )/.test(code.trim());
+  if (!code) {
+    return { valid: false, reason: 'Empty output' };
+  }
+
+  if (code.length < 10) {
+    return { valid: false, reason: 'Output too short' };
+  }
+
+  const trimmed = code.trim();
+
+  // Check for common LLM prose patterns that indicate thinking/explanation
+  const prosePatterns = [
+    /^(We need|Let's|The |I |You |This |Maybe|Probably|Actually|But |So |Thus |Given |Here|Now |First|To |In order)/i,
+    /^(Looking at|Based on|According to|As you can|Note that|Remember|Consider|Thinking|Output:)/i,
+    /^(```|~~~)/,  // Markdown code fence at start means extraction failed
+    /<think>|<\/think>/i,  // Thinking tags leaked through
+  ];
+
+  for (const pattern of prosePatterns) {
+    if (pattern.test(trimmed)) {
+      return { valid: false, reason: `Starts with prose/thinking: "${trimmed.slice(0, 50)}..."` };
+    }
+  }
+
+  // Must start with valid TS/JS syntax
+  const validStartPatterns = /^(import|export|const|let|var|function|async|class|interface|type|enum|declare|module|namespace|\/\*\*|\/\*|\/\/|'use |"use |@)/;
+
+  if (!validStartPatterns.test(trimmed)) {
+    return { valid: false, reason: `Invalid start: "${trimmed.slice(0, 50)}..."` };
+  }
+
+  // Additional sanity checks
+  // Should have some code-like structure (braces, semicolons, etc.)
+  const hasCodeStructure = /[{};=()]/.test(code);
+  if (!hasCodeStructure && code.length > 100) {
+    return { valid: false, reason: 'No code structure detected (missing braces/semicolons)' };
+  }
+
+  return { valid: true };
 }
 
 // ============================================================
@@ -1090,6 +1127,17 @@ class Orchestrator {
 
         const cleanOutput = this.cleanOutput(output);
 
+        // CRITICAL: Validate code BEFORE writing to prevent file corruption
+        const codeValidation = isValidCode(cleanOutput);
+        if (!codeValidation.valid) {
+          log('red', `   ❌ Invalid code output: ${codeValidation.reason}`);
+          result.errors.push(`Invalid code: ${codeValidation.reason}`);
+
+          // Add error context for retry
+          prompt += `\n\n## PREVIOUS ERROR\n\nYour output was not valid code. ${codeValidation.reason}\n\nOutput ONLY valid TypeScript/JavaScript code. No explanations, no markdown, no thinking.`;
+          continue; // Skip file write, retry
+        }
+
         const outputPath = step.params?.path;
         if (outputPath) {
           const dir = path.dirname(outputPath);
@@ -1098,6 +1146,19 @@ class Orchestrator {
           }
 
           const isNew = !fs.existsSync(outputPath);
+
+          // For modify-file, do a sanity check: new content shouldn't be drastically smaller
+          if (!isNew && step.type === 'modify-file') {
+            const existingContent = fs.readFileSync(outputPath, 'utf-8');
+            const sizeRatio = cleanOutput.length / existingContent.length;
+            if (sizeRatio < 0.3 && existingContent.length > 100) {
+              log('red', `   ❌ Output suspiciously small (${Math.round(sizeRatio * 100)}% of original)`);
+              result.errors.push('Output file size too small - likely incomplete');
+              prompt += `\n\n## PREVIOUS ERROR\n\nYour output was only ${Math.round(sizeRatio * 100)}% the size of the original file. You must output the COMPLETE file, not a partial snippet.`;
+              continue; // Skip write, retry
+            }
+          }
+
           fs.writeFileSync(outputPath, cleanOutput);
 
           if (isNew) {
@@ -1146,13 +1207,6 @@ class Orchestrator {
   cleanOutput(output) {
     // Use the comprehensive extraction function
     const extracted = extractCodeFromResponse(output, this.config.model);
-
-    // If extraction didn't produce valid code, log a warning
-    if (!isValidCode(extracted)) {
-      log('yellow', '   ⚠️ Warning: Extracted output may not be valid code');
-      log('dim', `      First 100 chars: ${extracted.slice(0, 100).replace(/\n/g, '\\n')}`);
-    }
-
     return extracted;
   }
 
