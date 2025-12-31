@@ -42,6 +42,8 @@ show_help() {
     echo ""
     echo "Workflow:"
     echo "  health               Check workflow health"
+    echo "  verify <gate>        Run verification gate (lint, typecheck, test, build)"
+    echo "  verify all           Run all verification gates"
     echo "  standup [days]       Generate standup summary"
     echo "  session-end          End session properly"
     echo "  init                 Initialize workflow (legacy)"
@@ -65,9 +67,31 @@ show_help() {
     echo "  trace list           List saved traces"
     echo "  trace show <n>    Show a saved trace"
     echo ""
+    echo "Run History:"
+    echo "  run-trace start <n>  Start a new traced run"
+    echo "  run-trace end        End current run"
+    echo "  history [--limit N]  List recent runs"
+    echo "  inspect <run-id>     Show run details"
+    echo "  run-trace cleanup    Remove old runs"
+    echo ""
+    echo "Diff Preview:"
+    echo "  diff <file1> <file2>           Show diff between files"
+    echo "  diff --preview <ops.json>      Preview proposed changes"
+    echo "  diff --apply <ops.json>        Apply changes from JSON"
+    echo "  diff --dry-run <ops.json>      Show diff without prompting"
+    echo ""
+    echo "Checkpoints:"
+    echo "  checkpoint create [msg]        Create manual checkpoint"
+    echo "  checkpoint list                List all checkpoints"
+    echo "  checkpoint rollback <id>       Rollback to checkpoint"
+    echo "  checkpoint cleanup             Remove old checkpoints"
+    echo ""
     echo "Search & Context:"
     echo "  search <query>       Search request-log by tag/keyword"
     echo "  context <task-id>    Load all context for a task"
+    echo "  links list           List external links"
+    echo "  links fetch <name>   Fetch and cache link content"
+    echo "  links add <n> <url>  Add external link"
     echo ""
     echo "Team:"
     echo "  export-profile       Export workflow config for team"
@@ -106,6 +130,16 @@ show_help() {
     echo "  hybrid test          Test hybrid mode installation"
     echo "  templates generate   Generate project-specific templates"
     echo ""
+    echo "Model Providers:"
+    echo "  providers list       List all available providers"
+    echo "  providers detect     Detect running local providers"
+    echo "  providers test <t>   Test a provider connection"
+    echo ""
+    echo "Declarative Workflows:"
+    echo "  workflow list        List available workflows"
+    echo "  workflow run <name>  Run a workflow"
+    echo "  workflow create <n>  Create workflow template"
+    echo ""
     echo "Options:"
     echo "  help, --help, -h     Show this help"
     echo "  version, --version   Show version"
@@ -138,6 +172,27 @@ case "${1:-}" in
         ;;
     health)
         node "$SCRIPT_DIR/flow-health.js" "${@:2}"
+        ;;
+    safety)
+        node "$SCRIPT_DIR/flow-safety.js" "${@:2}"
+        ;;
+    verify)
+        node "$SCRIPT_DIR/flow-verify.js" "${@:2}"
+        ;;
+    run-trace)
+        node "$SCRIPT_DIR/flow-run-trace.js" "${@:2}"
+        ;;
+    history)
+        node "$SCRIPT_DIR/flow-run-trace.js" list "${@:2}"
+        ;;
+    inspect)
+        node "$SCRIPT_DIR/flow-run-trace.js" inspect "${@:2}"
+        ;;
+    diff)
+        node "$SCRIPT_DIR/flow-diff.js" "${@:2}"
+        ;;
+    checkpoint)
+        node "$SCRIPT_DIR/flow-checkpoint.js" "${@:2}"
         ;;
     standup)
         "$SCRIPT_DIR/flow-standup" "${@:2}"
@@ -183,6 +238,12 @@ case "${1:-}" in
         ;;
     context)
         "$SCRIPT_DIR/flow-context" "${@:2}"
+        ;;
+    links)
+        node "$SCRIPT_DIR/flow-links.js" "${@:2}"
+        ;;
+    context-init)
+        node "$SCRIPT_DIR/flow-context-init.js" "${@:2}"
         ;;
     export-profile)
         "$SCRIPT_DIR/flow-export-profile" "${@:2}"
@@ -352,6 +413,12 @@ case "${1:-}" in
         ;;
     templates)
         node "$SCRIPT_DIR/flow-templates.js" "${2:-generate}"
+        ;;
+    providers)
+        node "$SCRIPT_DIR/flow-providers.js" "${@:2}"
+        ;;
+    workflow)
+        node "$SCRIPT_DIR/flow-workflow.js" "${@:2}"
         ;;
     version|--version|-v)
         show_version

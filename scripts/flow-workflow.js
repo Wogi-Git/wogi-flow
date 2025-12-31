@@ -1,0 +1,748 @@
+#!/usr/bin/env node
+
+/**
+ * Wogi Flow - Declarative Workflow Engine
+ *
+ * Conditional routing and bounded loops for automation:
+ * - YAML-based workflow definitions
+ * - Conditional step execution
+ * - Bounded loop iterations
+ * - Step dependencies
+ *
+ * Usage as module:
+ *   const { Workflow, loadWorkflow, runWorkflow } = require('./flow-workflow');
+ *   const workflow = loadWorkflow('deploy');
+ *   await runWorkflow(workflow, context);
+ *
+ * Usage as CLI:
+ *   flow workflow list                    # List workflows
+ *   flow workflow run <name>              # Run a workflow
+ *   flow workflow create <name>           # Create workflow template
+ *   flow workflow validate <name>         # Validate workflow
+ */
+
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
+
+const PROJECT_ROOT = process.cwd();
+const WORKFLOW_DIR = path.join(PROJECT_ROOT, '.workflow');
+const WORKFLOWS_DIR = path.join(WORKFLOW_DIR, 'workflows');
+
+// Colors
+const c = {
+  reset: '\x1b[0m',
+  bold: '\x1b[1m',
+  dim: '\x1b[2m',
+  red: '\x1b[31m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  blue: '\x1b[34m',
+  cyan: '\x1b[36m',
+  magenta: '\x1b[35m'
+};
+
+/**
+ * Step types
+ */
+const STEP_TYPES = {
+  COMMAND: 'command',
+  SCRIPT: 'script',
+  GATE: 'gate',
+  LOOP: 'loop',
+  PARALLEL: 'parallel',
+  CONDITIONAL: 'conditional'
+};
+
+/**
+ * Simple YAML parser for workflow files
+ */
+function parseYaml(content) {
+  const lines = content.split('\n');
+  const result = {};
+  const stack = [{ obj: result, indent: -1 }];
+  let currentArray = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    const indent = line.search(/\S/);
+
+    // Pop stack for lower indents
+    while (stack.length > 1 && indent <= stack[stack.length - 1].indent) {
+      stack.pop();
+    }
+
+    const parent = stack[stack.length - 1].obj;
+
+    // Array item
+    if (trimmed.startsWith('- ')) {
+      const value = trimmed.slice(2).trim();
+
+      if (currentArray && Array.isArray(parent[currentArray])) {
+        if (value.includes(':')) {
+          // Object in array
+          const [key, ...valueParts] = value.split(':');
+          const obj = { [key]: valueParts.join(':').trim() };
+          parent[currentArray].push(obj);
+          stack.push({ obj: obj, indent: indent, key: currentArray });
+        } else {
+          parent[currentArray].push(value);
+        }
+      }
+      continue;
+    }
+
+    // Key-value
+    if (trimmed.includes(':')) {
+      const colonIdx = trimmed.indexOf(':');
+      const key = trimmed.slice(0, colonIdx).trim();
+      const value = trimmed.slice(colonIdx + 1).trim();
+
+      if (!value) {
+        // Check if next line starts with - (array)
+        const nextLine = lines[i + 1];
+        const nextTrimmed = nextLine?.trim();
+
+        if (nextTrimmed?.startsWith('- ')) {
+          parent[key] = [];
+          currentArray = key;
+        } else {
+          parent[key] = {};
+          stack.push({ obj: parent[key], indent: indent, key: key });
+        }
+      } else {
+        // Simple value
+        parent[key] = value === 'true' ? true :
+                      value === 'false' ? false :
+                      /^\d+$/.test(value) ? parseInt(value) :
+                      value;
+        currentArray = null;
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Generate YAML from object
+ */
+function toYaml(obj, indent = 0) {
+  let result = '';
+  const spaces = '  '.repeat(indent);
+
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === null || value === undefined) continue;
+
+    if (Array.isArray(value)) {
+      result += `${spaces}${key}:\n`;
+      for (const item of value) {
+        if (typeof item === 'object') {
+          result += `${spaces}  - ${Object.entries(item)[0][0]}: ${Object.entries(item)[0][1]}\n`;
+          for (const [k, v] of Object.entries(item).slice(1)) {
+            result += `${spaces}    ${k}: ${v}\n`;
+          }
+        } else {
+          result += `${spaces}  - ${item}\n`;
+        }
+      }
+    } else if (typeof value === 'object') {
+      result += `${spaces}${key}:\n`;
+      result += toYaml(value, indent + 1);
+    } else {
+      result += `${spaces}${key}: ${value}\n`;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Execute a shell command
+ */
+function executeCommand(command, options = {}) {
+  return new Promise((resolve, reject) => {
+    const startTime = Date.now();
+
+    const proc = spawn('sh', ['-c', command], {
+      cwd: options.cwd || PROJECT_ROOT,
+      env: { ...process.env, ...options.env },
+      timeout: options.timeout || 60000
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (data) => {
+      stdout += data.toString();
+      if (options.stream) process.stdout.write(data);
+    });
+
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString();
+      if (options.stream) process.stderr.write(data);
+    });
+
+    proc.on('close', (code) => {
+      resolve({
+        exitCode: code,
+        stdout,
+        stderr,
+        duration: Date.now() - startTime
+      });
+    });
+
+    proc.on('error', (err) => {
+      reject(err);
+    });
+  });
+}
+
+/**
+ * Evaluate a condition expression
+ */
+function evaluateCondition(condition, context) {
+  // Simple condition evaluator
+  // Supports: ==, !=, &&, ||, !
+  // Variables: $var or ${var}
+
+  let expr = condition;
+
+  // Replace variables
+  expr = expr.replace(/\$\{?(\w+)\}?/g, (match, name) => {
+    const value = context[name];
+    if (typeof value === 'string') return `"${value}"`;
+    if (typeof value === 'boolean') return value.toString();
+    if (typeof value === 'number') return value.toString();
+    return 'undefined';
+  });
+
+  try {
+    // Safely evaluate
+    const fn = new Function('return ' + expr);
+    return fn();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Workflow execution context
+ */
+class WorkflowContext {
+  constructor(initialVars = {}) {
+    this.variables = { ...initialVars };
+    this.stepResults = {};
+    this.iteration = 0;
+    this.maxIterations = 100;
+  }
+
+  get(key) {
+    return this.variables[key];
+  }
+
+  set(key, value) {
+    this.variables[key] = value;
+  }
+
+  setResult(stepId, result) {
+    this.stepResults[stepId] = result;
+    this.variables[`${stepId}_exitCode`] = result.exitCode;
+    this.variables[`${stepId}_success`] = result.exitCode === 0;
+  }
+
+  getResult(stepId) {
+    return this.stepResults[stepId];
+  }
+}
+
+/**
+ * Workflow class
+ */
+class Workflow {
+  constructor(definition) {
+    this.name = definition.name || 'unnamed';
+    this.description = definition.description || '';
+    this.steps = definition.steps || [];
+    this.variables = definition.variables || {};
+    this.onError = definition.onError || 'abort';
+    this.maxIterations = definition.maxIterations || 100;
+  }
+
+  async run(context = null) {
+    context = context || new WorkflowContext(this.variables);
+    context.maxIterations = this.maxIterations;
+
+    const results = {
+      name: this.name,
+      success: true,
+      steps: [],
+      startTime: new Date().toISOString(),
+      endTime: null
+    };
+
+    for (const step of this.steps) {
+      try {
+        const stepResult = await this.runStep(step, context);
+        results.steps.push(stepResult);
+
+        if (!stepResult.success && this.onError === 'abort') {
+          results.success = false;
+          break;
+        }
+      } catch (err) {
+        results.steps.push({
+          id: step.id || step.name,
+          success: false,
+          error: err.message
+        });
+        results.success = false;
+
+        if (this.onError === 'abort') break;
+      }
+    }
+
+    results.endTime = new Date().toISOString();
+    return results;
+  }
+
+  async runStep(step, context) {
+    const stepId = step.id || step.name;
+    const stepResult = {
+      id: stepId,
+      type: step.type || STEP_TYPES.COMMAND,
+      success: true,
+      skipped: false,
+      duration: 0
+    };
+
+    // Check condition
+    if (step.when) {
+      const shouldRun = evaluateCondition(step.when, context.variables);
+      if (!shouldRun) {
+        stepResult.skipped = true;
+        stepResult.skipReason = 'Condition not met';
+        return stepResult;
+      }
+    }
+
+    const startTime = Date.now();
+
+    switch (step.type) {
+      case STEP_TYPES.COMMAND:
+      case undefined: {
+        const result = await executeCommand(step.run || step.command, {
+          timeout: step.timeout,
+          stream: step.stream
+        });
+        stepResult.exitCode = result.exitCode;
+        stepResult.success = result.exitCode === 0;
+        stepResult.stdout = result.stdout;
+        stepResult.stderr = result.stderr;
+        context.setResult(stepId, result);
+        break;
+      }
+
+      case STEP_TYPES.GATE: {
+        const result = await executeCommand(step.check, { timeout: step.timeout });
+        stepResult.success = result.exitCode === 0;
+        stepResult.exitCode = result.exitCode;
+
+        if (!stepResult.success && step.onFail) {
+          console.log(`${c.yellow}Gate failed, running recovery...${c.reset}`);
+          await executeCommand(step.onFail);
+        }
+        break;
+      }
+
+      case STEP_TYPES.LOOP: {
+        const maxIter = step.maxIterations || context.maxIterations;
+        let iterations = 0;
+
+        while (iterations < maxIter) {
+          context.iteration = iterations;
+
+          // Check exit condition
+          if (step.until && evaluateCondition(step.until, context.variables)) {
+            break;
+          }
+
+          // Run loop body
+          for (const innerStep of step.steps || []) {
+            await this.runStep(innerStep, context);
+          }
+
+          iterations++;
+
+          // Check continue condition
+          if (step.while && !evaluateCondition(step.while, context.variables)) {
+            break;
+          }
+        }
+
+        stepResult.iterations = iterations;
+        stepResult.success = iterations < maxIter || step.allowMaxIterations;
+        break;
+      }
+
+      case STEP_TYPES.PARALLEL: {
+        const promises = (step.steps || []).map(s => this.runStep(s, context));
+        const results = await Promise.all(promises);
+        stepResult.parallelResults = results;
+        stepResult.success = results.every(r => r.success);
+        break;
+      }
+
+      case STEP_TYPES.CONDITIONAL: {
+        const branches = step.branches || [];
+        let executed = false;
+
+        for (const branch of branches) {
+          if (evaluateCondition(branch.when, context.variables)) {
+            for (const innerStep of branch.steps || []) {
+              await this.runStep(innerStep, context);
+            }
+            executed = true;
+            break;
+          }
+        }
+
+        if (!executed && step.else) {
+          for (const innerStep of step.else || []) {
+            await this.runStep(innerStep, context);
+          }
+        }
+
+        stepResult.success = true;
+        break;
+      }
+
+      default:
+        stepResult.error = `Unknown step type: ${step.type}`;
+        stepResult.success = false;
+    }
+
+    stepResult.duration = Date.now() - startTime;
+    return stepResult;
+  }
+}
+
+/**
+ * Load workflow from file
+ */
+function loadWorkflow(name) {
+  const yamlPath = path.join(WORKFLOWS_DIR, `${name}.yaml`);
+  const ymlPath = path.join(WORKFLOWS_DIR, `${name}.yml`);
+  const jsonPath = path.join(WORKFLOWS_DIR, `${name}.json`);
+
+  let definition = null;
+
+  if (fs.existsSync(yamlPath)) {
+    definition = parseYaml(fs.readFileSync(yamlPath, 'utf-8'));
+  } else if (fs.existsSync(ymlPath)) {
+    definition = parseYaml(fs.readFileSync(ymlPath, 'utf-8'));
+  } else if (fs.existsSync(jsonPath)) {
+    definition = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+  } else {
+    throw new Error(`Workflow not found: ${name}`);
+  }
+
+  return new Workflow(definition);
+}
+
+/**
+ * List available workflows
+ */
+function listWorkflows() {
+  if (!fs.existsSync(WORKFLOWS_DIR)) {
+    return [];
+  }
+
+  const files = fs.readdirSync(WORKFLOWS_DIR);
+  const workflows = [];
+
+  for (const file of files) {
+    if (file.endsWith('.yaml') || file.endsWith('.yml') || file.endsWith('.json')) {
+      const name = file.replace(/\.(yaml|yml|json)$/, '');
+      try {
+        const workflow = loadWorkflow(name);
+        workflows.push({
+          name,
+          description: workflow.description,
+          steps: workflow.steps.length
+        });
+      } catch {
+        workflows.push({ name, error: 'Failed to parse' });
+      }
+    }
+  }
+
+  return workflows;
+}
+
+/**
+ * Create workflow template
+ */
+function createWorkflowTemplate(name) {
+  if (!fs.existsSync(WORKFLOWS_DIR)) {
+    fs.mkdirSync(WORKFLOWS_DIR, { recursive: true });
+  }
+
+  const template = {
+    name,
+    description: 'Workflow description',
+    variables: {
+      environment: 'development'
+    },
+    onError: 'abort',
+    maxIterations: 10,
+    steps: [
+      {
+        id: 'lint',
+        name: 'Run linting',
+        run: 'npm run lint'
+      },
+      {
+        id: 'test',
+        name: 'Run tests',
+        run: 'npm test',
+        when: '$environment == "development"'
+      },
+      {
+        id: 'build',
+        name: 'Build project',
+        run: 'npm run build'
+      },
+      {
+        id: 'retry-loop',
+        name: 'Retry on failure',
+        type: 'loop',
+        maxIterations: 3,
+        until: '$build_success == true',
+        steps: [
+          {
+            id: 'fix-attempt',
+            run: 'npm run fix'
+          }
+        ]
+      }
+    ]
+  };
+
+  const yamlContent = `# ${name} Workflow
+# Auto-generated template
+
+${toYaml(template)}`;
+
+  const filePath = path.join(WORKFLOWS_DIR, `${name}.yaml`);
+  fs.writeFileSync(filePath, yamlContent);
+
+  return filePath;
+}
+
+/**
+ * Validate workflow
+ */
+function validateWorkflow(name) {
+  const errors = [];
+  const warnings = [];
+
+  try {
+    const workflow = loadWorkflow(name);
+
+    if (!workflow.name) {
+      warnings.push('Missing workflow name');
+    }
+
+    if (!workflow.steps || workflow.steps.length === 0) {
+      errors.push('Workflow has no steps');
+    }
+
+    for (const step of workflow.steps || []) {
+      if (!step.id && !step.name) {
+        errors.push(`Step missing id/name: ${JSON.stringify(step).slice(0, 50)}`);
+      }
+
+      if (step.type === 'loop' && !step.until && !step.while && !step.maxIterations) {
+        warnings.push(`Loop step "${step.id || step.name}" has no exit condition`);
+      }
+    }
+  } catch (err) {
+    errors.push(`Parse error: ${err.message}`);
+  }
+
+  return { valid: errors.length === 0, errors, warnings };
+}
+
+// Module exports
+module.exports = {
+  STEP_TYPES,
+  Workflow,
+  WorkflowContext,
+  loadWorkflow,
+  listWorkflows,
+  createWorkflowTemplate,
+  validateWorkflow,
+  executeCommand,
+  evaluateCondition
+};
+
+// CLI Handler
+if (require.main === module) {
+  const args = process.argv.slice(2);
+  const command = args[0];
+
+  async function main() {
+    switch (command) {
+      case 'list': {
+        const workflows = listWorkflows();
+
+        if (workflows.length === 0) {
+          console.log(`${c.dim}No workflows found.${c.reset}`);
+          console.log(`${c.dim}Create one with: flow workflow create <name>${c.reset}`);
+          return;
+        }
+
+        console.log(`\n${c.cyan}${c.bold}Available Workflows${c.reset}\n`);
+
+        for (const wf of workflows) {
+          if (wf.error) {
+            console.log(`${c.red}✗${c.reset} ${wf.name} ${c.dim}(${wf.error})${c.reset}`);
+          } else {
+            console.log(`${c.green}✓${c.reset} ${c.bold}${wf.name}${c.reset}`);
+            if (wf.description) {
+              console.log(`  ${c.dim}${wf.description}${c.reset}`);
+            }
+            console.log(`  ${c.dim}${wf.steps} step(s)${c.reset}`);
+          }
+        }
+        break;
+      }
+
+      case 'run': {
+        const name = args[1];
+        if (!name) {
+          console.error(`${c.red}Error: Workflow name required${c.reset}`);
+          process.exit(1);
+        }
+
+        console.log(`${c.cyan}Running workflow: ${name}${c.reset}\n`);
+
+        try {
+          const workflow = loadWorkflow(name);
+          const results = await workflow.run();
+
+          console.log('');
+          for (const step of results.steps) {
+            const icon = step.skipped ? `${c.dim}○` :
+                         step.success ? `${c.green}✓` : `${c.red}✗`;
+            const status = step.skipped ? 'skipped' :
+                          step.success ? 'passed' : 'failed';
+            console.log(`${icon}${c.reset} ${step.id} ${c.dim}(${status}, ${step.duration}ms)${c.reset}`);
+          }
+
+          console.log('');
+          if (results.success) {
+            console.log(`${c.green}✅ Workflow completed successfully${c.reset}`);
+          } else {
+            console.log(`${c.red}❌ Workflow failed${c.reset}`);
+            process.exit(1);
+          }
+        } catch (err) {
+          console.error(`${c.red}Error: ${err.message}${c.reset}`);
+          process.exit(1);
+        }
+        break;
+      }
+
+      case 'create': {
+        const name = args[1];
+        if (!name) {
+          console.error(`${c.red}Error: Workflow name required${c.reset}`);
+          process.exit(1);
+        }
+
+        const filePath = createWorkflowTemplate(name);
+        console.log(`${c.green}✅ Created workflow: ${filePath}${c.reset}`);
+        break;
+      }
+
+      case 'validate': {
+        const name = args[1];
+        if (!name) {
+          console.error(`${c.red}Error: Workflow name required${c.reset}`);
+          process.exit(1);
+        }
+
+        const result = validateWorkflow(name);
+
+        if (result.valid) {
+          console.log(`${c.green}✅ Workflow "${name}" is valid${c.reset}`);
+        } else {
+          console.log(`${c.red}❌ Workflow "${name}" has errors:${c.reset}`);
+          for (const err of result.errors) {
+            console.log(`   ${c.red}• ${err}${c.reset}`);
+          }
+        }
+
+        if (result.warnings.length > 0) {
+          console.log(`\n${c.yellow}Warnings:${c.reset}`);
+          for (const warn of result.warnings) {
+            console.log(`   ${c.yellow}• ${warn}${c.reset}`);
+          }
+        }
+
+        process.exit(result.valid ? 0 : 1);
+      }
+
+      default: {
+        console.log(`
+${c.cyan}Wogi Flow - Declarative Workflow Engine${c.reset}
+
+${c.bold}Usage:${c.reset}
+  flow workflow list                    List available workflows
+  flow workflow run <name>              Run a workflow
+  flow workflow create <name>           Create workflow template
+  flow workflow validate <name>         Validate workflow syntax
+
+${c.bold}Workflow YAML Format:${c.reset}
+  name: my-workflow
+  description: Description here
+  onError: abort   # abort | continue
+  maxIterations: 10
+
+  steps:
+    - id: lint
+      run: npm run lint
+
+    - id: conditional-test
+      when: \$environment == "dev"
+      run: npm test
+
+    - id: retry-loop
+      type: loop
+      maxIterations: 3
+      until: \$build_success == true
+      steps:
+        - run: npm run build
+
+${c.bold}Step Types:${c.reset}
+  command     Run shell command (default)
+  gate        Verification gate with recovery
+  loop        Bounded iteration
+  parallel    Run steps in parallel
+  conditional Branch based on conditions
+        `);
+      }
+    }
+  }
+
+  main().catch(err => {
+    console.error(`${c.red}Error: ${err.message}${c.reset}`);
+    process.exit(1);
+  });
+}
