@@ -153,19 +153,19 @@ AI agents appear "dumb" when they accumulate errors across files. By validating 
 5. **Update ready.json** - Move task to completed
 6. **Provide Task Completion Report** - See below
 
-### Task Completion Report (MANDATORY)
+### Task Completion Report
 
-After completing ANY task, provide a brief report:
+After completing a task, provide a brief report. This creates transparency about what context was used and helps identify gaps.
+
+**Skip for:** Trivial tasks (typos, single-line fixes, quick questions)
 
 ```
 📋 Task Completion Report
 
-Agents: [list agents read, e.g., developer.md] or "None"
-Skills: [list skills applied, e.g., nestjs] or "None"
+Agents: [list agents read] or "None"
+Skills: [list skills applied] or "None"
 Docs: [✅/❌] decisions.md [✅/❌] app-map.md [✅/❌] request-log.md
-Rules applied:
-  - [specific rule from decisions.md]
-  - [another rule]
+Rules applied: [key rules from decisions.md, or "Standard patterns"]
 ```
 
 **Example:**
@@ -173,8 +173,9 @@ Rules applied:
 📋 Task Completion Report
 
 Agents: developer.md
-Skills: None
+Skills: nestjs
 Docs: ✅ decisions.md ✅ app-map.md ✅ request-log.md
+Rules applied: Helper functions in src/utils/helpers/, kebab-case files
 ```
 
 ### Quality Gates (from config.json):
