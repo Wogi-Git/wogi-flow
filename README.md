@@ -1,4 +1,4 @@
-# Wogi Flow v1.4
+# Wogi Flow v1.5
 
 A self-improving AI development workflow that learns from your feedback and accumulates knowledge over time.
 
@@ -6,6 +6,7 @@ A self-improving AI development workflow that learns from your feedback and accu
 
 | Feature                   | Description                                                                                 |
 | ------------------------- | ------------------------------------------------------------------------------------------- |
+| **Figma Analyzer**        | Match Figma designs against existing components - reuse before recreating                   |
 | **Continual Learning**    | Skills automatically capture learnings from every session - knowledge persists and improves |
 | **Hybrid Mode**           | Claude plans, local LLM executes - save 85-95% tokens                                       |
 | **Self-Completing Tasks** | `/wogi-start` runs until truly done - no manual completion needed                           |
@@ -73,7 +74,8 @@ Daily commands for working with Wogi Flow. Start with `/wogi-ready` to see tasks
 
 ## Table of Contents
 
-- [Continual Learning Skills](#continual-learning-skills-new-in-v14)
+- [Figma Component Analyzer](#figma-component-analyzer-new-in-v15)
+- [Continual Learning Skills](#continual-learning-skills)
 - [Hybrid Mode](#hybrid-mode)
 - [Self-Completing Tasks](#self-completing-tasks)
 - [Task Management](#task-management)
@@ -86,7 +88,88 @@ Daily commands for working with Wogi Flow. Start with `/wogi-ready` to see tasks
 
 ---
 
-## Continual Learning Skills (New in v1.4)
+## Figma Component Analyzer (New in v1.5)
+
+Analyze Figma designs and match components against your existing codebase. Instead of generating all new code, it identifies what can be reused.
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Figma     │ ──▶ │   Extract   │ ──▶ │    Match    │
+│   Design    │     │  Components │     │  vs Codebase│
+└─────────────┘     └─────────────┘     └─────────────┘
+                                               │
+                    ┌──────────────────────────┼──────────────────────────┐
+                    ▼                          ▼                          ▼
+              ┌──────────┐              ┌──────────┐              ┌──────────┐
+              │ 95%+ Use │              │ 60-95%   │              │ <60% New │
+              │ Directly │              │ Variant? │              │Component │
+              └──────────┘              └──────────┘              └──────────┘
+```
+
+### Quick Start
+
+```bash
+# 1. Scan your codebase
+./scripts/flow figma scan
+
+# 2. Get Figma data via Figma MCP, save to file
+
+# 3. Analyze and match
+./scripts/flow figma analyze figma-data.json
+
+# 4. Interactive confirmation
+./scripts/flow figma confirm matches.json
+
+# 5. Generate code
+./scripts/flow figma generate
+```
+
+### Match Thresholds
+
+| Score   | Suggestion                     |
+| ------- | ------------------------------ |
+| 95%+    | Use directly                   |
+| 80-95%  | Use with minor adjustments     |
+| 60-80%  | Consider as variant            |
+| <60%    | Create new component           |
+
+### MCP Server
+
+Start the MCP server for Claude Desktop or Cursor:
+
+```bash
+./scripts/flow figma server        # stdio mode (default)
+./scripts/flow figma server 3847   # HTTP mode on port 3847
+```
+
+Add to Claude Desktop config:
+```json
+{
+  "mcpServers": {
+    "wogi-figma": {
+      "command": "node",
+      "args": ["/path/to/wogi-flow/scripts/flow-figma-mcp-server.js"]
+    }
+  }
+}
+```
+
+### Commands
+
+| Command                  | Description                    |
+| ------------------------ | ------------------------------ |
+| `flow figma scan`        | Scan codebase for components   |
+| `flow figma show [name]` | Show component details         |
+| `flow figma extract <f>` | Extract from Figma MCP data    |
+| `flow figma match <f>`   | Match against registry         |
+| `flow figma analyze <f>` | Extract + match (full pipeline)|
+| `flow figma confirm <f>` | Interactive confirmation       |
+| `flow figma generate`    | Generate code from decisions   |
+| `flow figma server`      | Start MCP server               |
+
+---
+
+## Continual Learning Skills
 
 Skills now automatically capture learnings from every session. Knowledge persists and improves over time without manual intervention.
 
@@ -438,6 +521,16 @@ flow hybrid disable             # Disable
 flow hybrid status              # Show config
 flow hybrid rollback            # Undo last execution
 
+# Figma Analyzer
+flow figma scan                 # Scan codebase for components
+flow figma show [name]          # Show component details
+flow figma extract <file>       # Extract from Figma MCP data
+flow figma match <file>         # Match against registry
+flow figma analyze <file>       # Full pipeline (extract + match)
+flow figma confirm <file>       # Interactive confirmation
+flow figma generate             # Generate code from decisions
+flow figma server               # Start MCP server
+
 # Workflow
 flow health                     # Check health
 flow standup                    # Generate standup
@@ -466,6 +559,7 @@ Quick reference for chat commands:
 | **Tasks**      | `/wogi-ready`, `/wogi-start`, `/wogi-loop`, `/wogi-done`, `/wogi-bulk`, `/wogi-status`, `/wogi-deps` |
 | **Create**     | `/wogi-story`, `/wogi-feature`, `/wogi-bug`                                                          |
 | **Components** | `/wogi-map`, `/wogi-map-add`, `/wogi-map-scan`, `/wogi-map-check`, `/wogi-map-sync`                  |
+| **Figma**      | `flow figma scan`, `flow figma analyze`, `flow figma confirm`, `flow figma generate`, `flow figma server` |
 | **Traces**     | `/wogi-trace`                                                                                        |
 | **Skills**     | `/wogi-skills`, `/wogi-skill-learn`                                                                  |
 | **Hybrid**     | `/wogi-hybrid-setup`, `/wogi-hybrid`, `/wogi-hybrid-off`, `/wogi-hybrid-status`                      |
@@ -488,12 +582,16 @@ Quick reference for chat commands:
 │   ├── component-index.json # Component index (auto-generated)
 │   ├── decisions.md         # Project rules
 │   ├── feedback-patterns.md # Learning tracker
-│   └── progress.md          # Session handoff notes
+│   ├── progress.md          # Session handoff notes
+│   ├── component-registry.json  # Figma codebase scan
+│   ├── figma-decisions.json     # Figma confirmations
+│   └── figma-output.json        # Figma generated output
 ├── traces/                  # Code trace documents
 └── tests/flows/             # Browser test flows
 
 skills/
 ├── _template/               # Template for new skills
+├── figma-analyzer/          # Figma design analyzer
 ├── nestjs/
 │   ├── skill.md
 │   ├── knowledge/           # Learnings, patterns, anti-patterns
@@ -539,6 +637,16 @@ After 3+ similar corrections → Claude suggests promoting to permanent instruct
 ---
 
 ## Changelog
+
+### v1.5.0 - Figma Component Analyzer
+
+- **Figma Component Analyzer**: Match Figma designs against existing codebase components
+- **Multi-framework support**: React, Vue, Svelte, Angular auto-detection
+- **Similarity matching**: Weighted scoring (CSS 35%, structure 25%, naming 20%, behavior 20%)
+- **Interactive confirmation**: Choose to reuse, add variant, or create new
+- **MCP Server**: Both stdio and HTTP modes for Claude Desktop/Cursor integration
+- **New commands**: `flow figma [scan|show|extract|match|analyze|confirm|generate|server]`
+- **New skill**: `skills/figma-analyzer/`
 
 ### v1.4.0 - Continual Learning Skills
 
