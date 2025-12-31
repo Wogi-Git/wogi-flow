@@ -42,7 +42,9 @@ const {
   buildExportMap,
   loadCachedExportMap,
   saveExportMapCache,
-  formatExportMapForTemplate
+  formatExportMapForTemplate,
+  validateComponentUsage,
+  formatComponentWithUsage
 } = require('./flow-export-scanner');
 
 // ============================================================
@@ -1455,38 +1457,71 @@ class ProjectContextGenerator {
 
   /**
    * Generate available imports section from export map
-   * Now includes components, hooks, services, types, and utils
+   * Now includes components with usage examples, hooks, services, types, and utils
    */
   generateAvailableImportsSection() {
     let section = '## Available Imports\n\n';
-    section += '**CRITICAL:** Only use imports listed below. DO NOT guess import paths.\n\n';
+    section += '**CRITICAL:** Only use imports listed below. DO NOT guess import paths.\n';
+    section += '**CRITICAL:** Use string literals for variant/size props, NOT object access.\n\n';
 
     const exportMap = this.getExportMap();
 
-    // Components
+    // Components - with usage examples and warnings
     if (Object.keys(exportMap.components).length > 0) {
       section += '### Components\n\n';
-      section += '```typescript\n';
+
       for (const [name, info] of Object.entries(exportMap.components)) {
-        if (info.exports.length > 0) {
-          section += `import { ${info.exports.join(', ')} } from '${info.importPath}';\n`;
-        } else if (info.defaultExport) {
-          section += `import ${info.defaultExport} from '${info.importPath}';\n`;
+        // Use the formatComponentWithUsage helper if component has details
+        if (info.usageExample || (info.arrayExports && info.arrayExports.length > 0)) {
+          section += formatComponentWithUsage(name, info);
+        } else {
+          // Fallback to simple format
+          section += `#### ${name}\n\n`;
+          section += '```typescript\n';
+          if (info.exports.length > 0) {
+            section += `import { ${info.exports.join(', ')} } from '${info.importPath}';\n`;
+          } else if (info.defaultExport) {
+            section += `import ${info.defaultExport} from '${info.importPath}';\n`;
+          }
+          section += '```\n\n';
         }
       }
-      section += '```\n\n';
+
+      // Collect all array exports for global warning
+      const allArrayExports = [];
+      for (const [name, info] of Object.entries(exportMap.components)) {
+        if (info.arrayExports && info.arrayExports.length > 0) {
+          allArrayExports.push(...info.arrayExports);
+        }
+      }
+
+      if (allArrayExports.length > 0) {
+        section += '#### ⚠️ CRITICAL: Array Exports Warning\n\n';
+        section += `The following exports are **ARRAYS** (for iteration), **NOT objects**:\n`;
+        section += `\`${allArrayExports.join('`, `')}\`\n\n`;
+        section += '**WRONG:** `variant={cardVariants.default}` ❌\n';
+        section += '**CORRECT:** `variant="default"` ✅\n\n';
+      }
     }
 
-    // Hooks
+    // Hooks - with file name vs export name warning
     if (Object.keys(exportMap.hooks).length > 0) {
       section += '### Hooks\n\n';
-      section += '```typescript\n';
-      for (const [name, info] of Object.entries(exportMap.hooks)) {
+      section += '**IMPORTANT:** Use exact hook names shown below. File names may differ from export names.\n\n';
+
+      for (const [fileName, info] of Object.entries(exportMap.hooks)) {
+        section += `#### ${fileName}\n`;
+        section += '```typescript\n';
         if (info.exports.length > 0) {
+          section += `// File: ${fileName}.ts\n`;
           section += `import { ${info.exports.join(', ')} } from '${info.importPath}';\n`;
         }
+        section += '```\n\n';
       }
-      section += '```\n\n';
+
+      section += '**Common Hook Mistakes:**\n';
+      section += '- ❌ `useAuthStore()` → Check actual export (might be `useAuthState()`)\n';
+      section += '- ❌ Using file name as function name → Use the actual exported function name\n\n';
     }
 
     // Services
@@ -1506,7 +1541,7 @@ class ProjectContextGenerator {
       section += '### Types\n\n';
       section += '```typescript\n';
       for (const [name, info] of Object.entries(exportMap.types)) {
-        if (info.types.length > 0) {
+        if (info.types && info.types.length > 0) {
           section += `import type { ${info.types.join(', ')} } from '${info.importPath}';\n`;
         }
       }

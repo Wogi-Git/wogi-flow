@@ -29,13 +29,14 @@ const CACHE_MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes
 /**
  * Extract exports from a TypeScript/JavaScript file
  * @param {string} filePath - Path to the file
- * @returns {{ namedExports: string[], defaultExport: string|null, types: string[] }}
+ * @returns {{ namedExports: string[], defaultExport: string|null, types: string[], arrayExports: string[] }}
  */
 function extractExports(filePath) {
   const result = {
     namedExports: [],
     defaultExport: null,
-    types: []
+    types: [],
+    arrayExports: [] // Exports that are arrays (for variant detection)
   };
 
   if (!fs.existsSync(filePath)) return result;
@@ -60,9 +61,29 @@ function extractExports(filePath) {
       result.types.push(...types);
     }
 
-    // Match export const/function/class X
-    const namedExportMatches = content.matchAll(/export\s+(?:const|let|var|function|class)\s+(\w+)/g);
+    // Match export const/function/class X and detect arrays
+    const namedExportMatches = content.matchAll(/export\s+(?:const|let|var)\s+(\w+)\s*(?::\s*\w+(?:\[\])?)?\s*=\s*(\[|\{|[^;]+)/g);
     for (const match of namedExportMatches) {
+      const exportName = match[1];
+      const valueStart = match[2].trim();
+
+      if (!result.namedExports.includes(exportName)) {
+        result.namedExports.push(exportName);
+      }
+
+      // Detect if this is an array export (common for variants)
+      if (valueStart === '[' ||
+          exportName.includes('Variants') ||
+          exportName.includes('Sizes') ||
+          exportName.includes('Statuses') ||
+          exportName.includes('Options')) {
+        result.arrayExports.push(exportName);
+      }
+    }
+
+    // Match export function/class
+    const funcExportMatches = content.matchAll(/export\s+(?:function|class)\s+(\w+)/g);
+    for (const match of funcExportMatches) {
       if (!result.namedExports.includes(match[1])) {
         result.namedExports.push(match[1]);
       }
@@ -96,17 +117,142 @@ function extractExports(filePath) {
 }
 
 /**
+ * Extract props interface and type aliases from a component file
+ * @param {string} filePath - Path to the component file
+ * @returns {{ props: Object, typeAliases: Object, usageExample: Object|null }}
+ */
+function extractComponentDetails(filePath) {
+  const result = {
+    props: {},
+    typeAliases: {},
+    usageExample: null
+  };
+
+  if (!fs.existsSync(filePath)) return result;
+
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+
+    // Extract props interface (e.g., interface ButtonProps { variant?: ButtonVariant; })
+    const propsMatch = content.match(/interface\s+(\w*Props)\s*\{([^}]+)\}/s);
+    if (propsMatch) {
+      const propLines = propsMatch[2].split('\n');
+      for (const line of propLines) {
+        // Match: propName?: TypeName or propName: TypeName
+        const propMatch = line.match(/^\s*(\w+)(\?)?:\s*([^;]+)/);
+        if (propMatch) {
+          const propName = propMatch[1];
+          const optional = !!propMatch[2];
+          const propType = propMatch[3].trim().replace(/;?\s*$/, '');
+
+          result.props[propName] = {
+            type: propType,
+            optional
+          };
+        }
+      }
+    }
+
+    // Extract type aliases for string literal unions
+    // e.g., type ButtonVariant = 'primary' | 'secondary' | 'outline'
+    const typeMatches = content.matchAll(/type\s+(\w+)\s*=\s*((['"][^'"]+['"](?:\s*\|\s*['"][^'"]+['"])*)|[^;]+)/g);
+    for (const match of typeMatches) {
+      const typeName = match[1];
+      const typeValue = match[2];
+
+      // Check if it's a string literal union
+      const literalMatches = typeValue.match(/['"]([^'"]+)['"]/g);
+      if (literalMatches) {
+        const values = literalMatches.map(v => v.replace(/['"]/g, ''));
+        result.typeAliases[typeName] = values;
+      }
+    }
+
+    // Also check for "as const" arrays that define variants
+    // e.g., const buttonVariants = ['primary', 'secondary'] as const
+    const constArrayMatches = content.matchAll(/(?:export\s+)?const\s+(\w+)\s*=\s*\[([^\]]+)\]\s*(?:as\s+const)?/g);
+    for (const match of constArrayMatches) {
+      const constName = match[1];
+      const arrayContent = match[2];
+
+      const literalMatches = arrayContent.match(/['"]([^'"]+)['"]/g);
+      if (literalMatches) {
+        const values = literalMatches.map(v => v.replace(/['"]/g, ''));
+        // Store as a pseudo-type for reference
+        result.typeAliases[`_array_${constName}`] = values;
+      }
+    }
+
+  } catch (e) {
+    // Ignore read errors
+  }
+
+  return result;
+}
+
+/**
+ * Generate a usage example for a component
+ * @param {string} componentName - Name of the component
+ * @param {Object} props - Extracted props
+ * @param {Object} typeAliases - Type aliases for string literal unions
+ * @returns {{ jsx: string, propsInfo: string[] }}
+ */
+function generateUsageExample(componentName, props, typeAliases) {
+  let example = `<${componentName}`;
+  const propsInfo = [];
+
+  // Important props to show in examples
+  const importantProps = ['variant', 'size', 'type', 'status', 'color', 'kind'];
+
+  for (const propName of importantProps) {
+    if (props[propName]) {
+      const propType = props[propName].type;
+
+      // Look up the type in our aliases
+      let values = typeAliases[propType];
+
+      // Also check for array-based variants
+      if (!values) {
+        // Try to find matching array (e.g., variant -> buttonVariants)
+        for (const [aliasName, aliasValues] of Object.entries(typeAliases)) {
+          if (aliasName.startsWith('_array_') &&
+              aliasName.toLowerCase().includes(propName.toLowerCase())) {
+            values = aliasValues;
+            break;
+          }
+        }
+      }
+
+      if (values && values.length > 0) {
+        const defaultValue = values[0];
+        example += ` ${propName}="${defaultValue}"`;
+        propsInfo.push(`${propName}="${values.join('" | "')}"`);
+      }
+    }
+  }
+
+  example += `>{children}</${componentName}>`;
+
+  return {
+    jsx: example,
+    propsInfo
+  };
+}
+
+/**
  * Scan a component/module directory for exports and resolve import path
  * @param {string} dirPath - Full path to the component directory
  * @param {string} baseImportPath - Base import path (e.g., '@/components')
- * @returns {{ exports: string[], types: string[], importPath: string, defaultExport: string|null }|null}
+ * @param {boolean} includeDetails - Whether to extract props and usage examples
+ * @returns {{ exports: string[], types: string[], importPath: string, defaultExport: string|null, arrayExports: string[], props: Object, usageExample: Object|null }|null}
  */
-function scanModuleExports(dirPath, baseImportPath) {
+function scanModuleExports(dirPath, baseImportPath, includeDetails = false) {
   const dirName = path.basename(dirPath);
 
   // Check for index file first
   const indexFiles = ['index.ts', 'index.tsx', 'index.js', 'index.jsx'];
   let mainFile = null;
+  let componentFile = null;
 
   for (const indexFile of indexFiles) {
     const indexPath = path.join(dirPath, indexFile);
@@ -116,15 +262,14 @@ function scanModuleExports(dirPath, baseImportPath) {
     }
   }
 
-  // If no index, try [DirName].tsx pattern
-  if (!mainFile) {
-    const componentFiles = [`${dirName}.tsx`, `${dirName}.ts`, `${dirName}.jsx`, `${dirName}.js`];
-    for (const compFile of componentFiles) {
-      const compPath = path.join(dirPath, compFile);
-      if (fs.existsSync(compPath)) {
-        mainFile = compPath;
-        break;
-      }
+  // Also find the main component file for props extraction
+  const componentFiles = [`${dirName}.tsx`, `${dirName}.ts`, `${dirName}.jsx`, `${dirName}.js`];
+  for (const compFile of componentFiles) {
+    const compPath = path.join(dirPath, compFile);
+    if (fs.existsSync(compPath)) {
+      componentFile = compPath;
+      if (!mainFile) mainFile = compPath;
+      break;
     }
   }
 
@@ -132,12 +277,27 @@ function scanModuleExports(dirPath, baseImportPath) {
 
   const result = extractExports(mainFile);
 
-  return {
+  const moduleResult = {
     exports: [...new Set(result.namedExports)],
     types: [...new Set(result.types)],
     defaultExport: result.defaultExport,
+    arrayExports: [...new Set(result.arrayExports)],
     importPath: `${baseImportPath}/${dirName}`
   };
+
+  // Extract props and generate usage example if requested
+  if (includeDetails && componentFile) {
+    const details = extractComponentDetails(componentFile);
+    moduleResult.props = details.props;
+    moduleResult.typeAliases = details.typeAliases;
+
+    // Generate usage example
+    if (Object.keys(details.props).length > 0) {
+      moduleResult.usageExample = generateUsageExample(dirName, details.props, details.typeAliases);
+    }
+  }
+
+  return moduleResult;
 }
 
 /**
@@ -185,13 +345,14 @@ function buildExportMap(config) {
     }
   };
 
-  // Scan component directories
+  // Scan component directories (with details for usage examples)
   const componentDirs = projectContext.componentDirs || ['src/components'];
   for (const dir of componentDirs) {
     const fullDir = path.join(PROJECT_ROOT, dir);
     if (!fs.existsSync(fullDir)) continue;
 
-    scanDirectory(fullDir, '@/components', exportMap.components);
+    // Include details (props, usage examples) for components
+    scanDirectory(fullDir, '@/components', exportMap.components, true);
   }
 
   // Scan hooks directory
@@ -245,8 +406,9 @@ function buildExportMap(config) {
 
 /**
  * Scan a directory containing subdirectories (like src/components/)
+ * @param {boolean} includeDetails - Whether to extract props and usage examples
  */
-function scanDirectory(dirPath, baseImportPath, target) {
+function scanDirectory(dirPath, baseImportPath, target, includeDetails = false) {
   try {
     const entries = fs.readdirSync(dirPath, { withFileTypes: true });
 
@@ -257,7 +419,7 @@ function scanDirectory(dirPath, baseImportPath, target) {
       if (['__tests__', '__mocks__', 'node_modules', '.git'].includes(entry.name)) continue;
 
       const modulePath = path.join(dirPath, entry.name);
-      const result = scanModuleExports(modulePath, baseImportPath);
+      const result = scanModuleExports(modulePath, baseImportPath, includeDetails);
 
       if (result && (result.exports.length > 0 || result.defaultExport)) {
         target[entry.name] = result;
@@ -437,6 +599,141 @@ function formatExportMapForTemplate(exportMap) {
 }
 
 // ============================================================
+// Component Usage Validation
+// ============================================================
+
+/**
+ * Validate component usage patterns in generated code
+ * @param {string} code - Generated code to validate
+ * @param {object} exportMap - Export map with array export info
+ * @returns {{ valid: boolean, errors: string[], warnings: string[] }}
+ */
+function validateComponentUsage(code, exportMap = null) {
+  const errors = [];
+  const warnings = [];
+
+  // Load export map if not provided
+  if (!exportMap) {
+    exportMap = loadCachedExportMap();
+    if (!exportMap) {
+      return { valid: true, errors: [], warnings: ['No export map available for validation'] };
+    }
+  }
+
+  // Collect all array exports from components
+  const arrayExports = new Set();
+  for (const [name, info] of Object.entries(exportMap.components || {})) {
+    if (info.arrayExports) {
+      info.arrayExports.forEach(e => arrayExports.add(e));
+    }
+  }
+
+  // Check for array-as-object access patterns
+  // e.g., cardVariants.default, buttonVariants.primary
+  const arrayAccessPattern = /(\w+(?:Variants|Sizes|Statuses|Options))\.(\w+)/g;
+  const matches = code.matchAll(arrayAccessPattern);
+
+  for (const match of matches) {
+    const exportName = match[1];
+    const accessedProp = match[2];
+
+    // If this is a known array export, it's wrong to access it as an object
+    if (arrayExports.has(exportName)) {
+      errors.push(
+        `Invalid usage: "${match[0]}" - ${exportName} is an ARRAY, not an object. ` +
+        `Use string literal: "${accessedProp}" instead of ${exportName}.${accessedProp}`
+      );
+    } else {
+      // Even if not in our export map, warn about common patterns
+      warnings.push(
+        `Suspicious pattern: "${match[0]}" - ${exportName} is likely an array. ` +
+        `Consider using string literal: "${accessedProp}"`
+      );
+    }
+  }
+
+  // Check for variant/size/type props using object access instead of string literals
+  // e.g., variant={buttonVariants.primary} instead of variant="primary"
+  const propObjectPattern = /(?:variant|size|type|status)=\{(\w+(?:Variants|Sizes|Types|Statuses))\.(\w+)\}/g;
+  const propMatches = code.matchAll(propObjectPattern);
+
+  for (const match of propMatches) {
+    const exportName = match[1];
+    const value = match[2];
+    errors.push(
+      `Invalid prop usage: "${match[0]}" - Use string literal instead: ` +
+      `variant="${value}" (NOT {${exportName}.${value}})`
+    );
+  }
+
+  // Check for hook file name vs export name mismatches
+  // Common pattern: use-auth-store.ts exports useAuthState, not useAuthStore
+  const hookPatterns = [
+    { pattern: /useAuthStore\(\)/g, suggestion: 'useAuthState()' },
+    { pattern: /useUserStore\(\)/g, suggestion: 'useUserState()' },
+    { pattern: /useCartStore\(\)/g, suggestion: 'useCartState()' },
+  ];
+
+  for (const { pattern, suggestion } of hookPatterns) {
+    if (pattern.test(code)) {
+      // Check if the actual export exists
+      const wrongName = pattern.source.replace(/\\/g, '').replace(/\(\)/g, '');
+      let found = false;
+      for (const [name, info] of Object.entries(exportMap.hooks || {})) {
+        if (info.exports?.includes(wrongName)) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        warnings.push(
+          `Possible hook name mistake: Check if "${wrongName}" is the correct export name. ` +
+          `File names often differ from export names (e.g., use-auth-store.ts might export ${suggestion.replace('()', '')})`
+        );
+      }
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings
+  };
+}
+
+/**
+ * Format component with usage example for context
+ * @param {string} name - Component name
+ * @param {object} info - Component info from export map
+ * @returns {string} Formatted markdown
+ */
+function formatComponentWithUsage(name, info) {
+  let output = `### ${name}\n\n`;
+  output += '```typescript\n';
+  output += `import { ${info.exports.join(', ')} } from '${info.importPath}';\n`;
+  output += '```\n\n';
+
+  // Add usage example
+  if (info.usageExample) {
+    output += '**Usage:**\n```tsx\n';
+    output += info.usageExample.jsx + '\n';
+    output += '```\n\n';
+
+    if (info.usageExample.propsInfo && info.usageExample.propsInfo.length > 0) {
+      output += '**Props:** ' + info.usageExample.propsInfo.join(', ') + '\n\n';
+    }
+  }
+
+  // Add warning about array exports
+  if (info.arrayExports && info.arrayExports.length > 0) {
+    output += `⚠️ **Warning:** \`${info.arrayExports.join('`, `')}\` are ARRAYS for iteration, not objects. `;
+    output += `Use string literals: \`variant="primary"\` NOT \`variant={${info.arrayExports[0]}.primary}\`\n\n`;
+  }
+
+  return output;
+}
+
+// ============================================================
 // CLI
 // ============================================================
 
@@ -519,11 +816,15 @@ if (require.main === module) {
 
 module.exports = {
   extractExports,
+  extractComponentDetails,
+  generateUsageExample,
   scanModuleExports,
   scanFileExports,
   buildExportMap,
   loadCachedExportMap,
   saveExportMapCache,
   clearCache,
-  formatExportMapForTemplate
+  formatExportMapForTemplate,
+  validateComponentUsage,
+  formatComponentWithUsage
 };

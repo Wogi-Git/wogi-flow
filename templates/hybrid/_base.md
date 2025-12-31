@@ -95,6 +95,48 @@ DO NOT import these: {{doNotImport}}
 - Write the code inline instead
 - Use a TODO comment: `// TODO: import X from '?'`
 
+## CRITICAL: Component Usage Rules
+
+These rules prevent the most common LLM mistakes:
+
+### 1. String Literals for Variants/Sizes (MANDATORY)
+
+**CORRECT:**
+```tsx
+<Button variant="primary" size="md">Click</Button>
+<Card variant="default">Content</Card>
+<Input size="lg" />
+```
+
+**WRONG (NEVER DO THIS):**
+```tsx
+<Button variant={buttonVariants.primary}>Click</Button>  // ❌ WRONG
+<Card variant={cardVariants.default}>Content</Card>      // ❌ WRONG
+<Input size={inputSizes.lg} />                           // ❌ WRONG
+```
+
+### 2. Exported Arrays Are for Iteration Only
+
+Constants like `buttonVariants`, `cardVariants`, `inputSizes` are **ARRAYS** like `['sm', 'md', 'lg']`:
+- ✅ Use them for: `buttonVariants.map(v => ...)` (iteration)
+- ❌ NOT for: `variant={buttonVariants.primary}` (object access)
+
+### 3. Hook Names ≠ File Names
+
+File: `use-auth-store.ts` might export: `useAuthState()`, NOT `useAuthStore()`
+- Always use the exact function name shown in the imports above
+- Never guess hook names based on file names
+
+### 4. When in Doubt, Use String Literals
+
+If you're unsure whether something is an array or object:
+```tsx
+// Always safe - string literals
+variant="primary"
+size="md"
+type="submit"
+```
+
 ## Code Rules
 
 1. Use TypeScript with proper types.
