@@ -95,13 +95,13 @@ backup_config() {
     fi
     
     # Backup any custom rules
-    if [ -d "$PROJECT_ROOT/.claude/rules" ] && [ "$(ls -A $PROJECT_ROOT/.claude/rules 2>/dev/null)" ]; then
+    if [ -d "$PROJECT_ROOT/.claude/rules" ] && [ "$(ls -A "$PROJECT_ROOT/.claude/rules" 2>/dev/null)" ]; then
         cp -r "$PROJECT_ROOT/.claude/rules" "$TEMP_DIR/rules.backup"
         echo -e "${GREEN}✓${NC} Custom rules backed up"
     fi
-    
+
     # Backup installed skills customizations
-    if [ -d "$PROJECT_ROOT/.claude/skills" ] && [ "$(ls -A $PROJECT_ROOT/.claude/skills 2>/dev/null)" ]; then
+    if [ -d "$PROJECT_ROOT/.claude/skills" ] && [ "$(ls -A "$PROJECT_ROOT/.claude/skills" 2>/dev/null)" ]; then
         cp -r "$PROJECT_ROOT/.claude/skills" "$TEMP_DIR/skills.backup"
         echo -e "${GREEN}✓${NC} Installed skills backed up"
     fi

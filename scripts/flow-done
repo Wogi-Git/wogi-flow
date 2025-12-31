@@ -36,14 +36,17 @@ if [ -f "$CONFIG_JSON" ]; then
     echo ""
     
     # Parse config and run gates
-    python3 << GATES
+    CONFIG_FILE="$CONFIG_JSON" REQUEST_LOG_FILE="$REQUEST_LOG" TASK_ID_ARG="$TASK_ID" python3 << 'GATES'
 import json
 import subprocess
 import sys
+import os
 
-with open('$CONFIG_JSON') as f:
+with open(os.environ['CONFIG_FILE']) as f:
     config = json.load(f)
 
+task_id = os.environ['TASK_ID_ARG']
+request_log = os.environ['REQUEST_LOG_FILE']
 gates = config.get('qualityGates', {}).get('feature', {}).get('require', [])
 testing = config.get('testing', {})
 failed = []
@@ -60,22 +63,22 @@ for gate in gates:
                 failed.append('tests')
         else:
             print('  \033[0;33m○\033[0m tests (not configured to run)')
-    
+
     elif gate == 'requestLogEntry':
         # Check if request-log has an entry for this task
         try:
-            with open('$REQUEST_LOG') as f:
+            with open(request_log) as f:
                 content = f.read()
-            if '$TASK_ID' in content or content.strip().endswith('---'):
+            if task_id in content or content.strip().endswith('---'):
                 print('  \033[0;33m○\033[0m requestLogEntry (verify manually)')
             else:
                 print('  \033[0;33m○\033[0m requestLogEntry (verify manually)')
         except:
             print('  \033[0;33m○\033[0m requestLogEntry (verify manually)')
-    
+
     elif gate == 'appMapUpdate':
         print('  \033[0;33m○\033[0m appMapUpdate (verify manually if components created)')
-    
+
     else:
         print(f'  \033[0;33m○\033[0m {gate} (manual check)')
 
@@ -91,12 +94,13 @@ GATES
     echo ""
 fi
 
-python3 << EOF
-import json
+READY_FILE="$READY_JSON" TASK_ID_ARG="$TASK_ID" python3 << 'EOF'
+import json, os
 
-task_id = "$TASK_ID"
+task_id = os.environ['TASK_ID_ARG']
+ready_file = os.environ['READY_FILE']
 
-with open('$READY_JSON') as f:
+with open(ready_file) as f:
     data = json.load(f)
 
 # Find task in inProgress
@@ -131,7 +135,7 @@ data['recentlyCompleted'] = completed[:10]  # Keep last 10
 from datetime import datetime
 data['lastUpdated'] = datetime.now().isoformat()
 
-with open('$READY_JSON', 'w') as f:
+with open(ready_file, 'w') as f:
     json.dump(data, f, indent=2)
 
 print(f'\033[0;32m✓ Completed: {task_id}\033[0m')

@@ -21,9 +21,9 @@ echo ""
 # Task counts
 if [ -f "$WORKFLOW_DIR/state/ready.json" ]; then
     echo -e "${CYAN}Tasks${NC}"
-    python3 << EOF
-import json
-with open('$WORKFLOW_DIR/state/ready.json') as f:
+    READY_FILE="$WORKFLOW_DIR/state/ready.json" python3 << 'EOF'
+import json, os
+with open(os.environ['READY_FILE']) as f:
     data = json.load(f)
 ready = len(data.get('ready', []))
 in_prog = len(data.get('inProgress', []))
@@ -93,9 +93,9 @@ fi
 # Config summary
 if [ -f "$WORKFLOW_DIR/config.json" ]; then
     echo -e "${CYAN}Config${NC}"
-    python3 << EOF
-import json
-with open('$WORKFLOW_DIR/config.json') as f:
+    CONFIG_FILE="$WORKFLOW_DIR/config.json" python3 << 'EOF'
+import json, os
+with open(os.environ['CONFIG_FILE']) as f:
     config = json.load(f)
 steps = config.get('mandatorySteps', {})
 after_task = steps.get('afterTask', [])

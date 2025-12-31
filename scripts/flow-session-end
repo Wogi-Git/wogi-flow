@@ -20,9 +20,9 @@ echo ""
 # Check config for onSessionEnd requirements
 if [ -f "$WORKFLOW_DIR/config.json" ]; then
     echo -e "${YELLOW}Checking session-end requirements...${NC}"
-    python3 << EOF
-import json
-with open('$WORKFLOW_DIR/config.json') as f:
+    CONFIG_FILE="$WORKFLOW_DIR/config.json" python3 << 'EOF'
+import json, os
+with open(os.environ['CONFIG_FILE']) as f:
     config = json.load(f)
 steps = config.get('mandatorySteps', {}).get('onSessionEnd', [])
 if steps:
@@ -69,9 +69,9 @@ fi
 
 # Extract skill learnings
 if [ -f "$WORKFLOW_DIR/config.json" ]; then
-    skill_learning=$(python3 -c "
-import json
-with open('$WORKFLOW_DIR/config.json') as f:
+    skill_learning=$(CONFIG_FILE="$WORKFLOW_DIR/config.json" python3 -c "
+import json, os
+with open(os.environ['CONFIG_FILE']) as f:
     config = json.load(f)
 sl = config.get('skillLearning', {})
 enabled = sl.get('enabled', False) and sl.get('autoExtract', False)

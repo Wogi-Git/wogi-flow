@@ -71,7 +71,7 @@ echo ""
 echo -e "${CYAN}Validating config.json...${NC}"
 
 if [ -f "$WORKFLOW_DIR/config.json" ]; then
-    if python3 -c "import json; json.load(open('$WORKFLOW_DIR/config.json'))" 2>/dev/null; then
+    if python3 -c "import json, sys; json.load(open(sys.argv[1]))" "$WORKFLOW_DIR/config.json" 2>/dev/null; then
         echo -e "  ${GREEN}✓${NC} Valid JSON"
     else
         echo -e "  ${RED}✗${NC} Invalid JSON syntax"
@@ -84,7 +84,7 @@ echo ""
 echo -e "${CYAN}Validating ready.json...${NC}"
 
 if [ -f "$WORKFLOW_DIR/state/ready.json" ]; then
-    if python3 -c "import json; json.load(open('$WORKFLOW_DIR/state/ready.json'))" 2>/dev/null; then
+    if python3 -c "import json, sys; json.load(open(sys.argv[1]))" "$WORKFLOW_DIR/state/ready.json" 2>/dev/null; then
         echo -e "  ${GREEN}✓${NC} Valid JSON"
     else
         echo -e "  ${RED}✗${NC} Invalid JSON syntax"

@@ -24,10 +24,10 @@ echo -e "${CYAN}Task Queue${NC}"
 echo "==========="
 echo ""
 
-python3 << EOF
-import json
+READY_FILE="$READY_JSON" python3 << 'EOF'
+import json, os
 
-with open('$READY_JSON') as f:
+with open(os.environ['READY_FILE']) as f:
     data = json.load(f)
 
 # Ready tasks

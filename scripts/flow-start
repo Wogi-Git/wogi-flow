@@ -24,12 +24,13 @@ if [ ! -f "$READY_JSON" ]; then
     exit 1
 fi
 
-python3 << EOF
-import json
+READY_FILE="$READY_JSON" TASK_ID_ARG="$TASK_ID" python3 << 'EOF'
+import json, os
 
-task_id = "$TASK_ID"
+task_id = os.environ['TASK_ID_ARG']
+ready_file = os.environ['READY_FILE']
 
-with open('$READY_JSON') as f:
+with open(ready_file) as f:
     data = json.load(f)
 
 # Find task in ready
@@ -64,7 +65,7 @@ data['inProgress'] = in_progress
 from datetime import datetime
 data['lastUpdated'] = datetime.now().isoformat()
 
-with open('$READY_JSON', 'w') as f:
+with open(ready_file, 'w') as f:
     json.dump(data, f, indent=2)
 
 print(f'\033[0;32m✓ Started: {task_id}\033[0m')

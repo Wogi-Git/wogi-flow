@@ -84,13 +84,13 @@ fi
 
 # Check 3: Run tests if configured
 if [ -f "$WORKFLOW_DIR/config.json" ]; then
-    run_tests=$(python3 -c "
-import json
-with open('$WORKFLOW_DIR/config.json') as f:
+    run_tests=$(CONFIG_FILE="$WORKFLOW_DIR/config.json" python3 -c "
+import json, os
+with open(os.environ['CONFIG_FILE']) as f:
     config = json.load(f)
 print(config.get('testing', {}).get('runBeforeCommit', False))
 " 2>/dev/null || echo "False")
-    
+
     if [ "$run_tests" = "True" ]; then
         echo "Running tests..."
         if npm test --silent 2>/dev/null; then
@@ -120,9 +120,9 @@ fi
 
 # Check 5: Skill Learning (extract learnings before commit)
 if [ -f "$WORKFLOW_DIR/config.json" ]; then
-    skill_learning=$(python3 -c "
-import json
-with open('$WORKFLOW_DIR/config.json') as f:
+    skill_learning=$(CONFIG_FILE="$WORKFLOW_DIR/config.json" python3 -c "
+import json, os
+with open(os.environ['CONFIG_FILE']) as f:
     config = json.load(f)
 sl = config.get('skillLearning', {})
 enabled = sl.get('enabled', False) and sl.get('autoExtract', False)

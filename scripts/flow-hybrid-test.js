@@ -8,7 +8,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 const PROJECT_ROOT = process.cwd();
 const TESTS = [];
@@ -63,7 +63,17 @@ test('Detection script exists and runs', () => {
   if (!fs.existsSync(scriptPath)) {
     throw new Error('flow-hybrid-detect.js not found');
   }
-  execSync(`node ${scriptPath} providers`, { encoding: 'utf-8', stdio: 'pipe' });
+  // Use spawnSync with array arguments to handle paths with spaces
+  const result = spawnSync('node', [scriptPath, 'providers'], {
+    encoding: 'utf-8',
+    stdio: 'pipe'
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(result.stderr || 'Detection script failed');
+  }
 });
 
 test('Orchestrator script exists', () => {
