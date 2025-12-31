@@ -1476,7 +1476,11 @@ class ProjectContextGenerator {
 
       for (const [name, info] of Object.entries(exportMap.components)) {
         // Use the formatComponentWithUsage helper if component has details
-        if (info.usageExample || (info.arrayExports && info.arrayExports.length > 0)) {
+        const hasDetails = info.usageExample ||
+          (info.props && Object.keys(info.props).length > 0) ||
+          (info.arrayExports && info.arrayExports.length > 0);
+
+        if (hasDetails) {
           section += formatComponentWithUsage(name, info);
         } else {
           // Fallback to simple format

@@ -153,29 +153,9 @@ function extractComponentDetails(filePath) {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
 
-    // Extract props interface (e.g., interface ButtonProps { variant?: ButtonVariant; })
-    const propsMatch = content.match(/interface\s+(\w*Props)\s*\{([^}]+)\}/s);
-    if (propsMatch) {
-      const propLines = propsMatch[2].split('\n');
-      for (const line of propLines) {
-        // Match: propName?: TypeName or propName: TypeName
-        const propMatch = line.match(/^\s*(\w+)(\?)?:\s*([^;]+)/);
-        if (propMatch) {
-          const propName = propMatch[1];
-          const optional = !!propMatch[2];
-          const propType = propMatch[3].trim().replace(/;?\s*$/, '');
-
-          result.props[propName] = {
-            type: propType,
-            optional
-          };
-        }
-      }
-    }
-
-    // Extract type aliases for string literal unions
+    // First extract type aliases so we can resolve prop types
     // e.g., type ButtonVariant = 'primary' | 'secondary' | 'outline'
-    const typeMatches = content.matchAll(/type\s+(\w+)\s*=\s*((['"][^'"]+['"](?:\s*\|\s*['"][^'"]+['"])*)|[^;]+)/g);
+    const typeMatches = content.matchAll(/type\s+(\w+)\s*=\s*((['"][^'"]+['"](?:\s*\|\s*['"][^'"]+['"])*)|[^;\n]+)/g);
     for (const match of typeMatches) {
       const typeName = match[1];
       const typeValue = match[2];
@@ -200,6 +180,46 @@ function extractComponentDetails(filePath) {
         const values = literalMatches.map(v => v.replace(/['"]/g, ''));
         // Store as a pseudo-type for reference
         result.typeAliases[`_array_${constName}`] = values;
+      }
+    }
+
+    // Extract props interfaces - handle nested braces with balanced matching
+    // Match: interface XxxProps { ... } or interface XxxProps extends YYY { ... }
+    const propsInterfaceRegex = /interface\s+(\w+Props)\s*(?:extends[^{]+)?\{/g;
+    let propsMatch;
+    while ((propsMatch = propsInterfaceRegex.exec(content)) !== null) {
+      const interfaceName = propsMatch[1];
+      const startIndex = propsMatch.index + propsMatch[0].length;
+
+      // Find matching closing brace with balanced brace counting
+      let braceCount = 1;
+      let endIndex = startIndex;
+      while (braceCount > 0 && endIndex < content.length) {
+        if (content[endIndex] === '{') braceCount++;
+        if (content[endIndex] === '}') braceCount--;
+        endIndex++;
+      }
+
+      const propsBody = content.slice(startIndex, endIndex - 1);
+
+      // Parse each prop line
+      const propLineRegex = /(\w+)(\?)?:\s*([^;\n]+)/g;
+      let propMatch;
+      while ((propMatch = propLineRegex.exec(propsBody)) !== null) {
+        const propName = propMatch[1];
+        const isOptional = !!propMatch[2];
+        let propType = propMatch[3].trim();
+
+        // Skip internal props (starting with $ or _)
+        if (propName.startsWith('$') || propName.startsWith('_')) continue;
+
+        // Clean up type (remove comments, simplify)
+        propType = propType.replace(/\/\*.*?\*\//g, '').trim();
+
+        result.props[propName] = {
+          type: propType,
+          optional: isOptional
+        };
       }
     }
 
@@ -744,26 +764,71 @@ function validateComponentUsage(code, exportMap = null) {
  * @returns {string} Formatted markdown
  */
 function formatComponentWithUsage(name, info) {
-  let output = `### ${name}\n\n`;
+  let output = `#### ${name}\n\n`;
   output += '```typescript\n';
-  output += `import { ${info.exports.join(', ')} } from '${info.importPath}';\n`;
+  if (info.exports.length > 0) {
+    output += `import { ${info.exports.join(', ')} } from '${info.importPath}';\n`;
+  } else if (info.defaultExport) {
+    output += `import ${info.defaultExport} from '${info.importPath}';\n`;
+  }
   output += '```\n\n';
+
+  // Show props table if available
+  if (info.props && Object.keys(info.props).length > 0) {
+    output += '**Props:**\n';
+
+    // Important props to show first (styling/behavior related)
+    const importantProps = ['variant', 'size', 'padding', 'status', 'type', 'color', 'disabled', 'checked', 'onChange', 'onClick', 'children'];
+    const shownProps = new Set();
+
+    // Show important props first
+    for (const propName of importantProps) {
+      if (info.props[propName]) {
+        const propInfo = info.props[propName];
+        const optional = propInfo.optional ? '?' : '';
+        let typeDisplay = propInfo.type;
+
+        // Resolve type alias to actual values if available
+        if (info.typeAliases && info.typeAliases[propInfo.type]) {
+          typeDisplay = `"${info.typeAliases[propInfo.type].join('" | "')}"`;
+        }
+
+        output += `- \`${propName}${optional}\`: ${typeDisplay}\n`;
+        shownProps.add(propName);
+      }
+    }
+
+    // Show remaining props (up to 3 more non-event, non-internal props)
+    let extraCount = 0;
+    for (const [propName, propInfo] of Object.entries(info.props)) {
+      if (shownProps.has(propName)) continue;
+      if (propName.startsWith('on') && propName !== 'onChange' && propName !== 'onClick') continue;
+      if (extraCount >= 3) break;
+
+      const optional = propInfo.optional ? '?' : '';
+      let typeDisplay = propInfo.type;
+
+      if (info.typeAliases && info.typeAliases[propInfo.type]) {
+        typeDisplay = `"${info.typeAliases[propInfo.type].join('" | "')}"`;
+      }
+
+      output += `- \`${propName}${optional}\`: ${typeDisplay}\n`;
+      extraCount++;
+    }
+
+    output += '\n';
+  }
 
   // Add usage example
   if (info.usageExample) {
     output += '**Usage:**\n```tsx\n';
     output += info.usageExample.jsx + '\n';
     output += '```\n\n';
-
-    if (info.usageExample.propsInfo && info.usageExample.propsInfo.length > 0) {
-      output += '**Props:** ' + info.usageExample.propsInfo.join(', ') + '\n\n';
-    }
   }
 
   // Add warning about array exports
   if (info.arrayExports && info.arrayExports.length > 0) {
-    output += `⚠️ **Warning:** \`${info.arrayExports.join('`, `')}\` are ARRAYS for iteration, not objects. `;
-    output += `Use string literals: \`variant="primary"\` NOT \`variant={${info.arrayExports[0]}.primary}\`\n\n`;
+    output += `⚠️ \`${info.arrayExports.join('`, `')}\` are arrays for iteration, NOT objects.\n\n`;
   }
 
   return output;
