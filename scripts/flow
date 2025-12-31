@@ -76,6 +76,18 @@ show_help() {
     echo "Docs:"
     echo "  changelog            Generate changelog from request-log"
     echo ""
+    echo "Parallel Execution:"
+    echo "  parallel config      Show parallel execution config"
+    echo "  parallel check       Check tasks for parallel potential"
+    echo "  parallel enable      Enable parallel execution"
+    echo "  parallel disable     Disable parallel execution"
+    echo ""
+    echo "Worktree Isolation:"
+    echo "  worktree enable      Enable worktree isolation for tasks"
+    echo "  worktree disable     Disable worktree isolation"
+    echo "  worktree list        List active task worktrees"
+    echo "  worktree cleanup     Remove stale worktrees"
+    echo ""
     echo "Hybrid Mode:"
     echo "  hybrid enable        Enable hybrid mode (Claude plans, local LLM executes)"
     echo "  hybrid disable       Disable hybrid mode"
@@ -177,6 +189,56 @@ case "${1:-}" in
         ;;
     watch)
         "$SCRIPT_DIR/flow-watch" "${@:2}"
+        ;;
+    parallel)
+        case "${2:-config}" in
+            config)
+                node "$SCRIPT_DIR/flow-parallel.js" config
+                ;;
+            check)
+                node "$SCRIPT_DIR/flow-parallel.js" check
+                ;;
+            enable)
+                jq '.parallel.enabled = true' "$PROJECT_ROOT/.workflow/config.json" > /tmp/cfg.tmp && mv /tmp/cfg.tmp "$PROJECT_ROOT/.workflow/config.json"
+                echo "✅ Parallel execution enabled"
+                ;;
+            disable)
+                jq '.parallel.enabled = false' "$PROJECT_ROOT/.workflow/config.json" > /tmp/cfg.tmp && mv /tmp/cfg.tmp "$PROJECT_ROOT/.workflow/config.json"
+                echo "✅ Parallel execution disabled"
+                ;;
+            auto-approve)
+                jq '.parallel.autoApprove = true' "$PROJECT_ROOT/.workflow/config.json" > /tmp/cfg.tmp && mv /tmp/cfg.tmp "$PROJECT_ROOT/.workflow/config.json"
+                echo "✅ Parallel auto-approve enabled"
+                ;;
+            *)
+                echo "Usage: flow parallel [config|check|enable|disable|auto-approve]"
+                ;;
+        esac
+        ;;
+    worktree)
+        case "${2:-list}" in
+            enable)
+                jq '.worktree.enabled = true' "$PROJECT_ROOT/.workflow/config.json" > /tmp/cfg.tmp && mv /tmp/cfg.tmp "$PROJECT_ROOT/.workflow/config.json"
+                echo "✅ Worktree isolation enabled"
+                echo "Tasks will now run in isolated git worktrees for safe parallel execution"
+                ;;
+            disable)
+                jq '.worktree.enabled = false' "$PROJECT_ROOT/.workflow/config.json" > /tmp/cfg.tmp && mv /tmp/cfg.tmp "$PROJECT_ROOT/.workflow/config.json"
+                echo "✅ Worktree isolation disabled"
+                ;;
+            list)
+                node "$SCRIPT_DIR/flow-worktree.js" list
+                ;;
+            cleanup)
+                node "$SCRIPT_DIR/flow-worktree.js" cleanup
+                ;;
+            status)
+                jq '.worktree' "$PROJECT_ROOT/.workflow/config.json"
+                ;;
+            *)
+                echo "Usage: flow worktree [enable|disable|list|cleanup|status]"
+                ;;
+        esac
         ;;
     hybrid)
         case "${2:-status}" in

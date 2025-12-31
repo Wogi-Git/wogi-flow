@@ -12,6 +12,13 @@
     "commitEvery": 3,
     "pauseBetweenScenarios": false
   },
+  "parallel": {
+    "enabled": true,
+    "maxConcurrent": 3,
+    "autoApprove": false,
+    "requireWorktree": true,
+    "showProgress": true
+  },
   "corrections": {
     "mode": "inline",
     "detailPath": ".workflow/corrections"
@@ -124,6 +131,12 @@
     "saveTo": ".workflow/traces",
     "generateDiagrams": true
   },
+  "worktree": {
+    "enabled": false,
+    "autoCleanupHours": 24,
+    "keepOnFailure": false,
+    "squashOnMerge": true
+  },
   "hybrid": {
     "enabled": false,
     "provider": null,
@@ -132,7 +145,7 @@
     "settings": {
       "temperature": 0.7,
       "maxTokens": 4096,
-      "maxRetries": 2,
+      "maxRetries": 20,
       "timeout": 120000,
       "autoExecute": false,
       "createBranch": false,

@@ -104,7 +104,7 @@ function loadHybridConfig() {
     temperature: hybrid.settings?.temperature ?? 0.7,
     // Local LLM tokens are FREE - don't limit output artificially
     maxTokens: hybrid.settings?.maxTokens ?? 16384,
-    maxRetries: hybrid.settings?.maxRetries ?? 2,
+    maxRetries: hybrid.settings?.maxRetries ?? 20,
     timeout: hybrid.settings?.timeout ?? 120000,
     autoExecute: hybrid.settings?.autoExecute ?? false,
     // Context window can be overridden in config, otherwise auto-detected from model
@@ -3132,8 +3132,57 @@ class Orchestrator {
     const initialTokens = estimateTokens(prompt);
     log('dim', `   Prompt size: ~${initialTokens.toLocaleString()} tokens (includes project context - FREE)`);
 
+    // Smart retry tracking - detect stuck loops and progress
+    const errorHistory = [];
+    const errorSignatures = new Map(); // Track how many times we see each error pattern
+    let consecutiveSameError = 0;
+    let lastErrorSignature = null;
+
+    /**
+     * Extract a signature from an error message for comparison
+     * Normalizes variable parts (line numbers, specific values) to detect same error type
+     */
+    const getErrorSignature = (errorMsg) => {
+      if (!errorMsg) return 'unknown';
+      return errorMsg
+        .replace(/line \d+/gi, 'line N')
+        .replace(/:\d+:\d+/g, ':N:N')
+        .replace(/'[^']+'/g, "'X'")
+        .replace(/"[^"]+"/g, '"X"')
+        .replace(/\d+/g, 'N')
+        .substring(0, 100);
+    };
+
+    /**
+     * Categorize error type for targeted fix strategies
+     */
+    const categorizeError = (errorMsg) => {
+      if (!errorMsg) return 'unknown';
+      const msg = errorMsg.toLowerCase();
+      if (msg.includes('cannot find module') || msg.includes('import')) return 'import';
+      if (msg.includes('type') && (msg.includes('not assignable') || msg.includes('missing'))) return 'type';
+      if (msg.includes('syntax') || msg.includes('unexpected token')) return 'syntax';
+      if (msg.includes('eslint') || msg.includes('prettier')) return 'lint';
+      if (msg.includes('semantic') || msg.includes('confidence')) return 'semantic';
+      return 'other';
+    };
+
     for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
       result.attempts = attempt + 1;
+
+      // Smart retry: Check if we're stuck in a loop
+      if (consecutiveSameError >= 3) {
+        log('red', `   ⚠️ Same error repeated ${consecutiveSameError} times - escalating`);
+        result.errors.push(`Stuck on error: ${lastErrorSignature}`);
+        result.escalate = true;
+        break;
+      }
+
+      // Smart retry: If we've seen 5+ different errors, we might be thrashing
+      if (errorHistory.length >= 5 && new Set(errorHistory.map(e => e.category)).size >= 4) {
+        log('yellow', `   ⚠️ Multiple error types encountered - may need different approach`);
+      }
+
       log('dim', `   Attempt ${attempt + 1}/${this.config.maxRetries + 1}...`);
 
       try {
@@ -3269,17 +3318,60 @@ class Orchestrator {
           log('yellow', `   ⚠️ Validation failed: ${failedCheck.check}`);
           log('dim', `      ${failedCheck.message.slice(0, 100)}`);
 
-          prompt += `\n\n## PREVIOUS ERROR\n\n${failedCheck.message}\n\nFix this error and output the corrected code.`;
+          // Smart retry: Track this error
+          const errorSig = getErrorSignature(failedCheck.message);
+          const errorCat = categorizeError(failedCheck.message);
+          errorHistory.push({ message: failedCheck.message, signature: errorSig, category: errorCat });
+
+          if (errorSig === lastErrorSignature) {
+            consecutiveSameError++;
+            log('dim', `   (Same error ${consecutiveSameError}x)`);
+          } else {
+            consecutiveSameError = 1;
+            lastErrorSignature = errorSig;
+            // Progress! Different error means we fixed something
+            if (errorHistory.length > 1) {
+              log('dim', `   (Different error - making progress)`);
+            }
+          }
+
+          // Apply category-specific fix hints
+          let fixHint = '';
+          if (errorCat === 'import') {
+            fixHint = '\n\n**HINT**: Check the "Available Imports" section above. Use ONLY those exact paths.';
+          } else if (errorCat === 'type') {
+            fixHint = '\n\n**HINT**: Check the Props section for correct types. Use string literals for variants.';
+          } else if (errorCat === 'syntax') {
+            fixHint = '\n\n**HINT**: Output ONLY valid code. No markdown, no explanations, no ```code blocks.';
+          }
+
+          prompt += `\n\n## PREVIOUS ERROR\n\n${failedCheck.message}${fixHint}\n\nFix this error and output the corrected code.`;
         }
       } catch (e) {
         result.errors.push(e.message);
         log('red', `   ❌ Error: ${e.message}`);
+
+        // Smart retry: Track catch errors too
+        const errorSig = getErrorSignature(e.message);
+        const errorCat = categorizeError(e.message);
+        errorHistory.push({ message: e.message, signature: errorSig, category: errorCat });
+
+        if (errorSig === lastErrorSignature) {
+          consecutiveSameError++;
+        } else {
+          consecutiveSameError = 1;
+          lastErrorSignature = errorSig;
+        }
       }
     }
 
     result.escalate = true;
     this.state.updateRequestLog(step, 'failed - needs escalation', 'hybrid', this.config.model);
     log('red', `   ❌ Step failed after ${result.attempts} attempts`);
+    if (errorHistory.length > 0) {
+      const errorTypes = [...new Set(errorHistory.map(e => e.category))];
+      log('dim', `   Error types encountered: ${errorTypes.join(', ')}`);
+    }
     log('yellow', `   ⬆️ Flagged for escalation to Claude`);
 
     return result;
