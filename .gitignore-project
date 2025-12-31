@@ -23,6 +23,10 @@
 .workflow/tests/flows/*.tmp
 .workflow/archive/*.bak
 
+# === Hybrid mode cache files (auto-generated) ===
+.workflow/state/export-map.json
+.workflow/state/hybrid-context.md
+
 # === Note ===
 # The update command (./scripts/flow update) will NEVER overwrite:
 # - .workflow/config.json (your settings)
