@@ -4,17 +4,17 @@ A self-improving AI development workflow that learns from your feedback and accu
 
 ## Key Features
 
-| Feature | Description |
-|---------|-------------|
-| **Continual Learning** | Skills automatically capture learnings from every session - knowledge persists and improves |
-| **Hybrid Mode** | Claude plans, local LLM executes - save 85-95% tokens |
-| **Self-Completing Tasks** | `/wogi-start` runs until truly done - no manual completion needed |
-| **Autonomous Loops** | `/wogi-loop` for ad-hoc work that continues until criteria are met |
-| **Component Registry** | Tracks all components to prevent duplication |
-| **Code Traces** | Task-focused flow documentation with diagrams |
-| **Quality Gates** | Configurable mandatory steps per task type |
-| **Skills System** | Modular add-ons for specific tech stacks with accumulated knowledge |
-| **Profile Sharing** | Export refined workflows for your team |
+| Feature                   | Description                                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------- |
+| **Continual Learning**    | Skills automatically capture learnings from every session - knowledge persists and improves |
+| **Hybrid Mode**           | Claude plans, local LLM executes - save 85-95% tokens                                       |
+| **Self-Completing Tasks** | `/wogi-start` runs until truly done - no manual completion needed                           |
+| **Autonomous Loops**      | `/wogi-loop` for ad-hoc work that continues until criteria are met                          |
+| **Component Registry**    | Tracks all components to prevent duplication                                                |
+| **Code Traces**           | Task-focused flow documentation with diagrams                                               |
+| **Quality Gates**         | Configurable mandatory steps per task type                                                  |
+| **Skills System**         | Modular add-ons for specific tech stacks with accumulated knowledge                         |
+| **Profile Sharing**       | Export refined workflows for your team                                                      |
 
 ## Quick Start
 
@@ -30,8 +30,45 @@ curl -fsSL https://raw.githubusercontent.com/Wogi-Git/wogi-flow/main/install.sh 
 ```
 
 For existing projects:
+
 ```bash
 ./scripts/flow onboard
+```
+
+## Developer Workflow
+
+Daily commands for working with Wogi Flow. Start with `/wogi-ready` to see tasks, use `/wogi-start` to begin work, and `/wogi-session-end` to save progress.
+
+```
+# Session Init
+/wogi-ready                    # Show available tasks
+/wogi-status                   # Project overview
+/wogi-context TASK-012         # Load task context
+
+# Execution
+/wogi-start TASK-012           # Start working on task
+/wogi-loop "Migrate API"       # Run until done (for refactors)
+
+# Backlog Management
+/wogi-story "Add user avatar"  # Create task with acceptance criteria
+/wogi-bug "Login fails"        # Report a bug
+/wogi-feature user-settings    # Create feature with subtasks
+
+# Pre-implementation Check
+/wogi-map                      # Check existing components
+/wogi-trace "auth flow"        # Analyze code flow
+/wogi-deps TASK-015            # Show task dependencies
+
+# Session Checkpoint
+/wogi-session-end              # Save progress and commit
+
+# Context Management (Critical)
+/wogi-compact                  # Free up context (use after 2-3 tasks)
+
+# Utilities
+/wogi-health                   # Check workflow integrity
+/wogi-search "#tag"            # Search request-log
+/wogi-skills                   # List installed skills
 ```
 
 ## Table of Contents
@@ -141,25 +178,26 @@ Save 85-95% of tokens by having Claude create execution plans that local LLMs ex
 ```
 
 **Requirements:**
+
 - [Ollama](https://ollama.ai/) or [LM Studio](https://lmstudio.ai/)
 - Recommended: `nemotron-3-nano`, `qwen3-coder:30b`, or `deepseek-coder:33b`
 
 ### Token Savings
 
-| Task Size | Normal | Hybrid | Savings |
-|-----------|--------|--------|---------|
-| Small (3 files) | ~8K | ~1.2K | 85% |
-| Medium (8 files) | ~20K | ~1.8K | 91% |
-| Large (15+ files) | ~45K | ~2.5K | 94% |
+| Task Size         | Normal | Hybrid | Savings |
+| ----------------- | ------ | ------ | ------- |
+| Small (3 files)   | ~8K    | ~1.2K  | 85%     |
+| Medium (8 files)  | ~20K   | ~1.8K  | 91%     |
+| Large (15+ files) | ~45K   | ~2.5K  | 94%     |
 
 ### Commands
 
-| Command | Description |
-|---------|-------------|
-| `flow hybrid enable` | Enable with setup wizard |
-| `flow hybrid disable` | Disable hybrid mode |
-| `flow hybrid status` | Show configuration |
-| `flow hybrid rollback` | Undo last execution |
+| Command                | Description              |
+| ---------------------- | ------------------------ |
+| `flow hybrid enable`   | Enable with setup wizard |
+| `flow hybrid disable`  | Disable hybrid mode      |
+| `flow hybrid status`   | Show configuration       |
+| `flow hybrid rollback` | Undo last execution      |
 
 ---
 
@@ -228,6 +266,7 @@ Stories are created with Given/When/Then acceptance criteria:
 # [TASK-012] Forgot Password Link
 
 ## User Story
+
 **As a** user who forgot my password
 **I want** to request a reset from login
 **So that** I can regain access
@@ -235,6 +274,7 @@ Stories are created with Given/When/Then acceptance criteria:
 ## Acceptance Criteria
 
 ### Scenario 1: Navigate to reset
+
 **Given** I am on login page
 **When** I click "Forgot password?"
 **Then** I navigate to /forgot-password
@@ -249,15 +289,17 @@ Two-layer system prevents component duplication:
 ### 1. Curated `app-map.md`
 
 Human-maintained with rich context:
+
 ```markdown
-| Component | Variants | Description |
-|-----------|----------|-------------|
-| Button | primary, secondary | Main action button |
+| Component | Variants           | Description        |
+| --------- | ------------------ | ------------------ |
+| Button    | primary, secondary | Main action button |
 ```
 
 ### 2. Auto-generated `component-index.json`
 
 Machine-generated, always current:
+
 ```bash
 ./scripts/flow map-index scan   # Scan codebase
 ./scripts/flow map-sync         # Compare with app-map
@@ -276,6 +318,7 @@ Generate task-focused documentation of code flows:
 ```
 
 Traces include:
+
 - High-level flow overview
 - Execution steps with file/line references
 - Mermaid diagrams
@@ -289,11 +332,11 @@ Skills are modular add-ons for specific tech stacks that accumulate knowledge ov
 
 ### Available Skills
 
-| Skill | Description | Commands |
-|-------|-------------|----------|
-| `nestjs` | NestJS module builder | `/nestjs-scaffold`, `/nestjs-entity`, `/nestjs-db` |
-| `react` | React component patterns | `/react-component`, `/react-hook` |
-| `python` | Python/FastAPI patterns | `/python-endpoint`, `/python-test` |
+| Skill    | Description              | Commands                                           |
+| -------- | ------------------------ | -------------------------------------------------- |
+| `nestjs` | NestJS module builder    | `/nestjs-scaffold`, `/nestjs-entity`, `/nestjs-db` |
+| `react`  | React component patterns | `/react-component`, `/react-hook`                  |
+| `python` | Python/FastAPI patterns  | `/python-endpoint`, `/python-test`                 |
 
 ### Install Skills
 
@@ -305,6 +348,7 @@ Skills are modular add-ons for specific tech stacks that accumulate knowledge ov
 ### Using Skills
 
 When working on files that match a skill's patterns, Claude automatically:
+
 1. Loads the skill's `knowledge/patterns.md`
 2. Checks `knowledge/anti-patterns.md` to avoid mistakes
 3. Updates learnings after task completion
@@ -336,6 +380,7 @@ When working on files that match a skill's patterns, Claude automatically:
 ### Natural Language Config
 
 Tell Claude what you want:
+
 - "Always run tests after completing a task"
 - "Require review before any commit"
 
@@ -343,12 +388,12 @@ Claude updates `config.json` accordingly.
 
 ### Optional Features
 
-| Feature | Enable |
-|---------|--------|
-| Storybook stories | `/wogi-config storybook on` |
-| Pre-commit hooks | `./scripts/flow setup-hooks install` |
-| Phase planning | Set `phases.enabled: true` in config |
-| Strict mode | Set `strictMode` options in config |
+| Feature           | Enable                               |
+| ----------------- | ------------------------------------ |
+| Storybook stories | `/wogi-config storybook on`          |
+| Pre-commit hooks  | `./scripts/flow setup-hooks install` |
+| Phase planning    | Set `phases.enabled: true` in config |
+| Strict mode       | Set `strictMode` options in config   |
 
 ---
 
@@ -416,18 +461,18 @@ flow setup-hooks uninstall      # Remove hooks
 
 Quick reference for chat commands:
 
-| Category | Commands |
-|----------|----------|
-| **Tasks** | `/wogi-ready`, `/wogi-start`, `/wogi-loop`, `/wogi-done`, `/wogi-bulk`, `/wogi-status`, `/wogi-deps` |
-| **Create** | `/wogi-story`, `/wogi-feature`, `/wogi-bug` |
-| **Components** | `/wogi-map`, `/wogi-map-add`, `/wogi-map-scan`, `/wogi-map-check`, `/wogi-map-sync` |
-| **Traces** | `/wogi-trace` |
-| **Skills** | `/wogi-skills`, `/wogi-skill-learn` |
-| **Hybrid** | `/wogi-hybrid-setup`, `/wogi-hybrid`, `/wogi-hybrid-off`, `/wogi-hybrid-status` |
-| **Workflow** | `/wogi-health`, `/wogi-standup`, `/wogi-session-end`, `/wogi-search`, `/wogi-context` |
-| **Config** | `/wogi-config` |
-| **Team** | `/wogi-export`, `/wogi-import`, `/wogi-changelog` |
-| **Help** | `/wogi-help` |
+| Category       | Commands                                                                                             |
+| -------------- | ---------------------------------------------------------------------------------------------------- |
+| **Tasks**      | `/wogi-ready`, `/wogi-start`, `/wogi-loop`, `/wogi-done`, `/wogi-bulk`, `/wogi-status`, `/wogi-deps` |
+| **Create**     | `/wogi-story`, `/wogi-feature`, `/wogi-bug`                                                          |
+| **Components** | `/wogi-map`, `/wogi-map-add`, `/wogi-map-scan`, `/wogi-map-check`, `/wogi-map-sync`                  |
+| **Traces**     | `/wogi-trace`                                                                                        |
+| **Skills**     | `/wogi-skills`, `/wogi-skill-learn`                                                                  |
+| **Hybrid**     | `/wogi-hybrid-setup`, `/wogi-hybrid`, `/wogi-hybrid-off`, `/wogi-hybrid-status`                      |
+| **Workflow**   | `/wogi-health`, `/wogi-standup`, `/wogi-session-end`, `/wogi-search`, `/wogi-context`                |
+| **Config**     | `/wogi-config`                                                                                       |
+| **Team**       | `/wogi-export`, `/wogi-import`, `/wogi-changelog`                                                    |
+| **Help**       | `/wogi-help`                                                                                         |
 
 ---
 
@@ -472,7 +517,7 @@ Wogi Flow learns from your corrections:
 1. **Correction** → You correct Claude's work
 2. **Fix** → Claude fixes immediately
 3. **Learn** → Claude asks to persist the rule
-4. **Update** → Updates decisions.md / agents/*.md / config.json / skills
+4. **Update** → Updates decisions.md / agents/\*.md / config.json / skills
 5. **Track** → Logs to feedback-patterns.md
 
 After 3+ similar corrections → Claude suggests promoting to permanent instruction.
@@ -496,6 +541,7 @@ After 3+ similar corrections → Claude suggests promoting to permanent instruct
 ## Changelog
 
 ### v1.4.0 - Continual Learning Skills
+
 - **Automatic skill learning**: Knowledge captured at pre-commit, task completion, session end
 - **New skill structure**: `knowledge/` directory with learnings, patterns, anti-patterns
 - **Agents use skills**: Developer agent loads relevant skill knowledge before tasks
@@ -504,22 +550,26 @@ After 3+ similar corrections → Claude suggests promoting to permanent instruct
 - **Config section**: `skillLearning` in config.json
 
 ### v1.3.0 - Hybrid Mode
+
 - **Hybrid mode**: Claude plans, local LLM executes - 85-95% token savings
 - **Supports**: Ollama and LM Studio
 - **Features**: Rollback, escalation, template system
 - **New commands**: `flow hybrid [enable|disable|status|rollback]`
 
 ### v1.2.0 - Self-Completing Loops
+
 - **Self-completing `/wogi-start`**: Tasks run until truly done
 - **New `/wogi-loop`**: Autonomous loops for ad-hoc work
 - **Options**: `--no-loop`, `--pause-between`, `--max-retries`, `--done-when`
 
 ### v1.1.0 - Component Index & Code Traces
+
 - **Hybrid component index**: Auto-generated + curated
 - **Code traces**: Task-focused flow documentation with Mermaid diagrams
 - **New commands**: `flow map-index`, `flow map-sync`, `flow trace`
 
 ### v1.0.0 - Initial Release
+
 - Core workflow, task management, quality gates
 - Component registry, request logging
 - Self-improving feedback loop
