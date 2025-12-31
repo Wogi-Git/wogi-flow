@@ -2,7 +2,13 @@
 
 You are generating code for this project.
 
-## Project UI Framework: {{uiFramework}}
+{{#if uiFramework}}
+## Project Framework: {{uiFramework}}
+{{/if}}
+
+{{#if stylingApproach}}
+## Styling: {{stylingApproach}}
+{{/if}}
 
 ## CRITICAL OUTPUT RULES
 
@@ -20,13 +26,6 @@ Here's the code you need:
 import React from 'react'
 ```
 
-WRONG OUTPUT:
-```
-We need to implement this feature...
-</think>
-import React from 'react'
-```
-
 CORRECT OUTPUT:
 import { useState } from 'react';
 
@@ -35,13 +34,7 @@ import { useState } from 'react';
 {{#if doNotImport}}
 ### Forbidden Imports (DO NOT USE)
 DO NOT import these: {{doNotImport}}
-These are either unnecessary (React with JSX transform) or not available in this project.
 {{/if}}
-
-### React Imports (IMPORTANT)
-- ❌ NEVER: `import React from 'react'` - Not needed with React 17+ JSX transform, causes TS6133 error
-- ❌ NEVER: `import * as React from 'react'` - Same issue
-- ✅ CORRECT: `import { useState, useCallback, useMemo } from 'react'` - Import only what you need
 
 {{#if availableComponents}}
 ### Available Components (USE THESE EXACT IMPORTS)
@@ -51,34 +44,22 @@ These are either unnecessary (React with JSX transform) or not available in this
 {{#if typeLocations}}
 ### Type Import Paths
 {{typeLocations}}
-{{else}}
-### Type Imports in Feature Folders
-- ❌ WRONG: `import type { X } from '../types'` - Types are in api folder
-- ❌ WRONG: `import type { X } from './types'` - Same issue
-- ✅ CORRECT: `import type { X } from '../api/types'` - Correct path
+{{/if}}
+
+{{#if projectWarnings}}
+### Project-Specific Warnings
+{{projectWarnings}}
 {{/if}}
 
 **NEVER INVENT IMPORTS.** Only use imports that:
 1. Are explicitly listed in the "Available Components" section above
 2. Are shown in the current file content (for modify-file tasks)
-3. Are standard library imports (react hooks, styled-components, etc.)
+3. Are standard library imports (react hooks, etc.)
 
 **If you're unsure about an import path:**
 - DON'T USE IT
 - Write the code inline instead
 - Use a TODO comment: `// TODO: import X from '?'`
-
-**Common WRONG patterns to avoid:**
-- ❌ `import React from 'react'` - Causes unused variable error
-- ❌ `import { useXxx } from '@/hooks/useXxx'` - No global hooks folder
-- ❌ `import { Xxx } from '@/components/ui/xxx'` - shadcn paths don't exist unless this is a shadcn project
-- ❌ `import { cn } from '@/lib/utils'` - Utility functions may not exist
-
-**CORRECT patterns:**
-- ✅ `import { useState, useCallback } from 'react'` - Named imports only
-- ✅ `import styled from 'styled-components'` - If using styled-components
-- ✅ Use paths from "Available Components" section above
-- ✅ `import { IconName } from 'lucide-react'` - Icon library
 
 ## Code Rules
 
@@ -89,6 +70,11 @@ These are either unnecessary (React with JSX transform) or not available in this
 5. Do NOT create files that weren't requested.
 6. Match the project's naming conventions exactly.
 7. Define types inline if unsure about import path.
+
+{{#if customRules}}
+### Project-Specific Rules
+{{customRules}}
+{{/if}}
 
 ## Instruction Richness: {{richnessLevel}}
 

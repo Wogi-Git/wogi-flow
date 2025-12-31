@@ -644,6 +644,91 @@ function escapeRegex(string) {
 }
 
 // ============================================================
+// Import Validation (Config-Driven)
+// ============================================================
+
+/**
+ * Validates that imports in the generated code match available components.
+ * Uses config.json -> hybrid.projectContext.availableComponents
+ *
+ * @param {string} code - The generated code
+ * @param {Object} projectContext - The project context from config (or null to load)
+ * @returns {{ valid: boolean, errors: string[], warnings: string[] }}
+ */
+function validateImports(code, projectContext = null) {
+  const errors = [];
+  const warnings = [];
+
+  // Load project context if not provided
+  if (!projectContext) {
+    try {
+      const config = loadConfig();
+      projectContext = config.hybrid?.projectContext || {};
+    } catch {
+      return { valid: true, errors: [], warnings: [] };
+    }
+  }
+
+  const availableComponents = projectContext.availableComponents || {};
+  const doNotImport = projectContext.doNotImport || [];
+
+  // Extract imports from code
+  const importMatches = code.match(/import\s+(?:{[^}]*}|[\w*]+)?\s*(?:,\s*{[^}]*})?\s*from\s+['"]([^'"]+)['"]/g) || [];
+
+  for (const importLine of importMatches) {
+    // Extract the import path
+    const pathMatch = importLine.match(/from\s+['"]([^'"]+)['"]/);
+    if (!pathMatch) continue;
+
+    const importPath = pathMatch[1];
+
+    // Check doNotImport list
+    for (const forbidden of doNotImport) {
+      // Check if importing the forbidden module
+      if (importLine.includes(`import ${forbidden}`) ||
+          importLine.includes(`import * as ${forbidden}`) ||
+          (importLine.includes(`{ ${forbidden}`) && !importLine.includes(`{ use`))) {
+        errors.push(`Forbidden import detected: "${forbidden}" - use named imports instead`);
+      }
+    }
+
+    // Check component imports against available components
+    if (importPath.startsWith('@/components/') || importPath.includes('/components/')) {
+      const componentName = importPath.split('/').pop();
+
+      // Extract what's being imported
+      const namedImportsMatch = importLine.match(/{([^}]+)}/);
+      if (namedImportsMatch) {
+        const importedNames = namedImportsMatch[1].split(',').map(n => n.trim().split(' ')[0]);
+
+        // Check if component is in available components
+        if (Object.keys(availableComponents).length > 0) {
+          const componentInfo = availableComponents[componentName];
+
+          if (!componentInfo) {
+            warnings.push(`Component "${componentName}" not found in available components - verify import path`);
+          } else {
+            // Check if imported names match available exports
+            const availableExports = componentInfo.exports || [];
+            for (const importedName of importedNames) {
+              if (importedName && !availableExports.includes(importedName)) {
+                errors.push(`"${importedName}" is not exported by "${componentName}" - available exports: ${availableExports.join(', ')}`);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings
+  };
+}
+
+// ============================================================
 // Auto-Correction for Common LLM Mistakes
 // ============================================================
 
@@ -949,6 +1034,21 @@ class ProjectContextGenerator {
     this.projectRoot = projectRoot;
     this.contextPath = path.join(projectRoot, '.workflow/state/hybrid-context.md');
     this.cacheMaxAge = 60 * 60 * 1000; // 1 hour
+
+    // Load config for project-specific settings
+    this.config = this.loadProjectConfig();
+  }
+
+  /**
+   * Load project-specific settings from config.json
+   */
+  loadProjectConfig() {
+    try {
+      const config = loadConfig();
+      return config.hybrid?.projectContext || {};
+    } catch {
+      return {};
+    }
   }
 
   /**
@@ -997,7 +1097,6 @@ class ProjectContextGenerator {
     const results = [];
     const basePath = this.projectRoot;
 
-    // Handle simple patterns like 'apps/web/src/features/*/api/types.ts'
     const parts = pattern.split('/');
     const searchDir = (currentPath, remainingParts) => {
       if (remainingParts.length === 0) {
@@ -1008,24 +1107,20 @@ class ProjectContextGenerator {
       const [current, ...rest] = remainingParts;
 
       if (current === '*' || current === '**') {
-        // Wildcard - search all directories
         try {
           const entries = fs.readdirSync(currentPath, { withFileTypes: true });
           for (const entry of entries) {
             if (entry.isDirectory()) {
               searchDir(path.join(currentPath, entry.name), rest);
               if (current === '**') {
-                // ** also searches deeper
                 searchDir(path.join(currentPath, entry.name), remainingParts);
               }
             } else if (rest.length === 0) {
-              // Check if file matches
               results.push(path.join(currentPath, entry.name));
             }
           }
         } catch {}
       } else if (current.includes('*')) {
-        // Pattern like *.tsx
         try {
           const regex = new RegExp('^' + current.replace(/\*/g, '.*') + '$');
           const entries = fs.readdirSync(currentPath, { withFileTypes: true });
@@ -1040,7 +1135,6 @@ class ProjectContextGenerator {
           }
         } catch {}
       } else {
-        // Exact match
         const nextPath = path.join(currentPath, current);
         if (fs.existsSync(nextPath)) {
           searchDir(nextPath, rest);
@@ -1057,7 +1151,7 @@ class ProjectContextGenerator {
    */
   readFile(filePath, maxLines = 100) {
     try {
-      const fullPath = path.join(this.projectRoot, filePath);
+      const fullPath = path.isAbsolute(filePath) ? filePath : path.join(this.projectRoot, filePath);
       if (!fs.existsSync(fullPath)) return null;
       const content = fs.readFileSync(fullPath, 'utf-8');
       return content.split('\n').slice(0, maxLines).join('\n');
@@ -1067,57 +1161,204 @@ class ProjectContextGenerator {
   }
 
   /**
-   * Gather raw project files for context generation
+   * Check if a path should be excluded based on config
+   */
+  shouldExcludePath(filePath) {
+    const excludeDirs = this.config.excludeDirectories || ['__tests__', '__mocks__', 'node_modules', '.git'];
+    return excludeDirs.some(dir => filePath.includes(`/${dir}/`) || filePath.includes(`\\${dir}\\`));
+  }
+
+  /**
+   * Check if a type definition should be excluded based on config patterns
+   */
+  shouldExcludeType(typeName) {
+    const excludePatterns = this.config.excludeTypePatterns || [];
+    if (excludePatterns.length === 0) return false;
+
+    return excludePatterns.some(pattern => {
+      try {
+        const regex = new RegExp(pattern, 'i');
+        return regex.test(typeName);
+      } catch {
+        return typeName.toLowerCase().includes(pattern.toLowerCase());
+      }
+    });
+  }
+
+  /**
+   * Filter type content to exclude irrelevant types
+   */
+  filterTypesContent(content, filePath) {
+    if (this.shouldExcludePath(filePath)) return null;
+
+    const lines = content.split('\n');
+    const filtered = [];
+    let skipBlock = false;
+    let braceCount = 0;
+
+    for (const line of lines) {
+      // Check if this line starts a type we want to exclude
+      const typeMatch = line.match(/(?:export\s+)?(?:interface|type)\s+(\w+)/);
+      if (typeMatch && this.shouldExcludeType(typeMatch[1])) {
+        skipBlock = true;
+        braceCount = 0;
+      }
+
+      if (skipBlock) {
+        braceCount += (line.match(/{/g) || []).length;
+        braceCount -= (line.match(/}/g) || []).length;
+        if (braceCount <= 0 && line.includes('}')) {
+          skipBlock = false;
+        }
+        continue;
+      }
+
+      filtered.push(line);
+    }
+
+    const result = filtered.join('\n').trim();
+    return result.length > 10 ? result : null;
+  }
+
+  /**
+   * Scan a directory for components and their exports
+   */
+  scanComponentExports(componentDir) {
+    const components = {};
+    const fullDir = path.join(this.projectRoot, componentDir);
+
+    if (!fs.existsSync(fullDir)) return components;
+
+    try {
+      const entries = fs.readdirSync(fullDir, { withFileTypes: true });
+
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+
+        const compPath = path.join(fullDir, entry.name);
+        const indexPath = path.join(compPath, 'index.ts');
+        const indexTsxPath = path.join(compPath, 'index.tsx');
+        const mainFile = path.join(compPath, `${entry.name}.tsx`);
+
+        let exports = [];
+        let importPath = `@/components/${entry.name}`;
+
+        // Try to find exports from index file
+        for (const indexFile of [indexPath, indexTsxPath]) {
+          if (fs.existsSync(indexFile)) {
+            const content = fs.readFileSync(indexFile, 'utf-8');
+            const exportMatches = content.match(/export\s+{\s*([^}]+)\s*}/g);
+            if (exportMatches) {
+              for (const match of exportMatches) {
+                const names = match.replace(/export\s*{\s*/, '').replace(/\s*}/, '').split(',');
+                exports.push(...names.map(n => n.trim()).filter(n => n && !n.includes(' as ')));
+              }
+            }
+            // Also check for named exports
+            const namedExports = content.match(/export\s+(?:const|function|class)\s+(\w+)/g);
+            if (namedExports) {
+              for (const match of namedExports) {
+                const name = match.split(/\s+/).pop();
+                if (name && !exports.includes(name)) exports.push(name);
+              }
+            }
+            break;
+          }
+        }
+
+        // If no index, try main file
+        if (exports.length === 0 && fs.existsSync(mainFile)) {
+          const content = fs.readFileSync(mainFile, 'utf-8');
+          const namedExports = content.match(/export\s+(?:const|function|class)\s+(\w+)/g);
+          if (namedExports) {
+            for (const match of namedExports) {
+              const name = match.split(/\s+/).pop();
+              if (name) exports.push(name);
+            }
+          }
+        }
+
+        if (exports.length > 0) {
+          components[entry.name] = {
+            exports: [...new Set(exports)],
+            importPath
+          };
+        }
+      }
+    } catch (e) {
+      // Ignore scan errors
+    }
+
+    return components;
+  }
+
+  /**
+   * Get default type patterns based on common project structures
+   */
+  getDefaultTypePatterns() {
+    return [
+      'src/types/*.ts',
+      'src/types/index.ts',
+      'src/*/types.ts',
+      'src/features/*/api/types.ts',
+      'src/**/types/*.ts',
+      'apps/*/src/types/*.ts',
+      'apps/*/src/features/*/api/types.ts',
+    ];
+  }
+
+  /**
+   * Get default component patterns based on common project structures
+   */
+  getDefaultComponentDirs() {
+    const possibleDirs = [
+      'src/components',
+      'components',
+      'apps/web/src/components',
+      'src/shared/components',
+    ];
+
+    return possibleDirs.filter(dir => {
+      const fullPath = path.join(this.projectRoot, dir);
+      return fs.existsSync(fullPath);
+    });
+  }
+
+  /**
+   * Gather project files for context generation (config-driven)
    */
   gatherProjectFiles() {
     const files = {};
 
-    // 1. Find and read type files
-    const typePatterns = [
-      'apps/web/src/features/*/api/types.ts',
-      'apps/api/src/**/dto/*.ts',
-      'src/types/*.ts',
-      'src/features/*/api/types.ts',
-      'src/*/types.ts',
-    ];
+    // 1. Use config type directories or detect them
+    const typeDirs = this.config.typeDirs?.length > 0
+      ? this.config.typeDirs
+      : this.getDefaultTypePatterns();
 
-    for (const pattern of typePatterns) {
+    for (const pattern of typeDirs) {
       const matches = this.globSync(pattern);
-      for (const match of matches.slice(0, 5)) { // Limit to 5 type files
+      for (const match of matches.slice(0, 5)) {
+        if (this.shouldExcludePath(match)) continue;
         const content = this.readFile(match, 150);
-        if (content) files[match] = content;
+        if (content) {
+          const filtered = this.filterTypesContent(content, match);
+          if (filtered) files[match] = filtered;
+        }
       }
     }
 
-    // 2. Read theme file
-    const themePaths = [
-      'apps/web/src/styles/theme.ts',
-      'src/styles/theme.ts',
-      'src/theme.ts',
-      'src/theme/index.ts',
-      'styles/theme.ts',
-    ];
-    for (const tp of themePaths) {
-      const content = this.readFile(tp, 200);
-      if (content) {
-        files[tp] = content;
-        break;
-      }
-    }
+    // 2. Use config component directories or detect them
+    const componentDirs = this.config.componentDirs?.length > 0
+      ? this.config.componentDirs
+      : this.getDefaultComponentDirs();
 
-    // 3. Read sample components (2-3 examples)
-    const componentPatterns = [
-      'apps/web/src/components/*.tsx',
-      'apps/web/src/features/*/components/*.tsx',
-      'src/components/*.tsx',
-      'src/features/*/components/*.tsx',
-    ];
-
+    // Read sample components (2-3 examples)
     let componentCount = 0;
-    for (const pattern of componentPatterns) {
+    for (const dir of componentDirs) {
       if (componentCount >= 3) break;
+      const pattern = `${dir}/**/*.tsx`;
       const matches = this.globSync(pattern)
-        .filter(f => !f.includes('.spec') && !f.includes('.test') && !f.includes('index'));
+        .filter(f => !f.includes('.spec') && !f.includes('.test') && !f.includes('index') && !this.shouldExcludePath(f));
       for (const match of matches.slice(0, 2)) {
         const content = this.readFile(match, 80);
         if (content) {
@@ -1128,35 +1369,199 @@ class ProjectContextGenerator {
       }
     }
 
-    // 4. Read component index files
-    const indexPatterns = [
-      'apps/web/src/components/index.ts',
-      'apps/web/src/features/*/components/index.ts',
-      'src/components/index.ts',
-      'src/features/*/components/index.ts',
-    ];
-    for (const pattern of indexPatterns) {
-      const matches = this.globSync(pattern);
-      for (const match of matches.slice(0, 3)) {
-        const content = this.readFile(match, 50);
-        if (content) files[match] = content;
-      }
+    // 3. Read component index files
+    for (const dir of componentDirs) {
+      const indexPath = `${dir}/index.ts`;
+      const content = this.readFile(indexPath, 50);
+      if (content) files[indexPath] = content;
     }
 
     return files;
   }
 
   /**
-   * Generate smart context from project files
-   * This is the fallback when Claude API is not available
+   * Generate available components section from config or scanning
+   */
+  generateAvailableComponentsSection() {
+    let section = '## Available UI Components\n\n';
+    section += '**IMPORTANT:** Use these exact import paths. Do NOT guess import paths.\n\n';
+
+    // Use pre-configured components if available
+    const configComponents = this.config.availableComponents || {};
+
+    if (Object.keys(configComponents).length > 0) {
+      section += '```typescript\n';
+      for (const [name, info] of Object.entries(configComponents)) {
+        const exports = Array.isArray(info.exports) ? info.exports.join(', ') : info.exports || name;
+        const importPath = info.importPath || `@/components/${name}`;
+        section += `// ${name}\nimport { ${exports} } from '${importPath}'\n\n`;
+      }
+      section += '```\n\n';
+    } else {
+      // Scan component directories
+      const componentDirs = this.config.componentDirs?.length > 0
+        ? this.config.componentDirs
+        : this.getDefaultComponentDirs();
+
+      const allComponents = {};
+      for (const dir of componentDirs) {
+        const scanned = this.scanComponentExports(dir);
+        Object.assign(allComponents, scanned);
+      }
+
+      if (Object.keys(allComponents).length > 0) {
+        section += '```typescript\n';
+        for (const [name, info] of Object.entries(allComponents)) {
+          section += `// ${name}\nimport { ${info.exports.join(', ')} } from '${info.importPath}'\n\n`;
+        }
+        section += '```\n\n';
+      } else {
+        section += '_No component directories configured or found._\n\n';
+      }
+    }
+
+    return section;
+  }
+
+  /**
+   * Generate project-specific warnings from config
+   */
+  generateWarningsSection() {
+    const warnings = this.config.projectWarnings || [];
+    const doNotImport = this.config.doNotImport || ['React'];
+
+    if (warnings.length === 0 && doNotImport.length <= 1) return '';
+
+    let section = '## Project-Specific Warnings\n\n';
+
+    if (doNotImport.length > 0) {
+      section += '**DO NOT import these:**\n';
+      for (const item of doNotImport) {
+        section += `- ❌ \`${item}\`\n`;
+      }
+      section += '\n';
+    }
+
+    if (warnings.length > 0) {
+      section += '**Additional warnings:**\n';
+      for (const warning of warnings) {
+        section += `- ⚠️ ${warning}\n`;
+      }
+      section += '\n';
+    }
+
+    return section;
+  }
+
+  /**
+   * Generate type locations section from config
+   */
+  generateTypeLocationsSection() {
+    const typeLocations = this.config.typeLocations || {};
+
+    if (Object.keys(typeLocations).length === 0) return '';
+
+    let section = '## Type Import Paths\n\n';
+    section += '| Context | Import From |\n';
+    section += '|---------|-------------|\n';
+
+    for (const [context, importPath] of Object.entries(typeLocations)) {
+      section += `| ${context} | \`${importPath}\` |\n`;
+    }
+    section += '\n';
+
+    return section;
+  }
+
+  /**
+   * Generate custom rules section from config
+   */
+  generateCustomRulesSection() {
+    const rules = this.config.customRules || [];
+
+    if (rules.length === 0) return '';
+
+    let section = '## Project Coding Rules\n\n';
+    for (const rule of rules) {
+      section += `- ${rule}\n`;
+    }
+    section += '\n';
+
+    return section;
+  }
+
+  /**
+   * Generate dynamic context based on detected UI framework
+   */
+  generateFrameworkGuidance() {
+    const uiFramework = this.config.uiFramework;
+    const stylingApproach = this.config.stylingApproach;
+
+    if (!uiFramework && !stylingApproach) return '';
+
+    let section = '## Framework & Styling\n\n';
+
+    if (uiFramework) {
+      section += `**UI Framework:** ${uiFramework}\n\n`;
+    }
+
+    if (stylingApproach) {
+      section += `**Styling Approach:** ${stylingApproach}\n\n`;
+
+      // Add framework-specific guidance
+      switch (stylingApproach.toLowerCase()) {
+        case 'styled-components':
+          section += `### Styled Components Patterns
+- Use transient props: \`$active\`, \`$variant\`, \`$size\` (prefix with $)
+- Theme access: \`\${({ theme }) => theme.colors.X}\`
+- Add displayName: \`Component.displayName = 'Component'\`
+\n`;
+          break;
+        case 'tailwind':
+        case 'tailwindcss':
+          section += `### Tailwind Patterns
+- Use className for styling
+- Use cn() utility if available for conditional classes
+- Follow project's class naming conventions
+\n`;
+          break;
+        case 'css-modules':
+          section += `### CSS Modules Patterns
+- Import styles: \`import styles from './Component.module.css'\`
+- Use: \`className={styles.container}\`
+\n`;
+          break;
+      }
+    }
+
+    return section;
+  }
+
+  /**
+   * Generate smart context from project files (config-driven)
    */
   generateSmartContext(projectFiles) {
     let context = '# Project Context for Code Generation\n\n';
-    context += '> This context is auto-generated from your project files.\n';
+    context += '> This context is auto-generated from your project configuration.\n';
     context += '> Local LLM: Use this as your primary reference.\n\n';
 
-    // Extract types
-    context += '## 1. Type Definitions\n\n';
+    // 1. Available components (FIRST - most important for imports)
+    context += this.generateAvailableComponentsSection();
+
+    // 2. Framework/styling guidance
+    context += this.generateFrameworkGuidance();
+
+    // 3. Type locations
+    context += this.generateTypeLocationsSection();
+
+    // 4. Project-specific warnings
+    context += this.generateWarningsSection();
+
+    // 5. Custom rules
+    context += this.generateCustomRulesSection();
+
+    // 6. Type Definitions (filtered)
+    context += '## Type Definitions\n\n';
     let hasTypes = false;
     for (const [filePath, content] of Object.entries(projectFiles)) {
       if (filePath.includes('types')) {
@@ -1165,46 +1570,16 @@ class ProjectContextGenerator {
       }
     }
     if (!hasTypes) {
-      context += '_No type files found. Define types inline._\n\n';
+      context += '_No type files found. Define types inline if needed._\n\n';
     }
 
-    // Extract theme info
-    context += '## 2. Theme Path Cheatsheet\n\n';
-    let hasTheme = false;
-    for (const [filePath, content] of Object.entries(projectFiles)) {
-      if (filePath.includes('theme')) {
-        context += `### Theme Structure (from \`${filePath}\`)\n`;
-        context += '```typescript\n' + content + '\n```\n\n';
-        hasTheme = true;
-
-        // Add explicit path guidance
-        context += `### CORRECT Theme Paths (MUST use these exact paths)
-| What | ❌ WRONG | ✅ CORRECT |
-|------|----------|-----------|
-| Primary color | \`theme.colors.primary\` | \`theme.colors.primary.main\` |
-| Success color | \`theme.colors.success\` | \`theme.colors.status.success\` |
-| Warning color | \`theme.colors.warning\` | \`theme.colors.status.warning\` |
-| Error color | \`theme.colors.error\` | \`theme.colors.status.error\` |
-| Border color | \`theme.colors.border\` | \`theme.colors.border.light\` |
-| Text color | \`theme.colors.text\` | \`theme.colors.text.primary\` |
-| Spacing | \`theme.spacing.4\` | \`theme.spacing[4]\` |
-| Font size | \`theme.fontSize.lg\` | \`theme.fontSize.lg\` or \`theme.fontSize['2xl']\` |
-
-`;
-        break;
-      }
-    }
-    if (!hasTheme) {
-      context += '_No theme file found._\n\n';
-    }
-
-    // Extract component patterns
-    context += '## 3. Component Patterns\n\n';
+    // 7. Component patterns (sample)
+    context += '## Component Patterns\n\n';
     let sampleShown = false;
     for (const [filePath, content] of Object.entries(projectFiles)) {
       if (filePath.includes('components/') && filePath.endsWith('.tsx') && !sampleShown) {
-        context += `### Sample Component Pattern (from \`${filePath}\`)\n`;
-        context += 'Follow this exact pattern for new components:\n';
+        context += `### Sample Pattern (from \`${filePath}\`)\n`;
+        context += 'Follow this pattern for new components:\n';
         context += '```typescript\n' + content + '\n```\n\n';
         sampleShown = true;
       }
@@ -1213,57 +1588,22 @@ class ProjectContextGenerator {
       context += '_No sample components found._\n\n';
     }
 
-    // Add existing components
-    context += '## 4. Available Components (DO NOT recreate these)\n\n';
-    let hasComponents = false;
-    for (const [filePath, content] of Object.entries(projectFiles)) {
-      if (filePath.endsWith('index.ts') && filePath.includes('components')) {
-        context += `### From \`${filePath}\`\n\`\`\`typescript\n${content}\n\`\`\`\n\n`;
-        hasComponents = true;
-      }
-    }
-    if (!hasComponents) {
-      context += '_No component index files found._\n\n';
-    }
-
-    // Add critical rules
-    context += `## 5. Critical Rules (MUST FOLLOW)
+    // 8. Universal rules
+    context += `## Universal Rules
 
 ### Import Rules
-| Rule | ❌ WRONG | ✅ CORRECT |
-|------|----------|-----------|
-| React imports | \`import React from 'react'\` | \`import { useState, useCallback } from 'react'\` |
-| Type imports (features) | \`from '../types'\` | \`from '../api/types'\` |
-| Type imports (features) | \`from './types'\` | \`from '../api/types'\` |
-| Inventing imports | \`import { X } from '@/utils/X'\` | Only import what exists |
-
-### Styled Components Rules
-| Rule | Example |
-|------|---------|
-| Transient props | \`$active\`, \`$variant\`, \`$size\` (prefix with $) |
-| Theme in template | \`\${({ theme }) => theme.colors.primary.main}\` |
-| DisplayName | \`ComponentName.displayName = 'ComponentName'\` |
+- ❌ NEVER: \`import React from 'react'\` (causes TS6133 error in React 17+)
+- ✅ CORRECT: \`import { useState, useCallback } from 'react'\`
+- ❌ NEVER invent import paths - use only what's listed above
+- ✅ If unsure, define types inline or use TODO comment
 
 ### Export Rules
-| Rule | Example |
-|------|---------|
-| Named exports | \`export function ComponentName() {}\` |
-| Type exports | \`export interface Props {}\` or \`export type X = ...\` |
-| Props interface | Name it \`ComponentNameProps\` |
-
-## 6. Import Path Conventions
-
-| Type | Path Pattern |
-|------|-------------|
-| Shared components | \`@/components/ComponentName\` |
-| Feature components | \`../components/ComponentName\` or \`./ComponentName\` |
-| Types in features | \`../api/types\` |
-| Shared types | \`@/types/...\` |
-| Icons | \`lucide-react\` |
+- ✅ Named exports: \`export function ComponentName() {}\`
+- ✅ Props interface: \`interface ComponentNameProps {}\`
 
 ---
 
-**Remember:** If you're unsure about an import, DON'T INVENT IT. Use inline code or a TODO comment.
+**Remember:** If you're unsure about an import path, DON'T GUESS. Use inline code or a TODO comment.
 
 `;
 
@@ -1274,27 +1614,26 @@ class ProjectContextGenerator {
    * Minimal context fallback when no project files found
    */
   getMinimalContext() {
-    return `# Project Context for Code Generation
+    let context = `# Project Context for Code Generation
 
 ## Critical Rules
 
 ### Imports
 - ❌ NEVER: \`import React from 'react'\` - causes TS6133 unused variable error
 - ✅ CORRECT: \`import { useState, useCallback } from 'react'\`
-
-### Type Imports in Features
-- ❌ WRONG: \`from '../types'\` or \`from './types'\`
-- ✅ CORRECT: \`from '../api/types'\`
-
-### Styled Components
-- ✅ Use transient props: \`$active\`, \`$variant\` (with $ prefix)
-- ✅ Theme access: \`theme.colors.primary.main\` (not \`theme.colors.primary\`)
-- ✅ Add displayName: \`Component.displayName = 'Component'\`
+- ❌ NEVER invent import paths - only import what you know exists
 
 ### Exports
 - ✅ Use named exports: \`export function ComponentName\`
 - ✅ Define Props interface: \`interface ComponentNameProps {}\`
+
 `;
+
+    // Add any configured warnings even in minimal mode
+    context += this.generateWarningsSection();
+    context += this.generateCustomRulesSection();
+
+    return context;
   }
 
   /**
@@ -1322,6 +1661,19 @@ class ProjectContextGenerator {
     this.saveContext(context);
 
     return { context, fromCache: false };
+  }
+
+  /**
+   * Force regenerate context (bypass cache)
+   */
+  regenerateContext() {
+    const projectFiles = this.gatherProjectFiles();
+    const context = Object.keys(projectFiles).length > 0
+      ? this.generateSmartContext(projectFiles)
+      : this.getMinimalContext();
+
+    this.saveContext(context);
+    return context;
   }
 }
 
@@ -1670,6 +2022,70 @@ class TemplateEngine {
     this.cache = new Map();
     this.richness = null; // Instruction richness settings
     this.projectRoot = PROJECT_ROOT;
+    this.projectContext = this.loadProjectContext();
+  }
+
+  /**
+   * Load project context from config for template rendering
+   */
+  loadProjectContext() {
+    try {
+      const config = loadConfig();
+      const ctx = config.hybrid?.projectContext || {};
+
+      // Format availableComponents for template display
+      let formattedComponents = '';
+      if (ctx.availableComponents && Object.keys(ctx.availableComponents).length > 0) {
+        formattedComponents = '```typescript\n';
+        for (const [name, info] of Object.entries(ctx.availableComponents)) {
+          const exports = Array.isArray(info.exports) ? info.exports.join(', ') : info.exports || name;
+          const importPath = info.importPath || `@/components/${name}`;
+          formattedComponents += `// ${name}\nimport { ${exports} } from '${importPath}'\n`;
+        }
+        formattedComponents += '```';
+      }
+
+      // Format typeLocations for template display
+      let formattedTypeLocations = '';
+      if (ctx.typeLocations && Object.keys(ctx.typeLocations).length > 0) {
+        formattedTypeLocations = '| Context | Import Path |\n|---------|-------------|\n';
+        for (const [context, importPath] of Object.entries(ctx.typeLocations)) {
+          formattedTypeLocations += `| ${context} | \`${importPath}\` |\n`;
+        }
+      }
+
+      // Format warnings
+      let formattedWarnings = '';
+      if (ctx.projectWarnings && ctx.projectWarnings.length > 0) {
+        formattedWarnings = ctx.projectWarnings.map(w => `- ⚠️ ${w}`).join('\n');
+      }
+
+      // Format custom rules
+      let formattedRules = '';
+      if (ctx.customRules && ctx.customRules.length > 0) {
+        formattedRules = ctx.customRules.map(r => `- ${r}`).join('\n');
+      }
+
+      // Format doNotImport
+      let formattedDoNotImport = '';
+      if (ctx.doNotImport && ctx.doNotImport.length > 0) {
+        formattedDoNotImport = ctx.doNotImport.map(i => `\`${i}\``).join(', ');
+      }
+
+      return {
+        uiFramework: ctx.uiFramework,
+        stylingApproach: ctx.stylingApproach,
+        availableComponents: formattedComponents,
+        typeLocations: formattedTypeLocations,
+        projectWarnings: formattedWarnings,
+        customRules: formattedRules,
+        doNotImport: formattedDoNotImport,
+        // Keep raw values too for programmatic use
+        _raw: ctx
+      };
+    } catch {
+      return {};
+    }
   }
 
   /**
@@ -1755,7 +2171,9 @@ class TemplateEngine {
 
     // Load richness-based context and merge with params
     const richnessContext = this.loadRichnessContext(params);
-    const augmentedParams = { ...params, ...richnessContext };
+
+    // Merge: params override projectContext, richnessContext adds more
+    const augmentedParams = { ...this.projectContext, ...params, ...richnessContext };
 
     // Simple variable substitution
     const substitute = (str, obj, prefix = '') => {
@@ -2539,6 +2957,24 @@ class Orchestrator {
 
           // Medium confidence - warn but proceed
           log('dim', `   Proceeding despite semantic concerns`);
+        }
+
+        // Import validation: check against available components from config
+        const importValidation = validateImports(cleanOutput);
+        if (!importValidation.valid) {
+          log('red', `   ❌ Import errors: ${importValidation.errors.join(', ')}`);
+          result.errors.push(`Import errors: ${importValidation.errors.join('; ')}`);
+
+          // Add hint to prompt for retry
+          prompt += `\n\n## PREVIOUS ERROR - IMPORT ISSUES\n\nYour code has invalid imports:\n${importValidation.errors.map(e => `- ${e}`).join('\n')}\n\nCheck the "Available Components" section and use ONLY those exact imports.\nDO NOT guess import paths or exports.`;
+          continue; // Retry with corrected hints
+        }
+
+        // Log warnings but don't fail
+        if (importValidation.warnings.length > 0) {
+          for (const warning of importValidation.warnings) {
+            log('yellow', `   ⚠️ ${warning}`);
+          }
         }
 
         if (outputPath) {

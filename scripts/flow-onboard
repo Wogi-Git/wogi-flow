@@ -771,7 +771,15 @@ main() {
     generate_decisions
     generate_initial_tasks
     suggest_skills
-    
+
+    # Run project analyzer for hybrid mode
+    echo ""
+    echo -e "${CYAN}Analyzing project for hybrid mode...${NC}"
+    if [ -f "$SCRIPT_DIR/flow-project-analyzer.js" ]; then
+        node "$SCRIPT_DIR/flow-project-analyzer.js" "$PROJECT_ROOT" 2>/dev/null
+        echo -e "${GREEN}✓${NC} Hybrid mode context configured"
+    fi
+
     # Update config with project name
     python3 << EOF
 import json

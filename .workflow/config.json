@@ -1,12 +1,10 @@
 {
   "version": "1.4",
   "projectName": "",
-
   "workflow": {
     "planningStyle": "feature-based",
     "agentStructure": "unified"
   },
-
   "loops": {
     "enabled": true,
     "maxRetries": 5,
@@ -14,49 +12,61 @@
     "commitEvery": 3,
     "pauseBetweenScenarios": false
   },
-  
   "corrections": {
     "mode": "inline",
     "detailPath": ".workflow/corrections"
   },
-  
   "phases": {
     "enabled": false,
     "definitions": []
   },
-  
   "mandatorySteps": {
     "afterTask": [],
     "beforeCommit": [],
-    "onSessionEnd": ["updateRequestLog", "updateAppMap"]
+    "onSessionEnd": [
+      "updateRequestLog",
+      "updateAppMap"
+    ]
   },
-  
   "autoLog": true,
   "autoUpdateAppMap": true,
-  
   "qualityGates": {
     "feature": {
-      "require": ["tests", "appMapUpdate", "requestLogEntry"],
-      "optional": ["review", "docs"]
+      "require": [
+        "tests",
+        "appMapUpdate",
+        "requestLogEntry"
+      ],
+      "optional": [
+        "review",
+        "docs"
+      ]
     },
     "bugfix": {
-      "require": ["tests", "requestLogEntry"],
-      "optional": ["review"]
+      "require": [
+        "tests",
+        "requestLogEntry"
+      ],
+      "optional": [
+        "review"
+      ]
     },
     "refactor": {
-      "require": ["tests", "noNewFeatures"],
-      "optional": ["review"]
+      "require": [
+        "tests",
+        "noNewFeatures"
+      ],
+      "optional": [
+        "review"
+      ]
     }
   },
-  
   "strictMode": {
     "verificationChecklist": false,
     "correctionReportsOnFail": false,
     "featureReportsOnComplete": false
   },
-  
   "requireApproval": [],
-  
   "componentRules": {
     "preferVariants": true,
     "requireAppMapEntry": true,
@@ -64,22 +74,18 @@
     "autoGenerateStorybook": false,
     "storybookPath": "src/stories"
   },
-  
   "testing": {
     "runAfterTask": false,
     "runBeforeCommit": false,
     "browserTests": false,
     "browserTestUrl": "http://localhost:3000"
   },
-  
   "hooks": {
     "preCommit": false
   },
-  
   "skills": {
     "installed": []
   },
-
   "skillLearning": {
     "enabled": true,
     "autoExtract": true,
@@ -91,19 +97,33 @@
     "minCorrectionsToLearn": 1,
     "autoCreateSkills": "ask"
   },
-
   "componentIndex": {
     "autoScan": true,
-    "scanOn": ["sessionStart"],
-    "directories": ["src/components", "src/hooks", "src/services", "src/pages", "src/modules", "app"],
-    "ignore": ["*.test.*", "*.spec.*", "*.stories.*", "index.ts", "index.js", "__tests__", "__mocks__"]
+    "scanOn": [
+      "sessionStart"
+    ],
+    "directories": [
+      "src/components",
+      "src/hooks",
+      "src/services",
+      "src/pages",
+      "src/modules",
+      "app"
+    ],
+    "ignore": [
+      "*.test.*",
+      "*.spec.*",
+      "*.stories.*",
+      "index.ts",
+      "index.js",
+      "__tests__",
+      "__mocks__"
+    ]
   },
-
   "traces": {
     "saveTo": ".workflow/traces",
     "generateDiagrams": true
   },
-
   "hybrid": {
     "enabled": false,
     "provider": null,
@@ -129,38 +149,80 @@
     },
     "projectContext": {
       "uiFramework": null,
-      "componentPaths": {},
-      "typePaths": {
-        "features": "../api/types"
-      },
-      "doNotImport": ["React"],
-      "noExternalUtils": true
+      "stylingApproach": null,
+      "componentDirs": [],
+      "typeDirs": [
+        "src/types/*.ts"
+      ],
+      "availableComponents": {},
+      "typeLocations": {},
+      "doNotImport": [
+        "React"
+      ],
+      "excludeTypePatterns": [],
+      "excludeDirectories": [
+        "__tests__",
+        "__mocks__",
+        "node_modules",
+        ".git",
+        "dist",
+        "build"
+      ],
+      "projectWarnings": [],
+      "customRules": []
     }
   },
-
   "validation": {
     "afterFileEdit": {
       "enabled": false,
       "commands": {
-        "*.ts": ["npx tsc --noEmit"],
-        "*.tsx": ["npx tsc --noEmit", "npx eslint {file} --fix"],
-        "*.js": ["npx eslint {file} --fix"],
-        "*.jsx": ["npx eslint {file} --fix"]
+        "*.ts": [
+          "npx tsc --noEmit"
+        ],
+        "*.tsx": [
+          "npx tsc --noEmit",
+          "npx eslint {file} --fix"
+        ],
+        "*.js": [
+          "npx eslint {file} --fix"
+        ],
+        "*.jsx": [
+          "npx eslint {file} --fix"
+        ]
       },
       "fixErrorsBeforeContinuing": true
     },
     "afterTaskComplete": {
       "enabled": true,
-      "commands": ["npm run lint", "npm run typecheck"]
+      "commands": [
+        "npm run lint",
+        "npm run typecheck"
+      ]
     },
     "beforeCommit": {
       "enabled": true,
-      "commands": ["npm run lint", "npm run typecheck", "npm run test"]
+      "commands": [
+        "npm run lint",
+        "npm run typecheck",
+        "npm run test"
+      ]
     }
   },
-
   "agents": {
-    "enabled": ["orchestrator", "story-writer", "developer", "reviewer", "tester"],
-    "optional": ["accessibility", "security", "performance", "docs", "design-system", "onboarding"]
+    "enabled": [
+      "orchestrator",
+      "story-writer",
+      "developer",
+      "reviewer",
+      "tester"
+    ],
+    "optional": [
+      "accessibility",
+      "security",
+      "performance",
+      "docs",
+      "design-system",
+      "onboarding"
+    ]
   }
 }
