@@ -88,6 +88,15 @@ show_help() {
     echo "  worktree list        List active task worktrees"
     echo "  worktree cleanup     Remove stale worktrees"
     echo ""
+    echo "Figma Analyzer:"
+    echo "  figma scan           Scan codebase for components"
+    echo "  figma show [name]    Show component details"
+    echo "  figma extract <file> Extract from Figma data"
+    echo "  figma match <file>   Match against registry"
+    echo "  figma confirm <file> Interactive confirmation"
+    echo "  figma generate       Generate code from decisions"
+    echo "  figma server [port]  Start MCP server"
+    echo ""
     echo "Hybrid Mode:"
     echo "  hybrid enable        Enable hybrid mode (Claude plans, local LLM executes)"
     echo "  hybrid disable       Disable hybrid mode"
@@ -272,6 +281,72 @@ case "${1:-}" in
                 ;;
             *)
                 echo "Usage: flow hybrid [enable|disable|status|execute|rollback|test]"
+                ;;
+        esac
+        ;;
+    figma)
+        case "${2:-help}" in
+            scan)
+                node "$SCRIPT_DIR/flow-figma-index.js" scan
+                ;;
+            show)
+                node "$SCRIPT_DIR/flow-figma-index.js" show "$3"
+                ;;
+            export)
+                node "$SCRIPT_DIR/flow-figma-index.js" export
+                ;;
+            extract)
+                if [ -z "$3" ]; then
+                    node "$SCRIPT_DIR/flow-figma-extract.js"
+                else
+                    node "$SCRIPT_DIR/flow-figma-extract.js" "$3"
+                fi
+                ;;
+            match)
+                if [ -z "$3" ]; then
+                    node "$SCRIPT_DIR/flow-figma-match.js"
+                else
+                    node "$SCRIPT_DIR/flow-figma-match.js" "$3"
+                fi
+                ;;
+            confirm)
+                if [ -z "$3" ]; then
+                    node "$SCRIPT_DIR/flow-figma-confirm.js"
+                else
+                    node "$SCRIPT_DIR/flow-figma-confirm.js" "$3" "${@:4}"
+                fi
+                ;;
+            generate)
+                node "$SCRIPT_DIR/flow-figma-generate.js" "$3"
+                ;;
+            server)
+                if [ -z "$3" ]; then
+                    node "$SCRIPT_DIR/flow-figma-mcp-server.js" --http
+                else
+                    node "$SCRIPT_DIR/flow-figma-mcp-server.js" --http "$3"
+                fi
+                ;;
+            analyze)
+                # Full pipeline: extract + match
+                if [ -z "$3" ]; then
+                    echo "Usage: flow figma analyze <figma-data.json>"
+                    exit 1
+                fi
+                node "$SCRIPT_DIR/flow-figma-extract.js" "$3" | \
+                node "$SCRIPT_DIR/flow-figma-match.js" --stdin
+                ;;
+            *)
+                echo ""
+                echo "Figma Component Analyzer:"
+                echo "  figma scan              Scan codebase for components"
+                echo "  figma show [name]       Show component details (or list all)"
+                echo "  figma extract <file>    Extract from Figma MCP data"
+                echo "  figma match <file>      Match against registry"
+                echo "  figma analyze <file>    Extract + match (full pipeline)"
+                echo "  figma confirm <file>    Interactive confirmation"
+                echo "  figma generate [file]   Generate code from decisions"
+                echo "  figma server [port]     Start MCP server (default: 3847)"
+                echo ""
                 ;;
         esac
         ;;

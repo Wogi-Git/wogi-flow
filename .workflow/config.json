@@ -1,5 +1,5 @@
 {
-  "version": "1.4",
+  "version": "1.5.0",
   "projectName": "",
   "workflow": {
     "planningStyle": "feature-based",
@@ -126,6 +126,26 @@
       "__tests__",
       "__mocks__"
     ]
+  },
+  "figmaAnalyzer": {
+    "enabled": true,
+    "thresholds": {
+      "exactMatch": 95,
+      "strongMatch": 80,
+      "variantCandidate": 60
+    },
+    "componentDirs": [
+      "src/components",
+      "components",
+      "src/ui",
+      "ui"
+    ],
+    "mcpServer": {
+      "port": 3847,
+      "autoStart": false
+    },
+    "autoScanOnAnalyze": true,
+    "generatePrompts": true
   },
   "traces": {
     "saveTo": ".workflow/traces",
