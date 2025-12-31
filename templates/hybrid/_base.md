@@ -36,9 +36,43 @@ import { useState } from 'react';
 DO NOT import these: {{doNotImport}}
 {{/if}}
 
+### Available Imports (USE THESE EXACT PATHS)
+
+**ONLY use imports listed below. Any other import path is FORBIDDEN.**
+
 {{#if availableComponents}}
-### Available Components (USE THESE EXACT IMPORTS)
+#### Components
+```typescript
 {{availableComponents}}
+```
+{{/if}}
+
+{{#if availableHooks}}
+#### Hooks
+```typescript
+{{availableHooks}}
+```
+{{/if}}
+
+{{#if availableServices}}
+#### Services
+```typescript
+{{availableServices}}
+```
+{{/if}}
+
+{{#if availableTypes}}
+#### Types
+```typescript
+{{availableTypes}}
+```
+{{/if}}
+
+{{#if availableUtils}}
+#### Utilities
+```typescript
+{{availableUtils}}
+```
 {{/if}}
 
 {{#if typeLocations}}
@@ -52,9 +86,9 @@ DO NOT import these: {{doNotImport}}
 {{/if}}
 
 **NEVER INVENT IMPORTS.** Only use imports that:
-1. Are explicitly listed in the "Available Components" section above
+1. Are explicitly listed in the "Available Imports" section above
 2. Are shown in the current file content (for modify-file tasks)
-3. Are standard library imports (react hooks, etc.)
+3. Are standard library imports (react hooks, useState, useEffect, etc.)
 
 **If you're unsure about an import path:**
 - DON'T USE IT

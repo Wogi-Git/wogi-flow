@@ -37,6 +37,14 @@ const {
   loadRelatedCode
 } = require('./flow-instruction-richness');
 
+// Import export scanner module
+const {
+  buildExportMap,
+  loadCachedExportMap,
+  saveExportMapCache,
+  formatExportMapForTemplate
+} = require('./flow-export-scanner');
+
 // ============================================================
 // Configuration
 // ============================================================
@@ -648,32 +656,59 @@ function escapeRegex(string) {
 // ============================================================
 
 /**
- * Validates that imports in the generated code match available components.
- * Uses config.json -> hybrid.projectContext.availableComponents
+ * Validates imports in generated code against the export map.
+ * Uses the cached export map for accurate import validation.
  *
  * @param {string} code - The generated code
- * @param {Object} projectContext - The project context from config (or null to load)
+ * @param {Object} exportMap - The export map (or null to load from cache)
  * @returns {{ valid: boolean, errors: string[], warnings: string[] }}
  */
-function validateImports(code, projectContext = null) {
+function validateImports(code, exportMap = null) {
   const errors = [];
   const warnings = [];
 
-  // Load project context if not provided
-  if (!projectContext) {
-    try {
-      const config = loadConfig();
-      projectContext = config.hybrid?.projectContext || {};
-    } catch {
-      return { valid: true, errors: [], warnings: [] };
+  // Load export map if not provided
+  if (!exportMap) {
+    exportMap = loadCachedExportMap();
+    if (!exportMap) {
+      // No export map available, can't validate
+      return { valid: true, errors: [], warnings: ['No export map available for validation'] };
     }
   }
 
-  const availableComponents = projectContext.availableComponents || {};
-  const doNotImport = projectContext.doNotImport || [];
+  // Load doNotImport from config
+  let doNotImport = ['React']; // Default
+  try {
+    const config = loadConfig();
+    doNotImport = config.hybrid?.projectContext?.doNotImport || ['React'];
+  } catch {}
+
+  // Build a lookup map for all exports by import path
+  const exportsByPath = new Map();
+
+  // Add all exports from the map
+  for (const [category, items] of Object.entries(exportMap)) {
+    if (category === '_meta') continue;
+
+    for (const [name, info] of Object.entries(items)) {
+      if (!info.importPath) continue;
+
+      const exports = [];
+      if (info.exports?.length > 0) exports.push(...info.exports);
+      if (info.types?.length > 0) exports.push(...info.types);
+      if (info.defaultExport) exports.push(info.defaultExport);
+
+      exportsByPath.set(info.importPath, {
+        name,
+        exports,
+        defaultExport: info.defaultExport,
+        category
+      });
+    }
+  }
 
   // Extract imports from code
-  const importMatches = code.match(/import\s+(?:{[^}]*}|[\w*]+)?\s*(?:,\s*{[^}]*})?\s*from\s+['"]([^'"]+)['"]/g) || [];
+  const importMatches = code.match(/import\s+(?:type\s+)?(?:{[^}]*}|[\w*]+)?\s*(?:,\s*{[^}]*})?\s*from\s+['"]([^'"]+)['"]/g) || [];
 
   for (const importLine of importMatches) {
     // Extract the import path
@@ -682,40 +717,58 @@ function validateImports(code, projectContext = null) {
 
     const importPath = pathMatch[1];
 
-    // Check doNotImport list
-    for (const forbidden of doNotImport) {
-      // Check if importing the forbidden module
-      if (importLine.includes(`import ${forbidden}`) ||
-          importLine.includes(`import * as ${forbidden}`) ||
-          (importLine.includes(`{ ${forbidden}`) && !importLine.includes(`{ use`))) {
-        errors.push(`Forbidden import detected: "${forbidden}" - use named imports instead`);
+    // Skip external packages
+    if (!importPath.startsWith('@/') && !importPath.startsWith('./') && !importPath.startsWith('../')) {
+      // Check doNotImport for external packages
+      for (const forbidden of doNotImport) {
+        if (importLine.includes(`import ${forbidden} `) ||
+            importLine.includes(`import ${forbidden},`) ||
+            importLine.includes(`import * as ${forbidden}`)) {
+          errors.push(`Forbidden import detected: "import ${forbidden}" - use named imports instead`);
+        }
+      }
+      continue;
+    }
+
+    // Check if import path exists in our export map
+    const knownExports = exportsByPath.get(importPath);
+
+    if (!knownExports) {
+      // Path not in export map - might be a relative import or unknown path
+      if (importPath.startsWith('@/')) {
+        warnings.push(`Import path "${importPath}" not found in export map - verify it exists`);
+      }
+      continue;
+    }
+
+    // Extract what's being imported
+    const namedImportsMatch = importLine.match(/{([^}]+)}/);
+    if (namedImportsMatch) {
+      const importedNames = namedImportsMatch[1]
+        .split(',')
+        .map(n => n.trim().split(/\s+as\s+/)[0].trim()) // Handle "X as Y"
+        .filter(n => n && n !== 'type'); // Filter out 'type' keyword
+
+      const availableExports = knownExports.exports || [];
+
+      for (const importedName of importedNames) {
+        if (importedName && !availableExports.includes(importedName)) {
+          const suggestions = availableExports.slice(0, 5).join(', ');
+          errors.push(`"${importedName}" is not exported by "${importPath}" - available: ${suggestions}`);
+        }
       }
     }
 
-    // Check component imports against available components
-    if (importPath.startsWith('@/components/') || importPath.includes('/components/')) {
-      const componentName = importPath.split('/').pop();
-
-      // Extract what's being imported
-      const namedImportsMatch = importLine.match(/{([^}]+)}/);
-      if (namedImportsMatch) {
-        const importedNames = namedImportsMatch[1].split(',').map(n => n.trim().split(' ')[0]);
-
-        // Check if component is in available components
-        if (Object.keys(availableComponents).length > 0) {
-          const componentInfo = availableComponents[componentName];
-
-          if (!componentInfo) {
-            warnings.push(`Component "${componentName}" not found in available components - verify import path`);
-          } else {
-            // Check if imported names match available exports
-            const availableExports = componentInfo.exports || [];
-            for (const importedName of importedNames) {
-              if (importedName && !availableExports.includes(importedName)) {
-                errors.push(`"${importedName}" is not exported by "${componentName}" - available exports: ${availableExports.join(', ')}`);
-              }
-            }
-          }
+    // Check default import
+    const defaultImportMatch = importLine.match(/import\s+(\w+)\s*(?:,|from)/);
+    if (defaultImportMatch) {
+      const defaultImportName = defaultImportMatch[1];
+      if (defaultImportName !== 'type' && !knownExports.defaultExport) {
+        // Check if they might want a named export
+        if (knownExports.exports.includes(defaultImportName)) {
+          warnings.push(`"${defaultImportName}" is a named export, not default - use: import { ${defaultImportName} } from '${importPath}'`);
+        } else {
+          errors.push(`"${importPath}" has no default export - use named imports instead`);
         }
       }
     }
@@ -1037,6 +1090,27 @@ class ProjectContextGenerator {
 
     // Load config for project-specific settings
     this.config = this.loadProjectConfig();
+
+    // Export map (loaded lazily)
+    this._exportMap = null;
+  }
+
+  /**
+   * Get or build the export map (with caching)
+   */
+  getExportMap() {
+    if (this._exportMap) return this._exportMap;
+
+    // Try cached first
+    this._exportMap = loadCachedExportMap();
+    if (this._exportMap) return this._exportMap;
+
+    // Build fresh export map
+    const fullConfig = { hybrid: { projectContext: this.config } };
+    this._exportMap = buildExportMap(fullConfig);
+    saveExportMapCache(this._exportMap);
+
+    return this._exportMap;
   }
 
   /**
@@ -1380,47 +1454,96 @@ class ProjectContextGenerator {
   }
 
   /**
-   * Generate available components section from config or scanning
+   * Generate available imports section from export map
+   * Now includes components, hooks, services, types, and utils
    */
-  generateAvailableComponentsSection() {
-    let section = '## Available UI Components\n\n';
-    section += '**IMPORTANT:** Use these exact import paths. Do NOT guess import paths.\n\n';
+  generateAvailableImportsSection() {
+    let section = '## Available Imports\n\n';
+    section += '**CRITICAL:** Only use imports listed below. DO NOT guess import paths.\n\n';
 
-    // Use pre-configured components if available
-    const configComponents = this.config.availableComponents || {};
+    const exportMap = this.getExportMap();
 
-    if (Object.keys(configComponents).length > 0) {
+    // Components
+    if (Object.keys(exportMap.components).length > 0) {
+      section += '### Components\n\n';
       section += '```typescript\n';
-      for (const [name, info] of Object.entries(configComponents)) {
-        const exports = Array.isArray(info.exports) ? info.exports.join(', ') : info.exports || name;
-        const importPath = info.importPath || `@/components/${name}`;
-        section += `// ${name}\nimport { ${exports} } from '${importPath}'\n\n`;
+      for (const [name, info] of Object.entries(exportMap.components)) {
+        if (info.exports.length > 0) {
+          section += `import { ${info.exports.join(', ')} } from '${info.importPath}';\n`;
+        } else if (info.defaultExport) {
+          section += `import ${info.defaultExport} from '${info.importPath}';\n`;
+        }
       }
       section += '```\n\n';
-    } else {
-      // Scan component directories
-      const componentDirs = this.config.componentDirs?.length > 0
-        ? this.config.componentDirs
-        : this.getDefaultComponentDirs();
+    }
 
-      const allComponents = {};
-      for (const dir of componentDirs) {
-        const scanned = this.scanComponentExports(dir);
-        Object.assign(allComponents, scanned);
-      }
-
-      if (Object.keys(allComponents).length > 0) {
-        section += '```typescript\n';
-        for (const [name, info] of Object.entries(allComponents)) {
-          section += `// ${name}\nimport { ${info.exports.join(', ')} } from '${info.importPath}'\n\n`;
+    // Hooks
+    if (Object.keys(exportMap.hooks).length > 0) {
+      section += '### Hooks\n\n';
+      section += '```typescript\n';
+      for (const [name, info] of Object.entries(exportMap.hooks)) {
+        if (info.exports.length > 0) {
+          section += `import { ${info.exports.join(', ')} } from '${info.importPath}';\n`;
         }
-        section += '```\n\n';
-      } else {
-        section += '_No component directories configured or found._\n\n';
       }
+      section += '```\n\n';
+    }
+
+    // Services
+    if (Object.keys(exportMap.services).length > 0) {
+      section += '### Services\n\n';
+      section += '```typescript\n';
+      for (const [name, info] of Object.entries(exportMap.services)) {
+        if (info.exports.length > 0) {
+          section += `import { ${info.exports.join(', ')} } from '${info.importPath}';\n`;
+        }
+      }
+      section += '```\n\n';
+    }
+
+    // Types
+    if (Object.keys(exportMap.types).length > 0) {
+      section += '### Types\n\n';
+      section += '```typescript\n';
+      for (const [name, info] of Object.entries(exportMap.types)) {
+        if (info.types.length > 0) {
+          section += `import type { ${info.types.join(', ')} } from '${info.importPath}';\n`;
+        }
+      }
+      section += '```\n\n';
+    }
+
+    // Utils
+    if (Object.keys(exportMap.utils).length > 0) {
+      section += '### Utilities\n\n';
+      section += '```typescript\n';
+      for (const [name, info] of Object.entries(exportMap.utils)) {
+        if (info.exports.length > 0) {
+          section += `import { ${info.exports.join(', ')} } from '${info.importPath}';\n`;
+        }
+      }
+      section += '```\n\n';
+    }
+
+    // Check if we found anything
+    const totalExports = Object.keys(exportMap.components).length +
+      Object.keys(exportMap.hooks).length +
+      Object.keys(exportMap.services).length +
+      Object.keys(exportMap.types).length +
+      Object.keys(exportMap.utils).length;
+
+    if (totalExports === 0) {
+      section += '_No exports found. Define imports inline or use TODO comments._\n\n';
     }
 
     return section;
+  }
+
+  /**
+   * @deprecated Use generateAvailableImportsSection instead
+   */
+  generateAvailableComponentsSection() {
+    return this.generateAvailableImportsSection();
   }
 
   /**
@@ -2558,20 +2681,30 @@ ${step.description || ''}
   }
 
   /**
-   * Loads project context from config.json and app-map.md.
+   * Loads project context from config.json, export map, and app-map.md.
    * Returns context that can be used in templates.
    *
    * Reads from:
    * - config.json → hybrid.projectContext (primary source)
+   * - export-map.json (scanned exports)
    * - app-map.md (supplemental component info)
    */
   loadProjectContext() {
     const context = {
       importPatterns: '',
       availableComponents: '',
+      availableHooks: '',
+      availableServices: '',
+      availableTypes: '',
+      availableUtils: '',
       typeLocations: '',
       uiFramework: 'react',
-      projectContext: null
+      stylingApproach: '',
+      doNotImport: '',
+      projectWarnings: '',
+      customRules: '',
+      projectContext: null,
+      exportMap: null
     };
 
     // Try to load from config (primary source)
@@ -2589,18 +2722,9 @@ ${step.description || ''}
           context.uiFramework = projectCtx.uiFramework;
         }
 
-        // Format component paths for template
-        if (projectCtx.componentPaths && Object.keys(projectCtx.componentPaths).length > 0) {
-          context.availableComponents = Object.entries(projectCtx.componentPaths)
-            .map(([name, path]) => `- ${name}: \`import { ${name} } from '${path}'\``)
-            .join('\n');
-        }
-
-        // Format type locations
-        if (projectCtx.typePaths) {
-          context.typeLocations = Object.entries(projectCtx.typePaths)
-            .map(([scope, path]) => `- In ${scope}: \`import type { X } from '${path}'\``)
-            .join('\n');
+        // Styling approach
+        if (projectCtx.stylingApproach) {
+          context.stylingApproach = projectCtx.stylingApproach;
         }
 
         // Format forbidden imports
@@ -2608,16 +2732,89 @@ ${step.description || ''}
           context.doNotImport = projectCtx.doNotImport.join(', ');
         }
 
-        // Legacy support: importPatterns/typeLocations as strings
-        if (config.hybrid?.importPatterns) {
-          context.importPatterns = config.hybrid.importPatterns;
+        // Format project warnings
+        if (projectCtx.projectWarnings?.length > 0) {
+          context.projectWarnings = projectCtx.projectWarnings.map(w => `- ⚠️ ${w}`).join('\n');
+        }
+
+        // Format custom rules
+        if (projectCtx.customRules?.length > 0) {
+          context.customRules = projectCtx.customRules.map(r => `- ${r}`).join('\n');
+        }
+
+        // Format type locations
+        if (projectCtx.typeLocations && Object.keys(projectCtx.typeLocations).length > 0) {
+          context.typeLocations = Object.entries(projectCtx.typeLocations)
+            .map(([scope, importPath]) => `- In ${scope}: \`import type { X } from '${importPath}'\``)
+            .join('\n');
         }
       } catch (e) {
         log('dim', `   ⚠️ Could not parse config.json: ${e.message}`);
       }
     }
 
-    // Supplement with app-map.md if available
+    // Load export map for accurate imports
+    const exportMap = loadCachedExportMap();
+    if (exportMap) {
+      context.exportMap = exportMap;
+
+      // Format components
+      if (Object.keys(exportMap.components).length > 0) {
+        context.availableComponents = Object.entries(exportMap.components)
+          .map(([name, info]) => {
+            if (info.exports.length > 0) {
+              return `import { ${info.exports.join(', ')} } from '${info.importPath}';`;
+            } else if (info.defaultExport) {
+              return `import ${info.defaultExport} from '${info.importPath}';`;
+            }
+            return null;
+          })
+          .filter(Boolean)
+          .join('\n');
+      }
+
+      // Format hooks
+      if (Object.keys(exportMap.hooks).length > 0) {
+        context.availableHooks = Object.entries(exportMap.hooks)
+          .map(([name, info]) => info.exports.length > 0
+            ? `import { ${info.exports.join(', ')} } from '${info.importPath}';`
+            : null)
+          .filter(Boolean)
+          .join('\n');
+      }
+
+      // Format services
+      if (Object.keys(exportMap.services).length > 0) {
+        context.availableServices = Object.entries(exportMap.services)
+          .map(([name, info]) => info.exports.length > 0
+            ? `import { ${info.exports.join(', ')} } from '${info.importPath}';`
+            : null)
+          .filter(Boolean)
+          .join('\n');
+      }
+
+      // Format types
+      if (Object.keys(exportMap.types).length > 0) {
+        context.availableTypes = Object.entries(exportMap.types)
+          .map(([name, info]) => info.types?.length > 0
+            ? `import type { ${info.types.join(', ')} } from '${info.importPath}';`
+            : null)
+          .filter(Boolean)
+          .join('\n');
+      }
+
+      // Format utils
+      if (Object.keys(exportMap.utils).length > 0) {
+        context.availableUtils = Object.entries(exportMap.utils)
+          .map(([name, info]) => info.exports.length > 0
+            ? `import { ${info.exports.join(', ')} } from '${info.importPath}';`
+            : null)
+          .filter(Boolean)
+          .join('\n');
+      }
+    }
+
+    // Supplement with app-map.md if no exports found
     const appMapPath = path.join(STATE_DIR, 'app-map.md');
     if (fs.existsSync(appMapPath) && !context.availableComponents) {
       try {
