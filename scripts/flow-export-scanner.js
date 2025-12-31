@@ -378,19 +378,26 @@ function buildExportMap(config) {
   // Scan hooks directory (use config if available, with glob support)
   const hooksDirs = projectContext.hookDirs || ['src/hooks', 'hooks'];
   for (const dir of hooksDirs) {
+    // Convert directory path to import path
+    // apps/web/src/features/auth/hooks -> @/features/auth/hooks
+    // src/hooks -> @/hooks
+    const importBase = dir
+      .replace(/^apps\/\w+\/src\//, '@/')  // apps/web/src/ -> @/
+      .replace(/^src\//, '@/');             // src/ -> @/
+
     // Handle glob patterns like src/hooks/*.ts
     if (dir.includes('*')) {
       const baseDir = dir.split('*')[0].replace(/\/$/, '');
       const fullDir = path.join(PROJECT_ROOT, baseDir);
       if (!fs.existsSync(fullDir)) continue;
 
-      scanDirectoryFlat(fullDir, '@/hooks', exportMap.hooks);
+      scanDirectoryFlat(fullDir, importBase.split('*')[0].replace(/\/$/, ''), exportMap.hooks);
     } else {
       const fullDir = path.join(PROJECT_ROOT, dir);
       if (!fs.existsSync(fullDir)) continue;
 
       // Hooks can be individual files or directories
-      scanDirectoryFlat(fullDir, '@/hooks', exportMap.hooks);
+      scanDirectoryFlat(fullDir, importBase, exportMap.hooks);
     }
   }
 
