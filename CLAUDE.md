@@ -151,6 +151,31 @@ AI agents appear "dumb" when they accumulate errors across files. By validating 
 3. **Verify acceptance criteria** - All scenarios pass
 4. **Run tests** - If configured in config.json
 5. **Update ready.json** - Move task to completed
+6. **Provide Task Completion Report** - See below
+
+### Task Completion Report (MANDATORY)
+
+After completing ANY task, provide a brief report:
+
+```
+📋 Task Completion Report
+
+Agents: [list agents read, e.g., developer.md] or "None"
+Skills: [list skills applied, e.g., nestjs] or "None"
+Docs: [✅/❌] decisions.md [✅/❌] app-map.md [✅/❌] request-log.md
+Rules applied:
+  - [specific rule from decisions.md]
+  - [another rule]
+```
+
+**Example:**
+```
+📋 Task Completion Report
+
+Agents: developer.md
+Skills: None
+Docs: ✅ decisions.md ✅ app-map.md ✅ request-log.md
+```
 
 ### Quality Gates (from config.json):
 Always check `qualityGates` section and ensure required gates pass before marking done.
