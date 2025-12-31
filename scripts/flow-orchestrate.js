@@ -3015,8 +3015,11 @@ class Orchestrator {
       const parallelSteps = readySteps.filter(s => s.canParallelize !== false);
       const sequentialSteps = readySteps.filter(s => s.canParallelize === false);
 
-      if (parallelSteps.length > 1) {
-        log('cyan', `\n⚡ Executing ${parallelSteps.length} steps in parallel...\n`);
+      // Execute parallel steps (includes single step case - Promise.all works fine)
+      if (parallelSteps.length >= 1) {
+        if (parallelSteps.length > 1) {
+          log('cyan', `\n⚡ Executing ${parallelSteps.length} steps in parallel...\n`);
+        }
 
         const parallelResults = await Promise.all(
           parallelSteps.map(step => this.executeStep(step, plan.context))

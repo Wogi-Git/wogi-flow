@@ -152,21 +152,18 @@ type="submit"
 {{customRules}}
 {{/if}}
 
-## Instruction Richness: {{richnessLevel}}
+## Context Level: {{richnessLevel}}
 
-This prompt has been sized to match task complexity:
-- **Minimal** (~1.5k Claude tokens): Trivial changes, typos, single-line edits
-- **Standard** (~3k Claude tokens): Typical tasks, new functions, simple components
-- **Rich** (~5k Claude tokens): Complex tasks, components with state, services
-- **Maximum** (~7k Claude tokens): XL tasks, features, architectural changes
+You have been given comprehensive context to ensure high success rate.
+All imports, types, and patterns above are accurate and verified.
 
 {{#if verbosityGuidance}}
-### Guidance for This Task
+### Implementation Guidance
 {{verbosityGuidance}}
 {{/if}}
 
-Your output should be appropriately detailed. Simple tasks need concise output.
-Complex tasks may require more thorough implementations.
+Use ALL the context provided above. The imports, props, and types shown are
+the source of truth. Do not guess or invent alternatives.
 
 ## Validation
 

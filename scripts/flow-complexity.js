@@ -3,45 +3,60 @@
 /**
  * Wogi Flow - Task Complexity Assessment
  *
- * Analyzes task complexity to estimate appropriate token budget for hybrid mode.
- * Local LLM tokens are free, but right-sizing helps:
- * - Simple tasks: Faster execution, less context noise
- * - Complex tasks: Enough context to succeed without escalation
+ * Analyzes task complexity to guide context richness for the local LLM.
+ *
+ * Key insight: Local LLM tokens are FREE. The goal is to give the LLM
+ * everything it needs for 90%+ success rate. Failed executions cost more
+ * (in Claude retry tokens) than generous upfront context.
+ *
+ * This module helps Claude estimate the MINIMUM context needed for success,
+ * not impose artificial limits on token usage.
  *
  * Usage:
- *   const { assessTaskComplexity, TOKEN_BUDGETS } = require('./flow-complexity');
+ *   const { assessTaskComplexity } = require('./flow-complexity');
  *   const complexity = assessTaskComplexity(task);
  */
 
 // ============================================================
-// Token Budget Tiers
+// Complexity Levels (Guidance, NOT Hard Limits)
 // ============================================================
 
-const TOKEN_BUDGETS = {
+/**
+ * These are GUIDANCE for Claude on how much context to include.
+ * There are NO hard token limits - local LLM tokens are free.
+ *
+ * The suggestedTokens is a minimum estimate for 90%+ success rate.
+ * Claude should include MORE context if there's any doubt.
+ */
+const COMPLEXITY_LEVELS = {
   small: {
-    min: 1000,
-    default: 1500,
-    max: 2000,
-    description: 'Single file, simple change, no new dependencies'
+    suggestedTokens: 2000,
+    description: 'Single file, simple change, no new dependencies',
+    contextNeeds: 'Basic imports list, target file only'
   },
   medium: {
-    min: 2000,
-    default: 3000,
-    max: 4000,
-    description: 'Multi-file changes, moderate complexity, some boilerplate'
+    suggestedTokens: 4000,
+    description: 'Multi-file changes, moderate complexity, some boilerplate',
+    contextNeeds: 'Full imports, props/types for related components, patterns'
   },
   large: {
-    min: 4000,
-    default: 5000,
-    max: 6000,
-    description: 'Many files, complex logic, tests, error handling'
+    suggestedTokens: 6000,
+    description: 'Many files, complex logic, tests, error handling',
+    contextNeeds: 'All imports with usage examples, related code snippets, full types'
   },
   xl: {
-    min: 6000,
-    default: 7000,
-    max: 8000,
-    description: 'Architectural changes, many dependencies, extensive boilerplate'
+    suggestedTokens: 10000,
+    description: 'Architectural changes, many dependencies, extensive boilerplate',
+    contextNeeds: 'Everything available - full context, all examples, comprehensive types'
   }
+};
+
+// Keep TOKEN_BUDGETS for backward compatibility but without hard limits
+const TOKEN_BUDGETS = {
+  small: { default: 2000, description: COMPLEXITY_LEVELS.small.description },
+  medium: { default: 4000, description: COMPLEXITY_LEVELS.medium.description },
+  large: { default: 6000, description: COMPLEXITY_LEVELS.large.description },
+  xl: { default: 10000, description: COMPLEXITY_LEVELS.xl.description }
 };
 
 // ============================================================
@@ -266,21 +281,26 @@ function calculateComplexityScore(factors) {
 
 /**
  * Determines complexity level from score
+ * Uses soft thresholds - these guide context richness, not limit tokens
  * @param {number} score - Calculated score
  * @returns {string} - Complexity level
  */
 function scoreToLevel(score) {
-  if (score <= TOKEN_BUDGETS.small.max) return 'small';
-  if (score <= TOKEN_BUDGETS.medium.max) return 'medium';
-  if (score <= TOKEN_BUDGETS.large.max) return 'large';
+  if (score <= 2000) return 'small';
+  if (score <= 4000) return 'medium';
+  if (score <= 7000) return 'large';
   return 'xl';
 }
 
 /**
  * Main function: Assess task complexity
  *
+ * Returns guidance for Claude on how much context to include.
+ * The estimatedTokens is a MINIMUM for 90%+ success - Claude should
+ * include more if there's any doubt. Local LLM tokens are free!
+ *
  * @param {Object} task - Task object with description, title, acceptanceCriteria, etc.
- * @returns {Object} - Complexity assessment
+ * @returns {Object} - Complexity assessment with guidance (not limits)
  */
 function assessTaskComplexity(task) {
   // Handle string input (just a description)
@@ -310,20 +330,23 @@ function assessTaskComplexity(task) {
   // Calculate score
   const { score, breakdown } = calculateComplexityScore(factors);
 
-  // Determine level
+  // Determine level (guidance, not limit)
   const level = scoreToLevel(score);
-  const budget = TOKEN_BUDGETS[level];
-
-  // Clamp to budget range
-  const estimatedTokens = Math.max(budget.min, Math.min(budget.max, score));
+  const complexityInfo = COMPLEXITY_LEVELS[level];
 
   // Generate reasoning
   const reasoning = generateReasoning(level, factors, breakdown);
+
+  // Estimated tokens is a MINIMUM - no upper limit, local LLM is free
+  // Add buffer for safety (better to include too much than too little)
+  const estimatedTokens = Math.max(score, complexityInfo.suggestedTokens);
 
   return {
     level,
     estimatedTokens,
     reasoning,
+    // What context the LLM needs for this complexity level
+    contextNeeds: complexityInfo.contextNeeds,
     factors: {
       fileCount: factors.fileCount.total,
       filesToCreate: factors.fileCount.create,
@@ -334,7 +357,8 @@ function assessTaskComplexity(task) {
       complexityKeywords: [...factors.keywords.high, ...factors.keywords.medium],
       simplicityKeywords: factors.keywords.simplicity
     },
-    budget,
+    // Keep for backward compatibility
+    budget: TOKEN_BUDGETS[level],
     scoreBreakdown: breakdown
   };
 }
@@ -373,17 +397,19 @@ function generateReasoning(level, factors, breakdown) {
 }
 
 /**
- * Gets the default token budget for a level
+ * Gets the suggested token minimum for a level
  */
 function getDefaultTokens(level) {
-  return TOKEN_BUDGETS[level]?.default || TOKEN_BUDGETS.medium.default;
+  return COMPLEXITY_LEVELS[level]?.suggestedTokens || COMPLEXITY_LEVELS.medium.suggestedTokens;
 }
 
 /**
- * Validates and clamps a token estimate to valid range
+ * Ensures tokens meet minimum threshold
+ * Note: No upper limit - local LLM tokens are free!
  */
-function clampTokens(tokens, minTokens = 1000, maxTokens = 8000) {
-  return Math.max(minTokens, Math.min(maxTokens, tokens));
+function clampTokens(tokens, minTokens = 1000) {
+  // Only enforce minimum - no maximum, local LLM is free
+  return Math.max(minTokens, tokens);
 }
 
 // ============================================================
@@ -392,6 +418,9 @@ function clampTokens(tokens, minTokens = 1000, maxTokens = 8000) {
 
 module.exports = {
   assessTaskComplexity,
+  // New exports
+  COMPLEXITY_LEVELS,
+  // Legacy exports (for backward compatibility)
   TOKEN_BUDGETS,
   COMPLEXITY_KEYWORDS,
   SIMPLICITY_KEYWORDS,
@@ -430,14 +459,14 @@ Examples:
   const result = assessTaskComplexity(taskDescription);
 
   console.log('\n═══════════════════════════════════════════════════════════');
-  console.log('                TASK COMPLEXITY ASSESSMENT');
+  console.log('         TASK COMPLEXITY ASSESSMENT (No Limits!)');
   console.log('═══════════════════════════════════════════════════════════\n');
 
   console.log(`Task: "${taskDescription}"\n`);
 
   console.log(`Level: ${result.level.toUpperCase()}`);
-  console.log(`Estimated Tokens: ${result.estimatedTokens.toLocaleString()}`);
-  console.log(`Budget Range: ${result.budget.min.toLocaleString()} - ${result.budget.max.toLocaleString()}`);
+  console.log(`Minimum Tokens for 90%+ Success: ${result.estimatedTokens.toLocaleString()}`);
+  console.log(`Context Needs: ${result.contextNeeds}`);
   console.log(`\nReasoning: ${result.reasoning}`);
 
   console.log('\n───────────────────────────────────────────────────────────');

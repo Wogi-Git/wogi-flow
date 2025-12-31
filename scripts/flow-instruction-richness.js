@@ -3,11 +3,14 @@
 /**
  * Wogi Flow - Instruction Richness Module
  *
- * Controls how much detail Claude includes in instructions for the local LLM.
- * Higher richness = more Claude tokens spent = higher local LLM success rate.
+ * Controls how much detail to include for the local LLM.
  *
- * Key insight: Spending more Claude tokens upfront on rich instructions
- * saves total tokens by avoiding escalation failures.
+ * KEY INSIGHT: Local LLM tokens are FREE. The goal is to give the LLM
+ * everything it needs for 90%+ success rate. Failed executions cost more
+ * (in Claude retry tokens) than generous upfront context.
+ *
+ * This module provides GUIDANCE on context richness, not hard limits.
+ * When in doubt, include MORE context - it's free for the local LLM!
  *
  * Usage:
  *   const { getInstructionRichness } = require('./flow-instruction-richness');
@@ -18,54 +21,53 @@ const fs = require('fs');
 const path = require('path');
 
 // ============================================================
-// Instruction Richness Levels
+// Instruction Richness Levels (Guidance, NOT Limits)
 // ============================================================
 
 /**
- * Richness levels control what context Claude includes for the local LLM.
+ * Richness levels guide what context to include for the local LLM.
  *
- * The goal is right-sizing: enough context to succeed without escalation,
- * but not wasteful for simple tasks.
+ * IMPORTANT: These are MINIMUMS for each complexity level.
+ * Always include MORE context if there's any doubt - local LLM tokens are free!
+ *
+ * The goal is 90%+ success rate, not minimizing tokens.
  */
 const INSTRUCTION_RICHNESS = {
   minimal: {
-    claudeTokenBudget: 1500,
-    includeProjectContext: false,
-    includeTypeDefinitions: false,
+    // Even "minimal" should include enough for success
+    includeProjectContext: true,  // Always include
+    includeTypeDefinitions: true, // Always include - prevents type errors
     includeRelatedCode: false,
     includeExamples: false,
-    includePatterns: false,
+    includePatterns: true,        // Always include - consistency matters
     includeFullFileContents: false,
-    templateVerbosity: 'concise',
-    description: 'For trivial changes - typos, single-line edits, simple renames'
+    templateVerbosity: 'standard', // Upgraded from 'concise'
+    description: 'Simple changes - but still include types and patterns for accuracy'
   },
 
   standard: {
-    claudeTokenBudget: 3000,
     includeProjectContext: true,
     includeTypeDefinitions: true,
-    includeRelatedCode: false,
-    includeExamples: false,
+    includeRelatedCode: true,     // Include related code for context
+    includeExamples: true,        // Include examples - they help!
     includePatterns: true,
     includeFullFileContents: false,
-    templateVerbosity: 'standard',
-    description: 'For typical tasks - new functions, simple components, basic hooks'
+    templateVerbosity: 'detailed', // Upgraded from 'standard'
+    description: 'Typical tasks - include examples and related code for best results'
   },
 
   rich: {
-    claudeTokenBudget: 5000,
     includeProjectContext: true,
     includeTypeDefinitions: true,
     includeRelatedCode: true,
     includeExamples: true,
     includePatterns: true,
-    includeFullFileContents: false,
-    templateVerbosity: 'detailed',
-    description: 'For complex tasks - components with state, services, multi-file changes'
+    includeFullFileContents: true, // Include full files for complex tasks
+    templateVerbosity: 'comprehensive',
+    description: 'Complex tasks - full context for highest success rate'
   },
 
   maximum: {
-    claudeTokenBudget: 7000,
     includeProjectContext: true,
     includeTypeDefinitions: true,
     includeRelatedCode: true,
@@ -73,7 +75,7 @@ const INSTRUCTION_RICHNESS = {
     includePatterns: true,
     includeFullFileContents: true,
     templateVerbosity: 'comprehensive',
-    description: 'For XL tasks - features, architectural changes, complex integrations'
+    description: 'XL tasks - everything available, maximum context'
   }
 };
 
@@ -343,39 +345,39 @@ function loadSimilarExamples(projectRoot, stepType) {
 
 /**
  * Returns guidance text based on verbosity level
+ *
+ * NOTE: All levels now emphasize completeness over brevity.
+ * Local LLM tokens are free - include everything needed for success!
  */
 function getVerbosityGuidance(verbosity) {
   const guidance = {
-    concise: `
-Keep instructions brief. The local LLM just needs the specific change.
-- One sentence for what to do
-- Essential constraints only
-- No examples unless critical`,
-
     standard: `
-Include standard context. The local LLM needs enough to succeed.
+Include enough context for success. Local LLM tokens are free!
 - Clear description of the task
-- Mention imports, patterns, types needed
-- List any constraints or edge cases`,
+- All imports with exact paths
+- Type definitions for all interfaces
+- Mention patterns to follow`,
 
     detailed: `
-Be thorough. Include all context the local LLM needs to succeed first try.
+Be thorough. Include everything the local LLM needs to succeed first try.
 - Show exact import paths and type signatures
-- Include existing patterns to follow
+- Include ALL props for components being used
+- Show existing patterns to follow
 - Provide examples of similar code
 - List all edge cases and error handling requirements`,
 
     comprehensive: `
 Maximum detail. The local LLM should have complete knowledge to implement
-this without guessing anything.
-- Include full file contents of related files if helpful
-- Show complete type definitions
-- Provide multiple examples
+this without guessing anything. Local LLM tokens are FREE - don't hold back!
+- Include full file contents of related files
+- Show complete type definitions with all fields
+- Provide multiple usage examples
 - Document all integration points
-- Include testing requirements`
+- Include testing requirements
+- Show exact prop values (variant="primary" not variant={variants.primary})`
   };
 
-  return guidance[verbosity] || guidance.standard;
+  return guidance[verbosity] || guidance.detailed;
 }
 
 // ============================================================
@@ -419,7 +421,7 @@ Examples:
   const richness = getInstructionRichness(level);
 
   console.log('\n═══════════════════════════════════════════════════════════');
-  console.log('             INSTRUCTION RICHNESS CONFIG');
+  console.log('     INSTRUCTION RICHNESS CONFIG (Local LLM is FREE!)');
   console.log('═══════════════════════════════════════════════════════════\n');
 
   console.log(`Complexity Level: ${level.toUpperCase()}`);
@@ -427,10 +429,9 @@ Examples:
   console.log(`\n${richness.description}\n`);
 
   console.log('───────────────────────────────────────────────────────────');
-  console.log('                   SETTINGS');
+  console.log('              CONTEXT TO INCLUDE');
   console.log('───────────────────────────────────────────────────────────\n');
 
-  console.log(`Claude Token Budget: ~${richness.claudeTokenBudget.toLocaleString()}`);
   console.log(`Template Verbosity: ${richness.templateVerbosity}`);
   console.log('');
   console.log(`Include Project Context: ${richness.includeProjectContext ? '✅ Yes' : '❌ No'}`);
@@ -445,5 +446,7 @@ Examples:
   console.log('───────────────────────────────────────────────────────────');
   console.log(getVerbosityGuidance(richness.templateVerbosity));
 
-  console.log('\n═══════════════════════════════════════════════════════════\n');
+  console.log('\n💡 Remember: Local LLM tokens are FREE! Include MORE context');
+  console.log('   when in doubt. Failed executions cost more than extra context.\n');
+  console.log('═══════════════════════════════════════════════════════════\n');
 }
