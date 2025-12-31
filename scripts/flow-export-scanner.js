@@ -10,17 +10,37 @@
  * Usage:
  *   node flow-export-scanner.js [project-root]
  *   node flow-export-scanner.js --cache  # Use cached export map if fresh
+ *
+ * When used as a module, call setProjectRoot() before other functions.
  */
 
 const fs = require('fs');
 const path = require('path');
 
-const PROJECT_ROOT = process.argv[2] && !process.argv[2].startsWith('--')
-  ? process.argv[2]
-  : process.cwd();
-const CONFIG_PATH = path.join(PROJECT_ROOT, '.workflow/config.json');
-const CACHE_PATH = path.join(PROJECT_ROOT, '.workflow/state/export-map.json');
+// Default to cwd, can be overridden via setProjectRoot() or CLI arg
+let PROJECT_ROOT = process.cwd();
+let CONFIG_PATH = path.join(PROJECT_ROOT, '.workflow/config.json');
+let CACHE_PATH = path.join(PROJECT_ROOT, '.workflow/state/export-map.json');
 const CACHE_MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Set the project root directory.
+ * Must be called before using any other functions when used as a module.
+ * @param {string} root - Absolute path to project root
+ */
+function setProjectRoot(root) {
+  PROJECT_ROOT = path.resolve(root);
+  CONFIG_PATH = path.join(PROJECT_ROOT, '.workflow/config.json');
+  CACHE_PATH = path.join(PROJECT_ROOT, '.workflow/state/export-map.json');
+}
+
+/**
+ * Get current project root
+ * @returns {string}
+ */
+function getProjectRoot() {
+  return PROJECT_ROOT;
+}
 
 // ============================================================
 // Export Extraction
@@ -355,14 +375,23 @@ function buildExportMap(config) {
     scanDirectory(fullDir, '@/components', exportMap.components, true);
   }
 
-  // Scan hooks directory
-  const hooksDirs = ['src/hooks', 'hooks'];
+  // Scan hooks directory (use config if available, with glob support)
+  const hooksDirs = projectContext.hookDirs || ['src/hooks', 'hooks'];
   for (const dir of hooksDirs) {
-    const fullDir = path.join(PROJECT_ROOT, dir);
-    if (!fs.existsSync(fullDir)) continue;
+    // Handle glob patterns like src/hooks/*.ts
+    if (dir.includes('*')) {
+      const baseDir = dir.split('*')[0].replace(/\/$/, '');
+      const fullDir = path.join(PROJECT_ROOT, baseDir);
+      if (!fs.existsSync(fullDir)) continue;
 
-    // Hooks can be individual files or directories
-    scanDirectoryFlat(fullDir, '@/hooks', exportMap.hooks);
+      scanDirectoryFlat(fullDir, '@/hooks', exportMap.hooks);
+    } else {
+      const fullDir = path.join(PROJECT_ROOT, dir);
+      if (!fs.existsSync(fullDir)) continue;
+
+      // Hooks can be individual files or directories
+      scanDirectoryFlat(fullDir, '@/hooks', exportMap.hooks);
+    }
   }
 
   // Scan services directory
@@ -761,8 +790,14 @@ Output is saved to: .workflow/state/export-map.json
 `);
 }
 
-// Main
+// Main - CLI execution
 if (require.main === module) {
+  // Set project root from CLI arg (only when running directly as CLI)
+  const cliRoot = process.argv[2] && !process.argv[2].startsWith('--')
+    ? path.resolve(process.argv[2])
+    : process.cwd();
+  setProjectRoot(cliRoot);
+
   if (process.argv.includes('--help') || process.argv.includes('-h')) {
     printUsage();
     process.exit(0);
@@ -815,16 +850,23 @@ if (require.main === module) {
 }
 
 module.exports = {
+  // Core scanning functions
   extractExports,
   extractComponentDetails,
   generateUsageExample,
   scanModuleExports,
   scanFileExports,
   buildExportMap,
+  // Cache functions
   loadCachedExportMap,
   saveExportMapCache,
   clearCache,
+  // Formatting functions
   formatExportMapForTemplate,
   validateComponentUsage,
-  formatComponentWithUsage
+  formatComponentWithUsage,
+  // Configuration functions (for use as module)
+  setProjectRoot,
+  getProjectRoot,
+  loadConfig
 };

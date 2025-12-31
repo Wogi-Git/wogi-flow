@@ -44,8 +44,12 @@ const {
   saveExportMapCache,
   formatExportMapForTemplate,
   validateComponentUsage,
-  formatComponentWithUsage
+  formatComponentWithUsage,
+  setProjectRoot: setExportScannerRoot
 } = require('./flow-export-scanner');
+
+// Set export scanner project root to match orchestrator's cwd
+setExportScannerRoot(process.cwd());
 
 // ============================================================
 // Configuration
