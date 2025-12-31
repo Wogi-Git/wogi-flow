@@ -104,43 +104,105 @@ function loadHybridConfig() {
 // Local LLM Client
 // ============================================================
 
+// Model-specific context window defaults for popular models
+const MODEL_DEFAULTS = {
+  'qwen/qwen3-coder-30b': { contextWindow: 32768 },
+  'qwen/qwen3-coder': { contextWindow: 32768 },
+  'qwen3-coder': { contextWindow: 32768 },
+  'nvidia/nemotron-3-nano': { contextWindow: 8192 },
+  'nemotron': { contextWindow: 8192 },
+  'meta/llama-3.3-70b': { contextWindow: 131072 },
+  'llama-3.3': { contextWindow: 131072 },
+  'llama-3.1': { contextWindow: 131072 },
+  'deepseek-coder': { contextWindow: 16384 },
+  'codellama': { contextWindow: 16384 },
+  'mistral': { contextWindow: 32768 },
+  'mixtral': { contextWindow: 32768 },
+};
+
+/**
+ * Gets default settings for a model by name
+ * @param {string} modelName - The model name from config
+ * @returns {Object} - Default settings including contextWindow
+ */
+function getModelDefaults(modelName) {
+  if (!modelName) return { contextWindow: 4096 };
+
+  const lowerName = modelName.toLowerCase();
+
+  // Try exact match first
+  if (MODEL_DEFAULTS[modelName]) {
+    return MODEL_DEFAULTS[modelName];
+  }
+
+  // Try partial match
+  for (const [key, defaults] of Object.entries(MODEL_DEFAULTS)) {
+    if (lowerName.includes(key.toLowerCase())) {
+      return defaults;
+    }
+  }
+
+  return { contextWindow: 4096 }; // Conservative fallback
+}
+
 class LocalLLM {
   constructor(config) {
     this.config = config;
-    this.contextWindow = config.contextWindow || null; // Will be auto-detected
+    this.contextWindow = config.contextWindow || null; // Will be auto-detected or use defaults
     this.modelInfoFetched = false;
   }
 
   /**
    * Fetches model info including context window from the provider.
    * Called once on first generate() call.
+   *
+   * Priority order:
+   * 1. Config override (hybrid.settings.contextWindow)
+   * 2. Auto-detection from provider API
+   * 3. Model-specific defaults
+   * 4. Conservative fallback (4096)
    */
   async fetchModelInfo() {
     if (this.modelInfoFetched) return;
     this.modelInfoFetched = true;
 
+    // Priority 1: Config override
+    if (this.config.contextWindow) {
+      this.contextWindow = this.config.contextWindow;
+      log('dim', `   📊 Using configured context window: ${this.contextWindow.toLocaleString()} tokens`);
+      return;
+    }
+
+    // Get model defaults for fallback
+    const modelDefaults = getModelDefaults(this.config.model);
+
     try {
+      // Priority 2: Auto-detection from provider
       if (this.config.provider === 'ollama') {
         const info = await this.ollamaShowModel();
         if (info.contextLength) {
           this.contextWindow = info.contextLength;
-          log('dim', `   📊 Model context window: ${this.contextWindow.toLocaleString()} tokens`);
+          log('dim', `   📊 Model context window (detected): ${this.contextWindow.toLocaleString()} tokens`);
+          return;
         }
       } else {
         // LM Studio / OpenAI-compatible
         const info = await this.lmStudioGetModelInfo();
         if (info.contextLength) {
           this.contextWindow = info.contextLength;
-          log('dim', `   📊 Model context window: ${this.contextWindow.toLocaleString()} tokens`);
+          log('dim', `   📊 Model context window (detected): ${this.contextWindow.toLocaleString()} tokens`);
+          return;
         }
       }
+
+      // Priority 3: Model-specific defaults
+      this.contextWindow = modelDefaults.contextWindow;
+      log('dim', `   📊 Using model default context window: ${this.contextWindow.toLocaleString()} tokens`);
     } catch (e) {
       log('dim', `   ⚠️ Could not fetch model info: ${e.message}`);
-      // Fall back to default
-      if (!this.contextWindow) {
-        this.contextWindow = 4096;
-        log('dim', `   📊 Using default context window: ${this.contextWindow} tokens`);
-      }
+      // Priority 3/4: Model-specific defaults or conservative fallback
+      this.contextWindow = modelDefaults.contextWindow;
+      log('dim', `   📊 Using model default context window: ${this.contextWindow.toLocaleString()} tokens`);
     }
   }
 
@@ -465,6 +527,120 @@ function isValidCode(code) {
   }
 
   return { valid: true };
+}
+
+// ============================================================
+// Semantic Output Validation
+// ============================================================
+
+/**
+ * Validates that the output semantically matches what was requested.
+ * This catches cases where the code is syntactically valid but implements
+ * the wrong thing (e.g., creating ApprovalChain instead of Button).
+ *
+ * @param {string} code - The generated code
+ * @param {Object} step - The step definition containing type and params
+ * @returns {{ valid: boolean, reason?: string, confidence: number }}
+ */
+function validateOutputMatchesTask(code, step) {
+  if (!code || !step) {
+    return { valid: true, confidence: 0 }; // Can't validate without info
+  }
+
+  const stepType = step.type;
+  const expectedName = step.params?.name || step.params?.componentName || '';
+  const targetPath = step.params?.path || '';
+  const codeLower = code.toLowerCase();
+  const issues = [];
+  let confidence = 100;
+
+  // Extract the expected filename/component name from path
+  const fileBaseName = targetPath
+    ? path.basename(targetPath, path.extname(targetPath))
+    : expectedName;
+
+  // 1. Check if expected name appears in the code
+  if (fileBaseName && fileBaseName.length > 2) {
+    const namePattern = new RegExp(`\\b${escapeRegex(fileBaseName)}\\b`, 'i');
+    if (!namePattern.test(code)) {
+      issues.push(`Expected "${fileBaseName}" not found in output`);
+      confidence -= 40;
+    }
+  }
+
+  // 2. Check step-type specific patterns
+  switch (stepType) {
+    case 'create-component':
+      // Should have a function/const that exports a component
+      if (!/export\s+(default\s+)?function|export\s+(default\s+)?const/.test(code)) {
+        issues.push('No exported function/const found for component');
+        confidence -= 30;
+      }
+      // Should have JSX (tsx file)
+      if (targetPath.endsWith('.tsx') && !/<[A-Z]|<[a-z]+\s|<\//.test(code)) {
+        issues.push('No JSX found in .tsx component');
+        confidence -= 20;
+      }
+      break;
+
+    case 'create-hook':
+      // Should have a use* function
+      if (!/function\s+use[A-Z]|const\s+use[A-Z]/.test(code)) {
+        issues.push('No use* hook function found');
+        confidence -= 50;
+      }
+      break;
+
+    case 'create-service':
+      // Should have exports (functions or class)
+      if (!/export\s+(const|function|class|async)/.test(code)) {
+        issues.push('No exports found in service');
+        confidence -= 30;
+      }
+      break;
+
+    case 'modify-file':
+      // For modifications, the expected changes should be present
+      // This is harder to validate without more context
+      break;
+  }
+
+  // 3. Check for common "wrong thing" patterns
+  // If the code exports something completely different from expected name
+  const exportMatches = code.match(/export\s+(?:default\s+)?(?:function|const|class)\s+(\w+)/g) || [];
+  if (exportMatches.length > 0 && fileBaseName) {
+    const exportNames = exportMatches.map(m => {
+      const parts = m.split(/\s+/);
+      return parts[parts.length - 1];
+    });
+
+    // Check if any export is similar to expected name
+    const hasMatchingExport = exportNames.some(name =>
+      name.toLowerCase().includes(fileBaseName.toLowerCase()) ||
+      fileBaseName.toLowerCase().includes(name.toLowerCase())
+    );
+
+    if (!hasMatchingExport && exportNames.length > 0) {
+      issues.push(`Exports [${exportNames.join(', ')}] but expected "${fileBaseName}"`);
+      confidence -= 30;
+    }
+  }
+
+  // Validation result
+  const valid = confidence >= 50;
+  return {
+    valid,
+    reason: issues.length > 0 ? issues.join('; ') : undefined,
+    confidence,
+    issues
+  };
+}
+
+/**
+ * Escapes special regex characters in a string
+ */
+function escapeRegex(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 // ============================================================
@@ -2343,6 +2519,26 @@ class Orchestrator {
           // Add error context for retry
           prompt += `\n\n## PREVIOUS ERROR\n\nYour output was not valid code. ${codeValidation.reason}\n\nOutput ONLY valid TypeScript/JavaScript code. No explanations, no markdown, no thinking.`;
           continue; // Skip file write, retry
+        }
+
+        // Semantic validation: check if output matches what was requested
+        const semanticValidation = validateOutputMatchesTask(cleanOutput, step);
+        if (!semanticValidation.valid) {
+          log('yellow', `   ⚠️ Semantic mismatch (confidence: ${semanticValidation.confidence}%): ${semanticValidation.reason}`);
+
+          // If confidence is very low, treat as error and retry
+          if (semanticValidation.confidence < 30) {
+            log('red', `   ❌ Output doesn't match task - retrying with clarification`);
+            result.errors.push(`Semantic mismatch: ${semanticValidation.reason}`);
+
+            // Add clarification for retry
+            const expectedName = step.params?.name || path.basename(step.params?.path || '', path.extname(step.params?.path || ''));
+            prompt += `\n\n## PREVIOUS ERROR - WRONG OUTPUT\n\nYour output did not match the task. ${semanticValidation.reason}\n\n**CRITICAL**: You must create "${expectedName}", not something else.\nLook at the "YOUR TASK" section and implement EXACTLY what is requested.`;
+            continue; // Retry with clarification
+          }
+
+          // Medium confidence - warn but proceed
+          log('dim', `   Proceeding despite semantic concerns`);
         }
 
         if (outputPath) {

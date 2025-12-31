@@ -114,3 +114,35 @@ After you output code, it will be automatically validated:
 
 If validation fails, you'll receive the error and must fix it.
 Fix the error and output ONLY the corrected code. No explanations.
+
+═══════════════════════════════════════════════════════════════════════════════
+                    TASK BOUNDARY - YOUR TASK STARTS BELOW
+═══════════════════════════════════════════════════════════════════════════════
+
+**CRITICAL**: Everything ABOVE this line is PROJECT CONTEXT for REFERENCE ONLY.
+- Do NOT implement types/components from the project context
+- Do NOT confuse project patterns with your actual task
+- ONLY implement what is described in YOUR TASK below
+
+## YOUR TASK (IMPLEMENT THIS)
+
+{{#if taskDescription}}
+{{taskDescription}}
+{{else}}
+[Task description will be inserted here by the orchestrator]
+{{/if}}
+
+{{#if targetFile}}
+**Target File**: `{{targetFile}}`
+{{/if}}
+
+{{#if existingContent}}
+**Current File Content**:
+```
+{{existingContent}}
+```
+{{/if}}
+
+═══════════════════════════════════════════════════════════════════════════════
+                              END OF TASK
+═══════════════════════════════════════════════════════════════════════════════

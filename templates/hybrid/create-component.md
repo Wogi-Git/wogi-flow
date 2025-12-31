@@ -6,14 +6,19 @@
 
 ## Component Specification
 
-**Name:** {{name}}
-**File Path:** {{path}}
+**CRITICAL - You are creating this component:**
 
-**Props:**
-{{props}}
+| Field | Value |
+|-------|-------|
+| **Component Name** | `{{name}}` |
+| **File Path** | `{{path}}` |
+| **Props Interface** | `{{name}}Props` |
 
 **Description:**
 {{description}}
+
+**Props (if any):**
+{{props}}
 
 **Must Use These Existing Components/Hooks:**
 {{uses}}
@@ -21,15 +26,50 @@
 **Expected Behavior:**
 {{behavior}}
 
-## Requirements
+## What You MUST Create
 
-1. Create a functional component with proper TypeScript types
-2. Define a Props interface named `{{name}}Props`
-3. Export as named export: `export function {{name}}`
-4. Use the existing components and hooks listed above
-5. Follow the component pattern from _patterns.md exactly
-6. Add JSDoc comment describing the component
+```
+// File: {{path}}
+// Component: {{name}}
+// Interface: {{name}}Props
+
+import { ... } from 'react';
+
+interface {{name}}Props {
+  // props here
+}
+
+/**
+ * [Brief description of {{name}}]
+ */
+export function {{name}}({ ...props }: {{name}}Props) {
+  return (
+    // JSX for {{name}} here
+  );
+}
+```
+
+## What NOT to Create
+
+❌ Do NOT create any component except `{{name}}`
+❌ Do NOT create types/interfaces from the project context section
+❌ Do NOT create components mentioned as "available" - those already exist
+❌ Do NOT output anything except the code for `{{name}}`
+
+## Requirements Checklist
+
+1. [ ] Component is named exactly `{{name}}` (not something else!)
+2. [ ] Props interface is named `{{name}}Props`
+3. [ ] Exported as: `export function {{name}}`
+4. [ ] Uses only imports from "Available Components" or standard React
+5. [ ] Follows the component pattern from _patterns.md
+6. [ ] Has JSDoc comment
+7. [ ] Contains JSX (this is a .tsx file)
 
 ## Output
 
-Output the complete file content starting with imports. No markdown code blocks.
+Output the complete file content starting with imports.
+No markdown code blocks. No explanations. Just the code.
+
+The FIRST LINE must be an import statement.
+The code must define and export `{{name}}`.

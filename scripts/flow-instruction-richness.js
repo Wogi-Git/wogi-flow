@@ -178,16 +178,58 @@ function loadPatterns(projectRoot) {
 }
 
 /**
- * Finds TypeScript types relevant to a file path
+ * Extracts keywords from task description for relevance filtering
  */
-function loadRelevantTypes(projectRoot, filePath) {
+function extractTaskKeywords(taskDescription) {
+  if (!taskDescription) return [];
+
+  // Extract meaningful words (nouns, component names, etc.)
+  const words = taskDescription
+    .replace(/[^a-zA-Z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 2)
+    .map(w => w.toLowerCase());
+
+  // Also extract PascalCase component names
+  const pascalCaseNames = taskDescription.match(/[A-Z][a-z]+(?:[A-Z][a-z]+)*/g) || [];
+
+  return [...new Set([...words, ...pascalCaseNames.map(n => n.toLowerCase())])];
+}
+
+/**
+ * Checks if a type definition is relevant to the task
+ */
+function isTypeRelevant(typeDefinition, keywords, filename) {
+  if (!keywords || keywords.length === 0) return true;
+
+  const typeLower = typeDefinition.toLowerCase();
+  const filenameLower = filename.toLowerCase();
+
+  // Always include types that match the filename
+  if (typeLower.includes(filenameLower) || filenameLower.includes(typeLower.split(/\s+/)[1]?.toLowerCase() || '')) {
+    return true;
+  }
+
+  // Check if any keyword appears in the type definition
+  return keywords.some(keyword => typeLower.includes(keyword));
+}
+
+/**
+ * Finds TypeScript types relevant to a file path and task
+ * @param {string} projectRoot - Project root directory
+ * @param {string} filePath - Target file path
+ * @param {Object} options - Options including taskDescription and maxTypes
+ */
+function loadRelevantTypes(projectRoot, filePath, options = {}) {
   if (!filePath) return null;
 
+  const { taskDescription = '', maxTypes = 5 } = options;
+  const keywords = extractTaskKeywords(taskDescription);
   const types = [];
   const dir = path.dirname(filePath);
   const filename = path.basename(filePath, path.extname(filePath));
 
-  // Common type file locations
+  // Common type file locations - prioritize closest first
   const typeLocations = [
     path.join(dir, 'types.ts'),
     path.join(dir, 'types.d.ts'),
@@ -206,13 +248,21 @@ function loadRelevantTypes(projectRoot, filePath) {
         // Extract interface/type definitions (simplified)
         const typeMatches = content.match(/(?:export\s+)?(?:interface|type)\s+\w+[\s\S]*?(?=\n(?:export\s+)?(?:interface|type|const|function)|$)/g);
         if (typeMatches) {
-          types.push(`// From ${path.relative(projectRoot, fullPath)}`);
-          types.push(...typeMatches.slice(0, 5)); // Limit to 5 most relevant
+          // Filter types by relevance
+          const relevantTypes = typeMatches.filter(t => isTypeRelevant(t, keywords, filename));
+
+          if (relevantTypes.length > 0) {
+            types.push(`// From ${path.relative(projectRoot, fullPath)}`);
+            types.push(...relevantTypes.slice(0, maxTypes - types.length));
+          }
         }
       } catch {
         // Ignore read errors
       }
     }
+
+    // Stop if we have enough types
+    if (types.length >= maxTypes) break;
   }
 
   return types.length > 0 ? types.join('\n\n') : null;
