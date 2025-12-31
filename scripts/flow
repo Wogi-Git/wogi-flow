@@ -92,13 +92,13 @@ show_help() {
 
 case "${1:-}" in
     ready)
-        "$SCRIPT_DIR/flow-ready" "${@:2}"
+        node "$SCRIPT_DIR/flow-ready.js" "${@:2}"
         ;;
     start)
-        "$SCRIPT_DIR/flow-start" "${@:2}"
+        node "$SCRIPT_DIR/flow-start.js" "${@:2}"
         ;;
     done)
-        "$SCRIPT_DIR/flow-done" "${@:2}"
+        node "$SCRIPT_DIR/flow-done.js" "${@:2}"
         ;;
     story)
         "$SCRIPT_DIR/flow-story" "${@:2}"
@@ -110,19 +110,19 @@ case "${1:-}" in
         "$SCRIPT_DIR/flow-bug" "${@:2}"
         ;;
     status)
-        "$SCRIPT_DIR/flow-status" "${@:2}"
+        node "$SCRIPT_DIR/flow-status.js" "${@:2}"
         ;;
     deps)
         "$SCRIPT_DIR/flow-deps" "${@:2}"
         ;;
     health)
-        "$SCRIPT_DIR/flow-health" "${@:2}"
+        node "$SCRIPT_DIR/flow-health.js" "${@:2}"
         ;;
     standup)
         "$SCRIPT_DIR/flow-standup" "${@:2}"
         ;;
     session-end)
-        "$SCRIPT_DIR/flow-session-end" "${@:2}"
+        node "$SCRIPT_DIR/flow-session-end.js" "${@:2}"
         ;;
     init)
         "$SCRIPT_DIR/flow-init" "${@:2}"

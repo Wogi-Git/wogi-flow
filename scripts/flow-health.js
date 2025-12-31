@@ -1,0 +1,207 @@
+#!/usr/bin/env node
+
+/**
+ * Wogi Flow - Health Check
+ *
+ * Verifies workflow files are in sync and properly configured.
+ */
+
+const path = require('path');
+const {
+  PATHS,
+  PROJECT_ROOT,
+  fileExists,
+  dirExists,
+  validateJson,
+  countAppMapComponents,
+  countRequestLogEntries,
+  getLastRequestLogEntry,
+  getGitStatus,
+  countFiles,
+  color,
+  printSection,
+  success,
+  warn,
+  error
+} = require('./flow-utils');
+
+function main() {
+  console.log(color('cyan', 'Wogi Flow Health Check'));
+  console.log('========================');
+  console.log('');
+
+  let issues = 0;
+  let warnings = 0;
+
+  // Check required files
+  printSection('Checking required files...');
+
+  const requiredFiles = [
+    { path: PATHS.config, name: '.workflow/config.json' },
+    { path: PATHS.ready, name: '.workflow/state/ready.json' },
+    { path: PATHS.requestLog, name: '.workflow/state/request-log.md' },
+    { path: PATHS.appMap, name: '.workflow/state/app-map.md' },
+    { path: PATHS.decisions, name: '.workflow/state/decisions.md' },
+    { path: PATHS.progress, name: '.workflow/state/progress.md' },
+    { path: path.join(PROJECT_ROOT, 'CLAUDE.md'), name: 'CLAUDE.md' },
+  ];
+
+  for (const file of requiredFiles) {
+    if (fileExists(file.path)) {
+      console.log(`  ${color('green', '✓')} ${file.name}`);
+    } else {
+      console.log(`  ${color('red', '✗')} ${file.name} - MISSING`);
+      issues++;
+    }
+  }
+
+  // Check required directories
+  console.log('');
+  printSection('Checking directories...');
+
+  const requiredDirs = [
+    { path: PATHS.components, name: '.workflow/state/components' },
+    { path: PATHS.specs, name: '.workflow/specs' },
+    { path: PATHS.changes, name: '.workflow/changes' },
+    { path: PATHS.bugs, name: '.workflow/bugs' },
+    { path: PATHS.archive, name: '.workflow/archive' },
+    { path: path.join(PROJECT_ROOT, 'agents'), name: 'agents' },
+    { path: path.join(PROJECT_ROOT, 'scripts'), name: 'scripts' },
+  ];
+
+  for (const dir of requiredDirs) {
+    if (dirExists(dir.path)) {
+      console.log(`  ${color('green', '✓')} ${dir.name}/`);
+    } else {
+      console.log(`  ${color('red', '✗')} ${dir.name}/ - MISSING`);
+      issues++;
+    }
+  }
+
+  // Validate config.json
+  console.log('');
+  printSection('Validating config.json...');
+
+  if (fileExists(PATHS.config)) {
+    const result = validateJson(PATHS.config);
+    if (result.valid) {
+      console.log(`  ${color('green', '✓')} Valid JSON`);
+    } else {
+      console.log(`  ${color('red', '✗')} Invalid JSON syntax`);
+      issues++;
+    }
+  }
+
+  // Validate ready.json
+  console.log('');
+  printSection('Validating ready.json...');
+
+  if (fileExists(PATHS.ready)) {
+    const result = validateJson(PATHS.ready);
+    if (result.valid) {
+      console.log(`  ${color('green', '✓')} Valid JSON`);
+    } else {
+      console.log(`  ${color('red', '✗')} Invalid JSON syntax`);
+      issues++;
+    }
+  }
+
+  // Check app-map sync
+  console.log('');
+  printSection('Checking app-map sync...');
+
+  const srcComponents = path.join(PROJECT_ROOT, 'src', 'components');
+  if (dirExists(srcComponents)) {
+    const componentCount = countFiles(srcComponents, ['.tsx', '.jsx']);
+    const mappedCount = countAppMapComponents();
+
+    console.log(`  Components in src/: ${componentCount}`);
+    console.log(`  Components in app-map: ${mappedCount}`);
+
+    if (componentCount > mappedCount + 5) {
+      console.log(`  ${color('yellow', '⚠')} App-map may be out of sync`);
+      console.log('    Run: ./scripts/flow update-map scan src/components');
+      warnings++;
+    } else {
+      console.log(`  ${color('green', '✓')} App-map appears in sync`);
+    }
+  } else {
+    console.log(`  ${color('yellow', '⚠')} src/components/ not found (may be OK for new projects)`);
+  }
+
+  // Check git status
+  console.log('');
+  printSection('Checking git status...');
+
+  const git = getGitStatus();
+  if (git.isRepo) {
+    if (git.clean) {
+      console.log(`  ${color('green', '✓')} Working directory clean`);
+    } else {
+      console.log(`  ${color('yellow', '⚠')} ${git.uncommitted} uncommitted changes`);
+      warnings++;
+    }
+  } else {
+    console.log(`  ${color('yellow', '⚠')} Not a git repository`);
+    warnings++;
+  }
+
+  // Check request-log
+  console.log('');
+  printSection('Checking request-log...');
+
+  if (fileExists(PATHS.requestLog)) {
+    const entryCount = countRequestLogEntries();
+    console.log(`  Total entries: ${entryCount}`);
+
+    if (entryCount > 0) {
+      const lastEntry = getLastRequestLogEntry();
+      if (lastEntry) {
+        console.log(`  Last entry: ${lastEntry}`);
+      }
+    }
+  }
+
+  // Check agents
+  console.log('');
+  printSection('Checking agents...');
+
+  const agentsDir = path.join(PROJECT_ROOT, 'agents');
+  const coreAgents = ['orchestrator', 'developer', 'reviewer', 'tester'];
+  const optionalAgents = ['accessibility', 'security', 'performance', 'docs', 'design-system', 'onboarding'];
+
+  for (const agent of coreAgents) {
+    const agentPath = path.join(agentsDir, `${agent}.md`);
+    if (fileExists(agentPath)) {
+      console.log(`  ${color('green', '✓')} ${agent}.md`);
+    } else {
+      console.log(`  ${color('red', '✗')} ${agent}.md - MISSING (core agent)`);
+      issues++;
+    }
+  }
+
+  for (const agent of optionalAgents) {
+    const agentPath = path.join(agentsDir, `${agent}.md`);
+    if (fileExists(agentPath)) {
+      console.log(`  ${color('green', '✓')} ${agent}.md (optional)`);
+    }
+  }
+
+  // Summary
+  console.log('');
+  console.log('========================');
+
+  if (issues === 0 && warnings === 0) {
+    console.log(color('green', '✓ Workflow is healthy!'));
+  } else if (issues === 0) {
+    console.log(color('yellow', `⚠ ${warnings} warning(s), but no critical issues`));
+  } else {
+    console.log(color('red', `✗ ${issues} issue(s), ${warnings} warning(s)`));
+    console.log('');
+    console.log("Run './scripts/flow init' to fix missing files");
+  }
+
+  process.exit(issues > 0 ? 1 : 0);
+}
+
+main();
