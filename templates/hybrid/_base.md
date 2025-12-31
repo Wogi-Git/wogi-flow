@@ -90,13 +90,18 @@ These are either unnecessary (React with JSX transform) or not available in this
 6. Match the project's naming conventions exactly.
 7. Define types inline if unsure about import path.
 
-## Token Budget
+## Instruction Richness: {{richnessLevel}}
 
 This prompt has been sized to match task complexity:
-- **Small** (1-2k tokens): Single file, simple change
-- **Medium** (2-4k tokens): Multi-file, moderate complexity
-- **Large** (4-6k tokens): Many files, complex logic, tests
-- **XL** (6-8k tokens): Architectural changes, extensive boilerplate
+- **Minimal** (~1.5k Claude tokens): Trivial changes, typos, single-line edits
+- **Standard** (~3k Claude tokens): Typical tasks, new functions, simple components
+- **Rich** (~5k Claude tokens): Complex tasks, components with state, services
+- **Maximum** (~7k Claude tokens): XL tasks, features, architectural changes
+
+{{#if verbosityGuidance}}
+### Guidance for This Task
+{{verbosityGuidance}}
+{{/if}}
 
 Your output should be appropriately detailed. Simple tasks need concise output.
 Complex tasks may require more thorough implementations.

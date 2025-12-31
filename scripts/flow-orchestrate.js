@@ -27,6 +27,16 @@ const {
   clampTokens
 } = require('./flow-complexity');
 
+// Import instruction richness module
+const {
+  getInstructionRichness,
+  getVerbosityGuidance,
+  loadProjectContext: loadRichnessContext,
+  loadPatterns,
+  loadRelevantTypes,
+  loadRelatedCode
+} = require('./flow-instruction-richness');
+
 // ============================================================
 // Configuration
 // ============================================================
@@ -78,12 +88,15 @@ function loadHybridConfig() {
     endpoint: hybrid.providerEndpoint || 'http://localhost:11434',
     model: hybrid.model || '',
     temperature: hybrid.settings?.temperature ?? 0.7,
-    maxTokens: hybrid.settings?.maxTokens ?? 4096,
+    // Local LLM tokens are FREE - don't limit output artificially
+    maxTokens: hybrid.settings?.maxTokens ?? 16384,
     maxRetries: hybrid.settings?.maxRetries ?? 2,
     timeout: hybrid.settings?.timeout ?? 120000,
     autoExecute: hybrid.settings?.autoExecute ?? false,
     // Context window can be overridden in config, otherwise auto-detected from model
-    contextWindow: hybrid.settings?.contextWindow || null
+    contextWindow: hybrid.settings?.contextWindow || null,
+    // Instruction richness settings
+    instructionRichness: hybrid.settings?.instructionRichness || {}
   };
 }
 
@@ -1229,6 +1242,39 @@ function displayComplexityAssessment(complexity) {
 }
 
 /**
+ * Displays instruction richness settings to the user
+ */
+function displayInstructionRichness(richness) {
+  log('white', '─'.repeat(60));
+  log('cyan', '              INSTRUCTION RICHNESS');
+  log('white', '─'.repeat(60));
+
+  const levelColors = {
+    minimal: 'green',
+    standard: 'yellow',
+    rich: 'yellow',
+    maximum: 'red'
+  };
+
+  log(levelColors[richness.level] || 'white', `\n   Level: ${richness.level.toUpperCase()}`);
+  log('white', `   Verbosity: ${richness.templateVerbosity}`);
+  log('dim', `   Claude Token Budget: ~${richness.claudeTokenBudget.toLocaleString()}`);
+
+  // Show what will be included
+  const includes = [];
+  if (richness.includeProjectContext) includes.push('Project Context');
+  if (richness.includeTypeDefinitions) includes.push('Types');
+  if (richness.includeRelatedCode) includes.push('Related Code');
+  if (richness.includeExamples) includes.push('Examples');
+  if (richness.includePatterns) includes.push('Patterns');
+  if (richness.includeFullFileContents) includes.push('Full Files');
+
+  log('dim', `   Includes: ${includes.join(', ') || 'Minimal context only'}`);
+  log('dim', `\n   ${richness.description}`);
+  log('white', '');
+}
+
+/**
  * Gets token estimation settings from config
  */
 function getTokenEstimationSettings() {
@@ -1446,6 +1492,15 @@ class TemplateEngine {
   constructor(templatesDir) {
     this.templatesDir = templatesDir;
     this.cache = new Map();
+    this.richness = null; // Instruction richness settings
+    this.projectRoot = PROJECT_ROOT;
+  }
+
+  /**
+   * Set instruction richness level for context-aware rendering
+   */
+  setRichness(richnessConfig) {
+    this.richness = richnessConfig;
   }
 
   loadTemplate(name) {
@@ -1478,8 +1533,53 @@ class TemplateEngine {
     return template;
   }
 
+  /**
+   * Loads additional context based on richness settings
+   */
+  loadRichnessContext(params) {
+    if (!this.richness) return {};
+
+    const context = {};
+    const filePath = params.path;
+
+    // Load patterns from decisions.md
+    if (this.richness.includePatterns) {
+      const patterns = loadPatterns(this.projectRoot);
+      if (patterns) {
+        context.decisionsPatterns = patterns;
+      }
+    }
+
+    // Load relevant type definitions
+    if (this.richness.includeTypeDefinitions && filePath) {
+      const types = loadRelevantTypes(this.projectRoot, filePath);
+      if (types) {
+        context.relevantTypes = types;
+      }
+    }
+
+    // Load related code snippets
+    if (this.richness.includeRelatedCode && filePath) {
+      const related = loadRelatedCode(this.projectRoot, filePath, params.type);
+      if (related) {
+        context.relatedCodeExamples = related;
+      }
+    }
+
+    // Add verbosity guidance
+    context.verbosityGuidance = getVerbosityGuidance(this.richness.templateVerbosity);
+    context.richnessLevel = this.richness.level;
+    context.templateVerbosity = this.richness.templateVerbosity;
+
+    return context;
+  }
+
   render(templateName, params) {
     let template = this.loadTemplate(templateName);
+
+    // Load richness-based context and merge with params
+    const richnessContext = this.loadRichnessContext(params);
+    const augmentedParams = { ...params, ...richnessContext };
 
     // Simple variable substitution
     const substitute = (str, obj, prefix = '') => {
@@ -1505,7 +1605,34 @@ class TemplateEngine {
       return str;
     };
 
-    return substitute(template, params);
+    let result = substitute(template, augmentedParams);
+
+    // Add richness-specific sections if available
+    if (this.richness && (this.richness.includePatterns || this.richness.includeTypeDefinitions || this.richness.includeRelatedCode)) {
+      let additionalContext = '\n\n## Additional Context (Based on Task Complexity)\n\n';
+      let hasContent = false;
+
+      if (richnessContext.decisionsPatterns) {
+        additionalContext += '### Project Patterns\n' + richnessContext.decisionsPatterns + '\n\n';
+        hasContent = true;
+      }
+
+      if (richnessContext.relevantTypes) {
+        additionalContext += '### Relevant Type Definitions\n```typescript\n' + richnessContext.relevantTypes + '\n```\n\n';
+        hasContent = true;
+      }
+
+      if (richnessContext.relatedCodeExamples) {
+        additionalContext += '### Related Code Examples\n' + richnessContext.relatedCodeExamples + '\n\n';
+        hasContent = true;
+      }
+
+      if (hasContent) {
+        result += additionalContext;
+      }
+    }
+
+    return result;
   }
 }
 
@@ -1941,6 +2068,9 @@ class Orchestrator {
 
     // Complexity assessment for the current plan
     this.planComplexity = null;
+
+    // Instruction richness settings (set per-plan based on complexity)
+    this.instructionRichness = null;
   }
 
   /**
@@ -1999,6 +2129,18 @@ class Orchestrator {
         reasoning: 'Token estimation disabled'
       };
     }
+
+    // Get instruction richness based on complexity
+    this.instructionRichness = getInstructionRichness(
+      this.planComplexity.level,
+      this.config.instructionRichness || {}
+    );
+
+    // Set richness on template engine for context-aware rendering
+    this.templates.setRichness(this.instructionRichness);
+
+    // Display richness settings
+    displayInstructionRichness(this.instructionRichness);
 
     // Generate project context ONCE before executing any steps
     // This context is prepended to each step's prompt (local LLM tokens are FREE)
