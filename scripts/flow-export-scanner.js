@@ -16,9 +16,10 @@
 
 const fs = require('fs');
 const path = require('path');
+const { getProjectRoot: getProjectRootFromUtils, getConfig } = require('./flow-utils');
 
-// Default to cwd, can be overridden via setProjectRoot() or CLI arg
-let PROJECT_ROOT = process.cwd();
+// Default to getProjectRoot from utils, can be overridden via setProjectRoot() or CLI arg
+let PROJECT_ROOT = getProjectRootFromUtils();
 let CONFIG_PATH = path.join(PROJECT_ROOT, '.workflow/config.json');
 let CACHE_PATH = path.join(PROJECT_ROOT, '.workflow/state/export-map.json');
 const CACHE_MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes
@@ -41,6 +42,9 @@ function setProjectRoot(root) {
 function getProjectRoot() {
   return PROJECT_ROOT;
 }
+
+// Alias getConfig as loadConfig for minimal code changes
+const loadConfig = getConfig;
 
 // ============================================================
 // Export Extraction
@@ -942,13 +946,6 @@ function formatComponentWithUsage(name, info) {
 // ============================================================
 // CLI
 // ============================================================
-
-function loadConfig() {
-  if (!fs.existsSync(CONFIG_PATH)) {
-    return { hybrid: { projectContext: {} } };
-  }
-  return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
-}
 
 function printUsage() {
   console.log(`

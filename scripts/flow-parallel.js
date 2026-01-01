@@ -21,6 +21,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { getProjectRoot } = require('./flow-utils');
 
 // ============================================================
 // Configuration
@@ -28,8 +29,9 @@ const path = require('path');
 
 /**
  * Load parallel execution config from config.json
+ * @param {string} [projectRoot] - Project root path (defaults to getProjectRoot())
  */
-function loadConfig(projectRoot = process.cwd()) {
+function loadConfig(projectRoot = getProjectRoot()) {
   const configPath = path.join(projectRoot, '.workflow', 'config.json');
   if (!fs.existsSync(configPath)) {
     return getDefaultConfig();

@@ -20,39 +20,19 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-const { getProjectRoot } = require('./flow-utils');
+const { getProjectRoot, getConfig, colors } = require('./flow-utils');
 
 const PROJECT_ROOT = getProjectRoot();
 const WORKFLOW_DIR = path.join(PROJECT_ROOT, '.workflow');
 const SKILLS_DIR = path.join(PROJECT_ROOT, 'skills');
 const STATE_DIR = path.join(WORKFLOW_DIR, 'state');
 
-// Colors
-const colors = {
-  reset: '\x1b[0m',
-  bold: '\x1b[1m',
-  dim: '\x1b[2m',
-  red: '\x1b[31m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  cyan: '\x1b[36m'
-};
-
 function log(color, ...args) {
   console.log(colors[color] + args.join(' ') + colors.reset);
 }
 
-// ============================================================
-// Configuration
-// ============================================================
-
-function loadConfig() {
-  const configPath = path.join(WORKFLOW_DIR, 'config.json');
-  if (!fs.existsSync(configPath)) {
-    return null;
-  }
-  return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-}
+// Alias getConfig as loadConfig for minimal code changes
+const loadConfig = getConfig;
 
 function isLearningEnabled(config, trigger) {
   if (!config?.skillLearning?.enabled) return false;

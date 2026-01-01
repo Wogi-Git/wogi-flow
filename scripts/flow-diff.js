@@ -18,7 +18,7 @@
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
-const { colors: c } = require('./flow-utils');
+const { colors: c, getProjectRoot } = require('./flow-utils');
 
 /**
  * Simple diff implementation (line-based)
@@ -256,7 +256,7 @@ function formatDiffsForDisplay(diffs, options = {}) {
  * Save diffs to a run's artifacts
  */
 function saveDiffsToRun(runId, diffs) {
-  const runDir = path.join(process.cwd(), '.workflow', 'runs', runId);
+  const runDir = path.join(getProjectRoot(), '.workflow', 'runs', runId);
 
   if (!fs.existsSync(runDir)) {
     return false;

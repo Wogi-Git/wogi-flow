@@ -48,8 +48,8 @@ const {
   setProjectRoot: setExportScannerRoot
 } = require('./flow-export-scanner');
 
-// Import getProjectRoot for consistent project root detection
-const { getProjectRoot } = require('./flow-utils');
+// Import utilities for consistent project root and colors
+const { getProjectRoot, colors } = require('./flow-utils');
 
 // ============================================================
 // Configuration
@@ -62,19 +62,6 @@ setExportScannerRoot(PROJECT_ROOT);
 const WORKFLOW_DIR = path.join(PROJECT_ROOT, '.workflow');
 const STATE_DIR = path.join(WORKFLOW_DIR, 'state');
 const TEMPLATES_DIR = path.join(PROJECT_ROOT, 'templates', 'hybrid');
-
-// Colors for terminal output
-const colors = {
-  reset: '\x1b[0m',
-  bright: '\x1b[1m',
-  dim: '\x1b[2m',
-  red: '\x1b[31m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  blue: '\x1b[34m',
-  cyan: '\x1b[36m',
-  white: '\x1b[37m'
-};
 
 function log(color, ...args) {
   console.log(colors[color] + args.join(' ') + colors.reset);

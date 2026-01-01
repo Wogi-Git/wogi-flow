@@ -81,6 +81,11 @@ const PATHS = {
   bugs: path.join(WORKFLOW_DIR, 'bugs'),
   archive: path.join(WORKFLOW_DIR, 'archive'),
   specs: path.join(WORKFLOW_DIR, 'specs'),
+  // Additional workflow directories
+  runs: path.join(WORKFLOW_DIR, 'runs'),
+  checkpoints: path.join(WORKFLOW_DIR, 'checkpoints'),
+  corrections: path.join(WORKFLOW_DIR, 'corrections'),
+  traces: path.join(WORKFLOW_DIR, 'traces'),
 };
 
 // ============================================================

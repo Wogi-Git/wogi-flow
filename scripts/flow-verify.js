@@ -22,11 +22,13 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const { getProjectRoot, colors: c } = require('./flow-utils');
+const { getProjectRoot, getConfig, colors: c } = require('./flow-utils');
 
 const PROJECT_ROOT = getProjectRoot();
 const WORKFLOW_DIR = path.join(PROJECT_ROOT, '.workflow');
-const CONFIG_PATH = path.join(WORKFLOW_DIR, 'config.json');
+
+// Alias getConfig as loadConfig for minimal code changes
+const loadConfig = getConfig;
 
 /**
  * Gate result structure
@@ -266,19 +268,6 @@ const ERROR_PARSERS = {
   }
 };
 
-/**
- * Load project configuration
- */
-function loadConfig() {
-  if (fs.existsSync(CONFIG_PATH)) {
-    try {
-      return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
-    } catch {
-      return {};
-    }
-  }
-  return {};
-}
 
 /**
  * Detect which command to use based on installed packages

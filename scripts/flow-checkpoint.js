@@ -23,13 +23,15 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync, spawnSync } = require('child_process');
-const { getProjectRoot, colors: c } = require('./flow-utils');
+const { getProjectRoot, getConfig, colors: c } = require('./flow-utils');
 
 const PROJECT_ROOT = getProjectRoot();
 const WORKFLOW_DIR = path.join(PROJECT_ROOT, '.workflow');
 const CHECKPOINTS_DIR = path.join(WORKFLOW_DIR, 'checkpoints');
 const CHECKPOINT_LOG = path.join(CHECKPOINTS_DIR, 'checkpoint-log.json');
-const CONFIG_PATH = path.join(WORKFLOW_DIR, 'config.json');
+
+// Alias getConfig as loadConfig for minimal code changes
+const loadConfig = getConfig;
 
 /**
  * Default checkpoint configuration
@@ -331,19 +333,6 @@ class Checkpoint {
   }
 }
 
-/**
- * Load configuration
- */
-function loadConfig() {
-  if (fs.existsSync(CONFIG_PATH)) {
-    try {
-      return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
-    } catch {
-      return {};
-    }
-  }
-  return {};
-}
 
 /**
  * Format checkpoint list for display
