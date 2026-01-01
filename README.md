@@ -16,7 +16,7 @@ A self-improving AI development workflow that learns from your feedback and accu
 | **Continual Learning**    | Skills automatically capture learnings from every session - knowledge persists and improves |
 | **Hybrid Mode**           | Claude plans, local LLM executes - save 85-95% tokens                                       |
 | **Self-Completing Tasks** | `/wogi-start` runs until truly done - no manual completion needed                           |
-| **Autonomous Loops**      | `/wogi-loop` for ad-hoc work that continues until criteria are met                          |
+| **Ad-Hoc Task Handling**  | Ad-hoc requests get the same rigor as structured tasks (clarify → execute → verify)         |
 | **Component Registry**    | Tracks all components to prevent duplication                                                |
 | **Code Traces**           | Task-focused flow documentation with diagrams                                               |
 | **Quality Gates**         | Configurable mandatory steps per task type                                                  |
@@ -53,8 +53,7 @@ Daily commands for working with Wogi Flow. Start with `/wogi-ready` to see tasks
 /wogi-context TASK-012         # Load task context
 
 # Execution
-/wogi-start TASK-012           # Start working on task
-/wogi-loop "Migrate API"       # Run until done (for refactors)
+/wogi-start TASK-012           # Start working on task (self-completing)
 
 # Backlog Management
 /wogi-story "Add user avatar"  # Create task with acceptance criteria
@@ -70,7 +69,7 @@ Daily commands for working with Wogi Flow. Start with `/wogi-ready` to see tasks
 /wogi-session-end              # Save progress and commit
 
 # Context Management (Critical)
-/wogi-compact                  # Free up context (use after 2-3 tasks)
+/compact                       # Free up context (built-in, use after 2-3 tasks)
 
 # Utilities
 /wogi-health                   # Check workflow integrity
@@ -584,15 +583,17 @@ Run quality gates → Update logs → Commit
 
 Options: `--no-loop`, `--pause-between`, `--max-retries N`
 
-### Autonomous Loops
+### Ad-Hoc Task Handling
 
-For ad-hoc work (refactors, migrations):
+When you give Claude a direct implementation request (not via `/wogi-start`), it automatically:
 
-```bash
-/wogi-loop "Migrate all fetch() to apiClient" --done-when "No fetch() calls remain"
-```
+1. **Clarifies** - Asks 1-3 questions about requirements
+2. **Creates criteria** - Generates testable Given/When/Then criteria
+3. **Executes** - Full workflow (app-map check, auto-context, implementation)
+4. **Verifies** - Runs quality gates, confirms criteria are met
+5. **Logs** - Updates request-log.md
 
-Options: `--max-iterations N`, `--verify-command "cmd"`
+Ad-hoc tasks get the same rigor as structured tasks.
 
 ---
 
@@ -869,7 +870,7 @@ Quick reference for chat commands:
 
 | Category       | Commands                                                                                             |
 | -------------- | ---------------------------------------------------------------------------------------------------- |
-| **Tasks**      | `/wogi-ready`, `/wogi-start`, `/wogi-loop`, `/wogi-done`, `/wogi-bulk`, `/wogi-status`, `/wogi-deps` |
+| **Tasks**      | `/wogi-ready`, `/wogi-start`, `/wogi-done`, `/wogi-bulk`, `/wogi-status`, `/wogi-deps`               |
 | **Create**     | `/wogi-story`, `/wogi-feature`, `/wogi-bug`                                                          |
 | **Components** | `/wogi-map`, `/wogi-map-add`, `/wogi-map-scan`, `/wogi-map-check`, `/wogi-map-sync`                  |
 | **Figma**      | `flow figma scan`, `flow figma analyze`, `flow figma confirm`, `flow figma generate`, `flow figma server` |
