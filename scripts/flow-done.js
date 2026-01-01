@@ -6,7 +6,7 @@
  * Runs quality gates and moves task from inProgress to completed.
  */
 
-const { execSync, spawnSync } = require('child_process');
+const { execSync, execFileSync, spawnSync } = require('child_process');
 const {
   PATHS,
   fileExists,
@@ -57,13 +57,14 @@ function runQualityGates(taskId) {
       // Check if request-log has an entry for this task
       try {
         const content = readFile(PATHS.requestLog, '');
-        if (content.includes(taskId) || content.trim().endsWith('---')) {
-          console.log(`  ${color('yellow', '○')} requestLogEntry (verify manually)`);
+        if (content.includes(taskId)) {
+          console.log(`  ${color('green', '✓')} requestLogEntry (found in request-log)`);
         } else {
-          console.log(`  ${color('yellow', '○')} requestLogEntry (verify manually)`);
+          console.log(`  ${color('yellow', '○')} requestLogEntry (add entry to request-log.md)`);
         }
-      } catch {
-        console.log(`  ${color('yellow', '○')} requestLogEntry (verify manually)`);
+      } catch (err) {
+        if (process.env.DEBUG) console.error(`[DEBUG] requestLogEntry check: ${err.message}`);
+        console.log(`  ${color('yellow', '○')} requestLogEntry (could not check)`);
       }
     } else if (gate === 'appMapUpdate') {
       console.log(`  ${color('yellow', '○')} appMapUpdate (verify manually if components created)`);
@@ -94,11 +95,13 @@ function commitChanges(commitMsg) {
       console.log('');
       console.log(color('yellow', 'Committing changes...'));
       execSync('git add -A', { stdio: 'pipe' });
-      execSync(`git commit -m "feat: ${commitMsg}"`, { stdio: 'pipe' });
+      // Use execFileSync to prevent command injection from user-provided commit message
+      execFileSync('git', ['commit', '-m', `feat: ${commitMsg}`], { stdio: 'pipe' });
       success('Changes committed');
     }
-  } catch {
-    // Ignore git errors (not a repo, etc.)
+  } catch (err) {
+    // Log git errors but don't fail the task completion
+    warn(`Git operation skipped: ${err.message || 'not a git repo or no changes'}`);
   }
 }
 

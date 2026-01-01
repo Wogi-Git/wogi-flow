@@ -21,14 +21,12 @@
 
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const { getProjectRoot, getConfig, colors: c } = require('./flow-utils');
+const { recordCommandResult } = require('./flow-metrics');
 
 const PROJECT_ROOT = getProjectRoot();
 const WORKFLOW_DIR = path.join(PROJECT_ROOT, '.workflow');
-
-// Alias getConfig as loadConfig for minimal code changes
-const loadConfig = getConfig;
 
 /**
  * Gate result structure
@@ -147,6 +145,14 @@ const DEFAULT_GATES = {
     ],
     parser: 'prettier',
     autoFix: { cmd: 'npx', args: ['prettier', '--write', '.'] }
+  },
+  securityScan: {
+    name: 'Security Scan',
+    commands: [
+      { cmd: 'npm', args: ['audit', '--json'], detect: null }
+    ],
+    parser: 'security',
+    customChecks: ['secrets', 'injection', 'evalExec']
   }
 };
 
@@ -265,6 +271,64 @@ const ERROR_PARSERS = {
     }
 
     return errors;
+  },
+
+  security: (output) => {
+    const errors = [];
+
+    // Parse npm audit JSON output
+    try {
+      const audit = JSON.parse(output);
+      const vulns = audit.metadata?.vulnerabilities || {};
+
+      if (vulns.critical > 0) {
+        errors.push({
+          message: `${vulns.critical} critical vulnerability(s) found`,
+          severity: 'error',
+          code: 'CRITICAL_VULN'
+        });
+      }
+      if (vulns.high > 0) {
+        errors.push({
+          message: `${vulns.high} high severity vulnerability(s) found`,
+          severity: 'error',
+          code: 'HIGH_VULN'
+        });
+      }
+      if (vulns.moderate > 0) {
+        errors.push({
+          message: `${vulns.moderate} moderate vulnerability(s) found`,
+          severity: 'warning',
+          code: 'MODERATE_VULN'
+        });
+      }
+      if (vulns.low > 0) {
+        errors.push({
+          message: `${vulns.low} low severity vulnerability(s) found`,
+          severity: 'warning',
+          code: 'LOW_VULN'
+        });
+      }
+    } catch {
+      // Not JSON, try line-based parsing
+      if (output.includes('found 0 vulnerabilities')) {
+        // Clean
+      } else if (/found \d+ vulnerabilities/.test(output)) {
+        const match = output.match(/(\d+) (critical|high|moderate|low)/gi);
+        if (match) {
+          for (const m of match) {
+            const [count, severity] = m.split(' ');
+            errors.push({
+              message: `${count} ${severity} vulnerability(s)`,
+              severity: severity === 'critical' || severity === 'high' ? 'error' : 'warning',
+              code: `${severity.toUpperCase()}_VULN`
+            });
+          }
+        }
+      }
+    }
+
+    return errors;
   }
 };
 
@@ -301,11 +365,15 @@ function detectCommand(gate) {
 /**
  * Run a command and capture output
  */
+const MAX_OUTPUT_SIZE = 1024 * 1024; // 1MB limit per stream
+
 function runCommand(cmd, args, timeout = 120000) {
   return new Promise((resolve) => {
     const startTime = Date.now();
     let stdout = '';
     let stderr = '';
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
 
     const proc = spawn(cmd, args, {
       cwd: PROJECT_ROOT,
@@ -314,11 +382,21 @@ function runCommand(cmd, args, timeout = 120000) {
     });
 
     proc.stdout.on('data', (data) => {
-      stdout += data.toString();
+      if (stdout.length < MAX_OUTPUT_SIZE) {
+        stdout += data.toString();
+      } else if (!stdoutTruncated) {
+        stdout += '\n[OUTPUT TRUNCATED - exceeded 1MB]';
+        stdoutTruncated = true;
+      }
     });
 
     proc.stderr.on('data', (data) => {
-      stderr += data.toString();
+      if (stderr.length < MAX_OUTPUT_SIZE) {
+        stderr += data.toString();
+      } else if (!stderrTruncated) {
+        stderr += '\n[OUTPUT TRUNCATED - exceeded 1MB]';
+        stderrTruncated = true;
+      }
     });
 
     proc.on('close', (code) => {
@@ -546,14 +624,201 @@ function generateFixSuggestions(gateName, errors) {
     suggestions.push('Run `npx prettier --write .` to fix formatting');
   }
 
+  if (gateName === 'securityScan') {
+    const hasCritical = errors.some(e => e.code === 'CRITICAL_VULN');
+    const hasHigh = errors.some(e => e.code === 'HIGH_VULN');
+    const hasSecrets = errors.some(e => e.code === 'SECRET_DETECTED');
+    const hasInjection = errors.some(e => e.code === 'INJECTION_RISK');
+
+    if (hasCritical || hasHigh) {
+      suggestions.push('Run `npm audit fix` to auto-fix vulnerabilities');
+      suggestions.push('Run `npm audit fix --force` for breaking changes (review carefully)');
+    }
+    if (hasSecrets) {
+      suggestions.push('Remove hardcoded secrets and use environment variables');
+      suggestions.push('Add secrets to .gitignore and rotate any exposed credentials');
+    }
+    if (hasInjection) {
+      suggestions.push('Use parameterized queries for database operations');
+      suggestions.push('Avoid eval(), new Function(), and exec() with user input');
+    }
+  }
+
   return suggestions;
+}
+
+// ============================================================
+// Security Check Functions
+// ============================================================
+
+/**
+ * Get staged files for security scanning
+ */
+function getStagedFiles() {
+  try {
+    const output = execSync('git diff --cached --name-only', {
+      cwd: PROJECT_ROOT,
+      encoding: 'utf-8'
+    });
+    return output.split('\n').filter(f => f.trim() && /\.(ts|tsx|js|jsx|json|env)$/i.test(f));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Check for hardcoded secrets in files
+ */
+function checkForSecrets(files) {
+  const errors = [];
+  const config = getConfig();
+  const ignorePatterns = config.security?.ignoreFiles || ['*.test.ts', '*.spec.ts'];
+
+  const secretPatterns = [
+    { pattern: /password\s*[:=]\s*['"][^'"]{8,}['"]/gi, name: 'Hardcoded password' },
+    { pattern: /api[_-]?key\s*[:=]\s*['"][^'"]{10,}['"]/gi, name: 'Hardcoded API key' },
+    { pattern: /secret\s*[:=]\s*['"][^'"]{8,}['"]/gi, name: 'Hardcoded secret' },
+    { pattern: /-----BEGIN (RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----/g, name: 'Private key' },
+    { pattern: /sk_live_[a-zA-Z0-9]{24,}/g, name: 'Stripe live key' },
+    { pattern: /sk_test_[a-zA-Z0-9]{24,}/g, name: 'Stripe test key' },
+    { pattern: /ghp_[a-zA-Z0-9]{36}/g, name: 'GitHub personal token' },
+    { pattern: /gho_[a-zA-Z0-9]{36}/g, name: 'GitHub OAuth token' },
+    { pattern: /xox[baprs]-[a-zA-Z0-9-]{10,}/g, name: 'Slack token' },
+    { pattern: /AKIA[0-9A-Z]{16}/g, name: 'AWS access key' },
+    { pattern: /mongodb(\+srv)?:\/\/[^:]+:[^@]+@/g, name: 'MongoDB connection string with password' }
+  ];
+
+  for (const file of files) {
+    // Skip ignored patterns
+    const shouldIgnore = ignorePatterns.some(pattern => {
+      const regex = new RegExp(pattern.replace(/\*/g, '.*'));
+      return regex.test(file);
+    });
+    if (shouldIgnore) continue;
+
+    const filePath = path.join(PROJECT_ROOT, file);
+    if (!fs.existsSync(filePath)) continue;
+
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8');
+
+      for (const { pattern, name } of secretPatterns) {
+        const matches = content.match(pattern);
+        if (matches) {
+          errors.push({
+            file,
+            message: `${name} detected`,
+            severity: 'error',
+            code: 'SECRET_DETECTED',
+            count: matches.length
+          });
+        }
+      }
+    } catch {
+      // Skip unreadable files
+    }
+  }
+
+  return errors;
+}
+
+/**
+ * Check for injection vulnerabilities
+ */
+function checkForInjection(files) {
+  const errors = [];
+  const config = getConfig();
+  const ignorePatterns = config.security?.ignoreFiles || ['*.test.ts', '*.spec.ts'];
+
+  const injectionPatterns = [
+    { pattern: /eval\s*\([^)]*\$\{/g, name: 'eval() with template literal' },
+    { pattern: /new\s+Function\s*\([^)]*\$\{/g, name: 'new Function() with template literal' },
+    { pattern: /exec\s*\([^)]*\$\{/g, name: 'exec() with template literal' },
+    { pattern: /innerHTML\s*=\s*[^;]*\$\{/g, name: 'innerHTML with template literal (XSS risk)' },
+    { pattern: /dangerouslySetInnerHTML/g, name: 'dangerouslySetInnerHTML usage' },
+    { pattern: /\$\{[^}]+\}.*(?:SELECT|INSERT|UPDATE|DELETE|DROP)\s/gi, name: 'Potential SQL injection' }
+  ];
+
+  for (const file of files) {
+    // Skip ignored patterns
+    const shouldIgnore = ignorePatterns.some(pattern => {
+      const regex = new RegExp(pattern.replace(/\*/g, '.*'));
+      return regex.test(file);
+    });
+    if (shouldIgnore) continue;
+
+    const filePath = path.join(PROJECT_ROOT, file);
+    if (!fs.existsSync(filePath)) continue;
+
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8');
+
+      const lines = content.split('\n');
+      for (const { pattern, name } of injectionPatterns) {
+        // Create fresh regex for each pattern to avoid stateful lastIndex issues
+        for (let i = 0; i < lines.length; i++) {
+          const freshPattern = new RegExp(pattern.source, pattern.flags);
+          if (freshPattern.test(lines[i])) {
+            errors.push({
+              file,
+              line: i + 1,
+              message: name,
+              severity: 'warning',
+              code: 'INJECTION_RISK'
+            });
+          }
+        }
+      }
+    } catch {
+      // Skip unreadable files
+    }
+  }
+
+  return errors;
+}
+
+/**
+ * Run all security checks
+ */
+async function runSecurityChecks(gateResult) {
+  const config = getConfig();
+  const securityConfig = config.security || {};
+  const checkPatterns = securityConfig.checkPatterns || {};
+
+  // Get files to scan
+  let files = getStagedFiles();
+  if (files.length === 0) {
+    // Fall back to src directory if no staged files
+    try {
+      const output = execSync('find src -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" 2>/dev/null | head -100', {
+        cwd: PROJECT_ROOT,
+        encoding: 'utf-8'
+      });
+      files = output.split('\n').filter(f => f.trim());
+    } catch {
+      files = [];
+    }
+  }
+
+  // Run secret detection
+  if (checkPatterns.secrets !== false) {
+    const secretErrors = checkForSecrets(files);
+    gateResult.errors.push(...secretErrors);
+  }
+
+  // Run injection detection
+  if (checkPatterns.injection !== false) {
+    const injectionErrors = checkForInjection(files);
+    gateResult.errors.push(...injectionErrors.filter(e => e.severity === 'error'));
+    gateResult.warnings.push(...injectionErrors.filter(e => e.severity === 'warning'));
+  }
 }
 
 /**
  * Run a single verification gate
  */
 async function runGate(gateName, options = {}) {
-  const config = loadConfig();
+  const config = getConfig();
   const gateConfig = config.verifyGates?.[gateName] || DEFAULT_GATES[gateName];
 
   if (!gateConfig) {
@@ -593,10 +858,34 @@ async function runGate(gateName, options = {}) {
   result.errors = parsedErrors.filter(e => e.severity === 'error');
   result.warnings = parsedErrors.filter(e => e.severity === 'warning');
 
+  // Run custom security checks for securityScan gate
+  if (gateName === 'securityScan' && gateConfig.customChecks) {
+    await runSecurityChecks(result);
+    // Update passed status based on errors
+    const config = getConfig();
+    const blockOnHigh = config.security?.blockOnHigh !== false;
+    const hasBlockingErrors = result.errors.some(e =>
+      e.code === 'SECRET_DETECTED' ||
+      e.code === 'CRITICAL_VULN' ||
+      (blockOnHigh && e.code === 'HIGH_VULN')
+    );
+    if (hasBlockingErrors) {
+      result.passed = false;
+    }
+  }
+
   // Generate fix suggestions
   if (!result.passed) {
     result.fixSuggestions = generateFixSuggestions(gateName, result.errors);
   }
+
+  // Record metrics
+  recordCommandResult(result.command, {
+    success: result.passed,
+    duration: result.duration,
+    exitCode: result.exitCode,
+    errorType: result.errors[0]?.code || (result.passed ? null : 'UNKNOWN')
+  });
 
   if (!options.quiet) {
     if (result.passed) {
@@ -614,22 +903,36 @@ async function runGate(gateName, options = {}) {
  * Run multiple gates
  */
 async function runGates(gateNames, options = {}) {
-  const results = [];
-  const config = loadConfig();
+  const config = getConfig();
 
   // Use configured gates if 'all' specified
   if (gateNames.includes('all')) {
     gateNames = Object.keys(config.verifyGates || DEFAULT_GATES);
   }
 
-  for (const gateName of gateNames) {
-    const result = await runGate(gateName, options);
-    results.push(result);
-
-    // Stop on first failure if configured
-    if (!result.passed && options.stopOnFailure) {
-      break;
+  // If stopOnFailure is set or only one gate, run sequentially
+  if (options.stopOnFailure || gateNames.length <= 1) {
+    const results = [];
+    for (const gateName of gateNames) {
+      const result = await runGate(gateName, options);
+      results.push(result);
+      if (!result.passed && options.stopOnFailure) {
+        break;
+      }
     }
+    return results;
+  }
+
+  // Run gates with limited concurrency (max 4 parallel) to avoid resource exhaustion
+  const MAX_CONCURRENT = 4;
+  const results = [];
+
+  for (let i = 0; i < gateNames.length; i += MAX_CONCURRENT) {
+    const batch = gateNames.slice(i, i + MAX_CONCURRENT);
+    const batchResults = await Promise.all(
+      batch.map(gateName => runGate(gateName, options))
+    );
+    results.push(...batchResults);
   }
 
   return results;

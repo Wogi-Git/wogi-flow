@@ -257,5 +257,42 @@
       "design-system",
       "onboarding"
     ]
+  },
+  "multiApproach": {
+    "enabled": true,
+    "mode": "suggest",
+    "triggerOn": ["large", "xl"],
+    "maxApproaches": 3,
+    "selectionStrategy": "first-passing"
+  },
+  "autoContext": {
+    "enabled": true,
+    "showLoadedFiles": true,
+    "maxFilesToLoad": 10
+  },
+  "metrics": {
+    "enabled": true,
+    "trackCommands": true,
+    "retentionDays": 30,
+    "alertOnFailureRate": 0.3
+  },
+  "security": {
+    "scanBeforeCommit": true,
+    "blockOnHigh": true,
+    "checkPatterns": {
+      "secrets": true,
+      "injection": true,
+      "npmAudit": true
+    },
+    "ignoreFiles": ["*.test.ts", "*.spec.ts"]
+  },
+  "modelAdapters": {
+    "enabled": true,
+    "autoLearn": true,
+    "directory": ".workflow/model-adapters"
+  },
+  "codebaseInsights": {
+    "enabled": true,
+    "generateOn": ["onboarding", "manual"]
   }
 }

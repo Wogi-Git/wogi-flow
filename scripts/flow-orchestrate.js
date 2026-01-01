@@ -50,6 +50,7 @@ const {
 
 // Import utilities for consistent project root and colors
 const { getProjectRoot, colors } = require('./flow-utils');
+const { getPromptAdjustments, recordModelResult } = require('./flow-model-adapter');
 
 // ============================================================
 // Configuration
@@ -3243,6 +3244,12 @@ class Orchestrator {
       prompt = this.projectContext + '\n\n---\n\n# Step Instructions\n\n' + prompt;
     }
 
+    // Add model-specific guidance (weaknesses to avoid, patterns that work)
+    const modelAdjustments = getPromptAdjustments(this.config.model);
+    if (modelAdjustments.guidance) {
+      prompt = `## Model-Specific Guidance\n\n${modelAdjustments.guidance}\n\n---\n\n${prompt}`;
+    }
+
     // Show initial context info
     const initialTokens = estimateTokens(prompt);
     log('dim', `   Prompt size: ~${initialTokens.toLocaleString()} tokens (includes project context - FREE)`);
@@ -3425,6 +3432,12 @@ class Orchestrator {
             this.state.updateAppMap(step.stateUpdates.appMap);
           }
 
+          // Record success for model learning
+          recordModelResult(this.config.model, {
+            taskType: step.action || 'unknown',
+            success: true
+          });
+
           log('green', `   ✅ Step completed`);
           return result;
         } else {
@@ -3488,6 +3501,14 @@ class Orchestrator {
       log('dim', `   Error types encountered: ${errorTypes.join(', ')}`);
     }
     log('yellow', `   ⬆️ Flagged for escalation to Claude`);
+
+    // Record failure for model learning
+    recordModelResult(this.config.model, {
+      taskType: step.action || 'unknown',
+      success: false,
+      errorType: errorHistory[0]?.category || 'unknown',
+      errorContext: errorHistory[0]?.message?.slice(0, 200) || null
+    });
 
     return result;
   }

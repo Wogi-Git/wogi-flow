@@ -28,7 +28,7 @@ This scans your project, asks about PRD/docs, detects your tech stack, and gener
 To avoid context overflow errors:
 
 ### Compact Proactively
-Trigger `/wogi-compact` or suggest compaction when:
+Use the built-in `/compact` command (not a wogi-specific command) when:
 - After completing 2-3 tasks
 - After 15-20 back-and-forth messages
 - Before starting a large new task
@@ -127,6 +127,17 @@ AI agents appear "dumb" when they accumulate errors across files. By validating 
 - Any other way of requesting work
 
 ### Before Starting ANY Task:
+
+**Auto-Context (runs automatically):**
+Before ANY work begins, auto-context silently:
+1. Analyzes request for keywords (components, features, actions)
+2. Searches app-map, component-index, and src/
+3. Shows loaded files: "Auto-loaded: Button.tsx, useAuth.ts"
+4. Proceeds with task
+
+This happens automatically - no slash command needed. Configure via `config.json → autoContext`.
+
+**Manual Steps:**
 1. Check `app-map.md` for existing components - **reuse, don't recreate**
 2. Check `decisions.md` for coding patterns to follow
 3. Check `request-log.md` for related past work
@@ -264,7 +275,6 @@ When user types these commands, execute the corresponding action immediately.
 | `/wogi-ready` | Read `ready.json`, show tasks organized by status (ready, in progress, blocked). Summarize what's available to work on. |
 | `/wogi-start [id]` | **Self-completing loop.** Load context, decompose into TodoWrite checklist, implement each scenario with self-verification, run quality gates, auto-complete when truly done. Use `--no-loop` for old behavior. |
 | `/wogi-done [id]` | Manual completion (optional). Check quality gates, update ready.json, commit. Usually not needed since `/wogi-start` auto-completes. |
-| `/wogi-loop "prompt"` | **Autonomous loop for ad-hoc work.** Continues until `--done-when` criteria met. For refactors, migrations, batch work. Options: `--max-iterations N`, `--verify-command "cmd"`. |
 | `/wogi-bulk` | Execute multiple tasks in sequence. Order by dependencies + priority. Follow all Task Execution Rules for each. Compact between tasks. Options: number, task IDs, --auto, --plan. |
 | `/wogi-status` | Show project overview: task counts, active features, bugs, component count, git status, recent request-log entries. |
 | `/wogi-deps [id]` | Find the task in tasks.json, show what it depends on and what depends on it. |
@@ -367,9 +377,21 @@ When user types these commands, execute the corresponding action immediately.
 
 | Command | Action |
 |---------|--------|
-| `/wogi-roadmap` | Show phase-based roadmap (if phases enabled). Visual progress by phase. |
 | `/wogi-correction [TASK-XXX]` | Create detailed correction report for significant bug fix. Based on corrections.mode in config. |
 | `/wogi-help` | Show all available Wogi Flow commands with descriptions. |
+
+### Metrics & Insights
+
+| Command | Action |
+|---------|--------|
+| `/wogi-metrics` | Show command success/failure statistics. Surfaces problematic tools with high failure rates. Configure via `config.json → metrics`. |
+| `/wogi-metrics --problems` | Show only commands with >30% failure rate. |
+| `/wogi-metrics --reset` | Clear all metrics data. |
+| `/wogi-insights` | Regenerate codebase-insights.md. Analyzes architecture, conventions, potential issues, and statistics. |
+| `/wogi-model-adapter` | Show current model adapter info (strengths, weaknesses, prompt adjustments). |
+| `/wogi-model-adapter --stats` | Show per-model success/failure statistics. |
+| `/wogi-multi-approach "task"` | Start multi-approach session for complex task. Generates multiple solutions and validates each. |
+| `/wogi-multi-approach --analyze "task"` | Analyze task for multi-approach suitability without starting session. |
 
 ### Command Execution
 
@@ -477,8 +499,8 @@ When creating correction reports, use:
 When `config.json` → `phases.enabled: true`:
 
 - Tasks can have a `phase` field (0, 1, 2, ...)
-- Use `/wogi-roadmap` to see phase progress
 - Phases are defined in `.workflow/specs/ROADMAP.md`
+- Use `flow status` to see overall progress
 
 ## Creating Stories (CRITICAL)
 
@@ -778,23 +800,61 @@ Commit → Task complete
 - `--pause-between` - Ask confirmation between scenarios
 - `--max-retries N` - Limit retry attempts (default: 5)
 
-## Ad-Hoc Work with /wogi-loop
+## Ad-Hoc Task Handling (IMPORTANT)
 
-For work that isn't a structured task (refactors, migrations, batch operations):
+When a user gives you an implementation request directly (not via /wogi-start):
 
-```
-/wogi-loop "Migrate all fetch() to apiClient" --done-when "No fetch() calls remain, tests pass"
-```
+### Step 1: Recognize Implementation Requests
+These ARE implementation requests:
+- "Add X to Y"
+- "Fix the bug in..."
+- "Create a component for..."
+- "Implement feature X"
 
-Same self-completing philosophy, but for free-form prompts instead of structured tasks.
+These are NOT implementation requests (handle normally):
+- "What does X do?"
+- "How does Y work?"
+- "Show me the code for..."
+
+### Step 2: Structure the Task
+Before implementing, ask 1-3 clarifying questions:
+- What is the expected behavior?
+- Are there edge cases to consider?
+- Any specific requirements?
+
+### Step 3: Create Acceptance Criteria
+Convert answers into testable criteria:
+- Given [state], When [action], Then [outcome]
+
+### Step 4: Execute with Full Workflow
+Apply the same rigor as /wogi-start:
+1. Check app-map.md for existing components
+2. Check decisions.md for patterns
+3. Show auto-context (relevant files)
+4. Create TodoWrite checklist from criteria
+5. Implement each scenario
+
+### Step 5: Verify Completion
+Before declaring done:
+1. Run quality gates (lint, typecheck, test)
+2. Verify each acceptance criterion is met
+3. If verification fails, fix and retry (max 3 attempts)
+4. Update request-log.md
+
+### Step 6: Loop Until Done
+If any criterion is not met after implementation:
+1. Identify what's missing
+2. Implement the fix
+3. Re-verify
+4. Repeat until all criteria pass or max attempts reached
 
 ### When to Use Which
 
-| Situation | Command |
-|-----------|---------|
+| Situation | Command/Approach |
+|-----------|------------------|
 | Task in ready.json with acceptance criteria | `/wogi-start TASK-XXX` |
-| Ad-hoc refactor or migration | `/wogi-loop "prompt" --done-when "criteria"` |
-| Quick one-off fix (no loop needed) | Just do it directly |
+| Ad-hoc implementation request | Apply this section's workflow |
+| Quick one-off fix (trivial, obvious) | Just do it directly |
 
 ## Handling Feedback
 

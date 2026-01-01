@@ -86,6 +86,12 @@ const PATHS = {
   checkpoints: path.join(WORKFLOW_DIR, 'checkpoints'),
   corrections: path.join(WORKFLOW_DIR, 'corrections'),
   traces: path.join(WORKFLOW_DIR, 'traces'),
+  // Factory AI-inspired features
+  commandMetrics: path.join(STATE_DIR, 'command-metrics.json'),
+  modelStats: path.join(STATE_DIR, 'model-stats.json'),
+  approaches: path.join(STATE_DIR, 'approaches'),
+  modelAdapters: path.join(WORKFLOW_DIR, 'model-adapters'),
+  codebaseInsights: path.join(STATE_DIR, 'codebase-insights.md'),
 };
 
 // ============================================================
@@ -192,12 +198,13 @@ function dirExists(dirPath) {
 /**
  * Read JSON file safely
  */
-function readJson(filePath, defaultValue = null) {
+function readJson(filePath, defaultValue = undefined) {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
     return JSON.parse(content);
   } catch (e) {
-    if (defaultValue !== null) {
+    // Check for undefined to allow falsy defaults like false, 0, ''
+    if (defaultValue !== undefined) {
       return defaultValue;
     }
     throw new Error(`Failed to read JSON from ${filePath}: ${e.message}`);
@@ -219,11 +226,12 @@ function writeJson(filePath, data) {
 /**
  * Read text file safely
  */
-function readFile(filePath, defaultValue = null) {
+function readFile(filePath, defaultValue = undefined) {
   try {
     return fs.readFileSync(filePath, 'utf-8');
   } catch (e) {
-    if (defaultValue !== null) {
+    // Check for undefined to allow falsy defaults like false, 0, ''
+    if (defaultValue !== undefined) {
       return defaultValue;
     }
     throw new Error(`Failed to read file ${filePath}: ${e.message}`);
@@ -259,11 +267,39 @@ function validateJson(filePath) {
 // Config Operations
 // ============================================================
 
+// Config cache for performance (avoids repeated file reads)
+let _configCache = null;
+let _configMtime = null;
+
 /**
- * Read workflow config
+ * Read workflow config (cached, invalidates on file change)
  */
 function getConfig() {
-  return readJson(PATHS.config, {});
+  const configPath = PATHS.config;
+  if (!fs.existsSync(configPath)) return {};
+
+  try {
+    const stat = fs.statSync(configPath);
+    if (_configCache && _configMtime === stat.mtimeMs) {
+      return _configCache;
+    }
+
+    _configCache = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    _configMtime = stat.mtimeMs;
+    return _configCache;
+  } catch (err) {
+    // Log warning instead of silently returning empty config
+    console.warn(`Warning: Could not parse config.json: ${err.message}`);
+    return {};
+  }
+}
+
+/**
+ * Invalidate config cache (call after writing config)
+ */
+function invalidateConfigCache() {
+  _configCache = null;
+  _configMtime = null;
 }
 
 /**
@@ -303,6 +339,8 @@ function setConfigValue(configPath, newValue) {
 
   obj[parts[parts.length - 1]] = newValue;
   writeJson(PATHS.config, config);
+  // Invalidate cache after writing to ensure next getConfig() reads fresh data
+  invalidateConfigCache();
 }
 
 // ============================================================
@@ -547,7 +585,12 @@ function addAppMapComponent(component) {
     const lastPipeIndex = sectionContent.lastIndexOf('\n|');
 
     if (lastPipeIndex !== -1) {
-      const insertIndex = sectionIndex + lastPipeIndex + sectionContent.substring(lastPipeIndex).indexOf('\n', 1);
+      // Find the end of the last row (next newline after the pipe)
+      const afterPipe = sectionContent.substring(lastPipeIndex);
+      const newlineOffset = afterPipe.indexOf('\n', 1);
+      // If no newline found, insert at end of section content
+      const insertOffset = newlineOffset !== -1 ? newlineOffset : afterPipe.length;
+      const insertIndex = sectionIndex + lastPipeIndex + insertOffset;
       content = content.substring(0, insertIndex) + '\n' + newRow + content.substring(insertIndex);
     } else {
       // No table rows yet, add after header
@@ -555,6 +598,10 @@ function addAppMapComponent(component) {
       if (headerEnd !== -1) {
         const insertIndex = sectionIndex + headerEnd;
         content = content.substring(0, insertIndex) + '\n' + newRow + content.substring(insertIndex);
+      } else {
+        // Malformed section - no header end found
+        warn(`Could not find proper insertion point in section "${section}"`);
+        return false;
       }
     }
 
@@ -650,31 +697,43 @@ function listFiles(dirPath, extension = null) {
 }
 
 /**
- * Count files recursively
+ * Count files recursively with depth limit and symlink protection
  */
-function countFiles(dirPath, extensions = []) {
+function countFiles(dirPath, extensions = [], maxDepth = 10) {
   let count = 0;
+  const visited = new Set(); // Prevent infinite loops from symlinks
 
-  function walk(dir) {
+  function walk(dir, depth) {
+    if (depth <= 0) return; // Depth limit reached
+
     try {
+      // Resolve real path to detect symlink cycles
+      const realPath = fs.realpathSync(dir);
+      if (visited.has(realPath)) return; // Already visited (symlink cycle)
+      visited.add(realPath);
+
       const entries = fs.readdirSync(dir, { withFileTypes: true });
       for (const entry of entries) {
+        // Skip node_modules and hidden directories for performance
+        if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+
         const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          walk(fullPath);
+        if (entry.isDirectory() && !entry.isSymbolicLink()) {
+          walk(fullPath, depth - 1);
         } else if (entry.isFile()) {
           if (extensions.length === 0 || extensions.some(ext => entry.name.endsWith(ext))) {
             count++;
           }
         }
       }
-    } catch {
-      // Ignore permission errors
+    } catch (err) {
+      // Ignore permission errors, log others in debug mode
+      if (process.env.DEBUG) console.error(`[DEBUG] countFiles: ${err.message}`);
     }
   }
 
   if (dirExists(dirPath)) {
-    walk(dirPath);
+    walk(dirPath, maxDepth);
   }
 
   return count;
@@ -715,6 +774,7 @@ module.exports = {
   getConfig,
   getConfigValue,
   setConfigValue,
+  invalidateConfigCache,
 
   // Ready.json
   getReadyData,

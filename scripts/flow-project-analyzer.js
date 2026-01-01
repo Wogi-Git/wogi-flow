@@ -571,6 +571,335 @@ function clearContextCache() {
 }
 
 // ============================================================
+// Codebase Insights Generation
+// ============================================================
+
+/**
+ * Detect architecture pattern based on directory structure
+ */
+function detectArchitecturePattern() {
+  const indicators = {
+    monorepo: fs.existsSync(path.join(PROJECT_ROOT, 'packages')) ||
+              fs.existsSync(path.join(PROJECT_ROOT, 'apps')),
+    modular: fs.existsSync(path.join(PROJECT_ROOT, 'src/modules')) ||
+             fs.existsSync(path.join(PROJECT_ROOT, 'src/features')),
+    layered: fs.existsSync(path.join(PROJECT_ROOT, 'src/controllers')) &&
+             fs.existsSync(path.join(PROJECT_ROOT, 'src/services')),
+    componentBased: fs.existsSync(path.join(PROJECT_ROOT, 'src/components')),
+    pagesBased: fs.existsSync(path.join(PROJECT_ROOT, 'pages')) ||
+                fs.existsSync(path.join(PROJECT_ROOT, 'app'))
+  };
+
+  if (indicators.monorepo) return { pattern: 'Monorepo', description: 'Multi-package workspace with shared code' };
+  if (indicators.modular) return { pattern: 'Modular Monolith', description: 'Feature-based module structure in single deployable' };
+  if (indicators.layered) return { pattern: 'Layered Architecture', description: 'Separated controllers, services, and repositories' };
+  if (indicators.pagesBased && indicators.componentBased) return { pattern: 'Page-Component Architecture', description: 'Page-based routing with shared components' };
+  if (indicators.componentBased) return { pattern: 'Component-Based', description: 'UI component focused structure' };
+
+  return { pattern: 'Simple/Flat', description: 'Basic project structure' };
+}
+
+/**
+ * Detect naming conventions from file samples
+ */
+function detectConventions() {
+  const conventions = {
+    files: 'unknown',
+    components: 'unknown',
+    functions: 'unknown',
+    constants: 'unknown',
+    imports: 'unknown'
+  };
+
+  const srcDir = path.join(PROJECT_ROOT, 'src');
+  if (!fs.existsSync(srcDir)) return conventions;
+
+  try {
+    // Sample some files
+    const tsFiles = findFiles(srcDir, /\.tsx?$/).slice(0, 20);
+
+    // Check file naming
+    const fileNames = tsFiles.map(f => path.basename(f, path.extname(f)));
+    const kebabCount = fileNames.filter(n => /^[a-z]+(-[a-z]+)*$/.test(n)).length;
+    const pascalCount = fileNames.filter(n => /^[A-Z][a-zA-Z]*$/.test(n)).length;
+    const camelCount = fileNames.filter(n => /^[a-z][a-zA-Z]*$/.test(n)).length;
+
+    if (kebabCount > pascalCount && kebabCount > camelCount) conventions.files = 'kebab-case';
+    else if (pascalCount > camelCount) conventions.files = 'PascalCase';
+    else if (camelCount > 0) conventions.files = 'camelCase';
+
+    // Check component naming (from .tsx files)
+    const componentFiles = tsFiles.filter(f => f.endsWith('.tsx'));
+    if (componentFiles.length > 0) {
+      const content = fs.readFileSync(componentFiles[0], 'utf-8');
+      if (/export\s+(default\s+)?function\s+[A-Z]/.test(content)) {
+        conventions.components = 'PascalCase function components';
+      } else if (/const\s+[A-Z][a-zA-Z]+\s*=\s*\(/.test(content)) {
+        conventions.components = 'PascalCase arrow function components';
+      }
+    }
+
+    // Check import style
+    if (tsFiles.length > 0) {
+      const content = fs.readFileSync(tsFiles[0], 'utf-8');
+      if (content.includes('@/')) conventions.imports = 'Absolute with @/ alias';
+      else if (content.includes('~/')) conventions.imports = 'Absolute with ~/ alias';
+      else if (/from\s+['"]\.\.?\//.test(content)) conventions.imports = 'Relative imports';
+    }
+
+  } catch {
+    // Ignore errors
+  }
+
+  return conventions;
+}
+
+/**
+ * Detect potential issues in the codebase
+ */
+function detectPotentialIssues() {
+  const issues = [];
+  const srcDir = path.join(PROJECT_ROOT, 'src');
+
+  if (!fs.existsSync(srcDir)) return issues;
+
+  try {
+    // Check for large files (>500 lines)
+    const allFiles = findFiles(srcDir, /\.(ts|tsx|js|jsx)$/);
+    for (const file of allFiles.slice(0, 100)) {
+      try {
+        const content = fs.readFileSync(file, 'utf-8');
+        const lines = content.split('\n').length;
+        if (lines > 500) {
+          issues.push({
+            type: 'large-file',
+            severity: 'warning',
+            file: path.relative(PROJECT_ROOT, file),
+            message: `Large file (${lines} lines) - consider splitting`
+          });
+        }
+      } catch {}
+    }
+
+    // Check for files without tests
+    const componentFiles = allFiles.filter(f =>
+      f.includes('/components/') &&
+      !f.includes('.test.') &&
+      !f.includes('.spec.') &&
+      !f.includes('.stories.')
+    );
+    const testFiles = findFiles(srcDir, /\.(test|spec)\.(ts|tsx|js|jsx)$/);
+    const testedComponents = new Set(
+      testFiles.map(f => path.basename(f).replace(/\.(test|spec)\.(ts|tsx|js|jsx)$/, ''))
+    );
+
+    for (const comp of componentFiles.slice(0, 20)) {
+      const baseName = path.basename(comp).replace(/\.(ts|tsx|js|jsx)$/, '');
+      if (!testedComponents.has(baseName) && baseName !== 'index') {
+        issues.push({
+          type: 'missing-test',
+          severity: 'info',
+          file: path.relative(PROJECT_ROOT, comp),
+          message: 'No test file found'
+        });
+      }
+    }
+
+    // Check for console.log statements
+    let consoleCount = 0;
+    for (const file of allFiles.slice(0, 50)) {
+      try {
+        const content = fs.readFileSync(file, 'utf-8');
+        const matches = content.match(/console\.(log|warn|error)\(/g);
+        if (matches) consoleCount += matches.length;
+      } catch {}
+    }
+    if (consoleCount > 10) {
+      issues.push({
+        type: 'console-statements',
+        severity: 'info',
+        message: `Found ${consoleCount} console statements - consider removing for production`
+      });
+    }
+
+  } catch {
+    // Ignore errors
+  }
+
+  return issues;
+}
+
+/**
+ * Gather project statistics
+ */
+function gatherStatistics() {
+  const stats = {
+    totalFiles: 0,
+    typeScriptFiles: 0,
+    javaScriptFiles: 0,
+    testFiles: 0,
+    componentCount: 0,
+    hookCount: 0,
+    serviceCount: 0
+  };
+
+  const srcDir = path.join(PROJECT_ROOT, 'src');
+  if (!fs.existsSync(srcDir)) return stats;
+
+  try {
+    const allFiles = findFiles(srcDir, /\.(ts|tsx|js|jsx)$/);
+    stats.totalFiles = allFiles.length;
+    stats.typeScriptFiles = allFiles.filter(f => /\.tsx?$/.test(f)).length;
+    stats.javaScriptFiles = allFiles.filter(f => /\.jsx?$/.test(f)).length;
+    stats.testFiles = allFiles.filter(f => /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(f)).length;
+
+    // Count components (files in components/ directory or .tsx files with PascalCase names)
+    stats.componentCount = allFiles.filter(f =>
+      (f.includes('/components/') || f.includes('/ui/')) &&
+      !f.includes('.test.') &&
+      !f.includes('.stories.')
+    ).length;
+
+    // Count hooks (use*.ts files)
+    stats.hookCount = allFiles.filter(f =>
+      /\/use[A-Z][a-zA-Z]*\.(ts|tsx)$/.test(f)
+    ).length;
+
+    // Count services
+    stats.serviceCount = allFiles.filter(f =>
+      f.includes('.service.') || f.includes('/services/')
+    ).length;
+
+  } catch {
+    // Ignore errors
+  }
+
+  return stats;
+}
+
+/**
+ * Generate codebase insights markdown file
+ */
+function generateCodebaseInsights() {
+  const architecture = detectArchitecturePattern();
+  const conventions = detectConventions();
+  const issues = detectPotentialIssues();
+  const stats = gatherStatistics();
+  const framework = detectUIFramework();
+  const styling = detectStylingApproach();
+
+  const tsRatio = stats.totalFiles > 0
+    ? Math.round((stats.typeScriptFiles / stats.totalFiles) * 100)
+    : 0;
+
+  let markdown = `# Codebase Insights
+
+Generated: ${new Date().toISOString().split('T')[0]}
+
+## Architecture Pattern
+
+**${architecture.pattern}**
+
+${architecture.description}
+
+## Tech Stack
+
+- **Framework**: ${framework || 'Not detected'}
+- **Styling**: ${styling || 'Not detected'}
+- **TypeScript**: ${tsRatio}% of codebase
+
+## Conventions Detected
+
+| Aspect | Convention |
+|--------|------------|
+| Files | ${conventions.files} |
+| Components | ${conventions.components} |
+| Imports | ${conventions.imports} |
+
+## Statistics
+
+| Metric | Count |
+|--------|-------|
+| Total source files | ${stats.totalFiles} |
+| TypeScript files | ${stats.typeScriptFiles} |
+| Test files | ${stats.testFiles} |
+| Components | ${stats.componentCount} |
+| Hooks | ${stats.hookCount} |
+| Services | ${stats.serviceCount} |
+
+`;
+
+  // Add issues section if any
+  if (issues.length > 0) {
+    markdown += `## Potential Issues
+
+`;
+    const grouped = {
+      'large-file': [],
+      'missing-test': [],
+      'console-statements': [],
+      'other': []
+    };
+
+    for (const issue of issues) {
+      const group = grouped[issue.type] || grouped['other'];
+      group.push(issue);
+    }
+
+    if (grouped['large-file'].length > 0) {
+      markdown += `### Large Files\n`;
+      for (const issue of grouped['large-file'].slice(0, 5)) {
+        markdown += `- [ ] \`${issue.file}\` - ${issue.message}\n`;
+      }
+      markdown += '\n';
+    }
+
+    if (grouped['missing-test'].length > 0) {
+      markdown += `### Missing Tests (${grouped['missing-test'].length} files)\n`;
+      for (const issue of grouped['missing-test'].slice(0, 5)) {
+        markdown += `- [ ] \`${issue.file}\`\n`;
+      }
+      if (grouped['missing-test'].length > 5) {
+        markdown += `- ... and ${grouped['missing-test'].length - 5} more\n`;
+      }
+      markdown += '\n';
+    }
+
+    if (grouped['console-statements'].length > 0) {
+      markdown += `### Code Quality\n`;
+      for (const issue of grouped['console-statements']) {
+        markdown += `- [ ] ${issue.message}\n`;
+      }
+      markdown += '\n';
+    }
+  } else {
+    markdown += `## Code Health
+
+No significant issues detected.\n`;
+  }
+
+  return markdown;
+}
+
+/**
+ * Save codebase insights to file
+ */
+function saveCodebaseInsights() {
+  const insightsPath = path.join(PROJECT_ROOT, '.workflow', 'state', 'codebase-insights.md');
+  const dir = path.dirname(insightsPath);
+
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
+  const markdown = generateCodebaseInsights();
+  fs.writeFileSync(insightsPath, markdown);
+
+  console.log(`✓ Generated codebase insights: ${insightsPath}`);
+  return insightsPath;
+}
+
+// ============================================================
 // CLI
 // ============================================================
 
@@ -602,9 +931,21 @@ if (require.main === module) {
     process.exit(0);
   }
 
+  // Generate insights only
+  if (process.argv.includes('--insights')) {
+    saveCodebaseInsights();
+    process.exit(0);
+  }
+
   const analysis = analyzeProject();
   const success = updateConfig(analysis);
   clearContextCache();
+
+  // Also generate codebase insights during full analysis
+  const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+  if (config.codebaseInsights?.enabled !== false) {
+    saveCodebaseInsights();
+  }
 
   if (success) {
     console.log('\n✓ Project analysis complete!');
@@ -624,4 +965,11 @@ module.exports = {
   generateComponentGlobPatterns,
   generateFrameworkConfig,
   detectConfigFiles,
+  // Codebase insights
+  detectArchitecturePattern,
+  detectConventions,
+  detectPotentialIssues,
+  gatherStatistics,
+  generateCodebaseInsights,
+  saveCodebaseInsights
 };
