@@ -260,23 +260,58 @@ cleanup() {
 }
 
 print_completion() {
+    local old_version=$(cat "$TEMP_DIR/old_version" 2>/dev/null || echo "unknown")
+    local new_version=$(cat "$PROJECT_ROOT/.wogi-version" 2>/dev/null || echo "unknown")
+
     echo ""
     echo -e "${GREEN}╔═══════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${GREEN}║           ✅ Wogi Flow updated successfully!                  ║${NC}"
     echo -e "${GREEN}╚═══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "${BOLD}What was updated:${NC}"
+    echo -e "  Updated: ${BOLD}v${old_version}${NC} → ${BOLD}v${new_version}${NC}"
+    echo ""
+    echo -e "${BOLD}Updated files:${NC}"
     for path in "${UPDATE_PATHS[@]}"; do
-        echo "  • $path"
+        echo "  - $path"
     done
     echo ""
-    echo -e "${BOLD}What was preserved:${NC}"
-    echo "  • Project configuration"
-    echo "  • All workflow state (tasks, logs, history)"
-    echo "  • Custom rules"
-    echo "  • Installed skills"
+
+    # Show features based on new version
+    case "$new_version" in
+        1.6.*)
+            echo -e "${BOLD}New in v1.6:${NC}"
+            echo "  - Template {{#if}} conditionals now work properly"
+            echo "  - Tiered help: flow help --quick, flow help <command>"
+            echo "  - Action-oriented status with recommended next action"
+            echo "  - Token budgeting with auto-detection from Ollama/LM Studio"
+            echo "  - Lint auto-fix retry before failing gates"
+            echo "  - Correction artifacts (last-failure.json) on gate failure"
+            echo "  - File locking for safe parallel execution"
+            echo "  - Config schema validation warns about typos"
+            echo "  - Golden examples in component/hook templates"
+            echo "  - Plan-execute pattern for complex tasks"
+            ;;
+        1.5.*)
+            echo -e "${BOLD}New in v1.5:${NC}"
+            echo "  - Worktree isolation for safe parallel execution"
+            echo "  - Parallel execution of independent tasks"
+            echo "  - Figma analyzer - match designs to existing components"
+            echo "  - Auto-context loads relevant files automatically"
+            echo "  - Task completion reports"
+            echo "  - Metrics & insights tracking"
+            echo "  - Model adapter for per-model adjustments"
+            ;;
+        *)
+            echo -e "${BOLD}What was preserved:${NC}"
+            echo "  - Project configuration"
+            echo "  - All workflow state (tasks, logs, history)"
+            echo "  - Custom rules"
+            echo "  - Installed skills"
+            ;;
+    esac
+
     echo ""
-    echo -e "${YELLOW}Tip:${NC} Run /wogi-health to verify everything is working."
+    echo -e "${YELLOW}Run /wogi-health to verify everything is working.${NC}"
 }
 
 # Main
