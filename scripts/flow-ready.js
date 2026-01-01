@@ -91,4 +91,6 @@ function main() {
   console.log(`Total active: ${total} (${ready.length} ready, ${inProgress.length} in progress, ${blocked.length} blocked)`);
 }
 
-main();
+if (require.main === module) {
+  main();
+}

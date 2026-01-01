@@ -107,6 +107,8 @@ const colors = {
 
   bgRed: '\x1b[41m',
   bgGreen: '\x1b[42m',
+  bgYellow: '\x1b[43m',
+  bgBlue: '\x1b[44m',
 };
 
 /**

@@ -100,4 +100,6 @@ function main() {
   console.log(color('cyan', '═'.repeat(50)));
 }
 
-main();
+if (require.main === module) {
+  main();
+}

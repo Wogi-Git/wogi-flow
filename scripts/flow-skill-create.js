@@ -14,22 +14,11 @@
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
-const { getProjectRoot } = require('./flow-utils');
+const { getProjectRoot, colors } = require('./flow-utils');
 
 const PROJECT_ROOT = getProjectRoot();
 const SKILLS_DIR = path.join(PROJECT_ROOT, 'skills');
 const TEMPLATE_DIR = path.join(SKILLS_DIR, '_template');
-
-// Colors
-const colors = {
-  reset: '\x1b[0m',
-  bold: '\x1b[1m',
-  dim: '\x1b[2m',
-  red: '\x1b[31m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  cyan: '\x1b[36m'
-};
 
 function log(color, ...args) {
   console.log(colors[color] + args.join(' ') + colors.reset);

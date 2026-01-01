@@ -337,7 +337,7 @@ if (require.main === module) {
 
     case 'check': {
       // Load tasks from ready.json and check for parallelizable ones
-      const readyPath = path.join(process.cwd(), '.workflow', 'state', 'ready.json');
+      const readyPath = path.join(getProjectRoot(), '.workflow', 'state', 'ready.json');
       if (!fs.existsSync(readyPath)) {
         console.log('No ready.json found');
         process.exit(1);

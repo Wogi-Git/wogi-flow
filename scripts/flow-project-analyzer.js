@@ -12,8 +12,9 @@
 
 const fs = require('fs');
 const path = require('path');
+const { getProjectRoot } = require('./flow-utils');
 
-const PROJECT_ROOT = process.argv[2] || process.cwd();
+const PROJECT_ROOT = process.argv[2] || getProjectRoot();
 const CONFIG_PATH = path.join(PROJECT_ROOT, '.workflow/config.json');
 
 // ============================================================
