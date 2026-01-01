@@ -320,23 +320,187 @@ function loadRelatedCode(projectRoot, filePath, stepType) {
 }
 
 /**
+ * Simple glob pattern matcher for finding example files
+ */
+function globSync(basePath, pattern) {
+  const results = [];
+  const parts = pattern.split('/');
+
+  const searchDir = (currentPath, remainingParts) => {
+    if (remainingParts.length === 0) {
+      if (fs.existsSync(currentPath) && fs.statSync(currentPath).isFile()) {
+        results.push(currentPath);
+      }
+      return;
+    }
+
+    const [current, ...rest] = remainingParts;
+
+    if (current === '**') {
+      try {
+        const entries = fs.readdirSync(currentPath, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(currentPath, entry.name);
+          if (entry.isDirectory()) {
+            // Continue with ** (recurse deeper)
+            searchDir(fullPath, remainingParts);
+            // Also try without ** (match at this level)
+            searchDir(fullPath, rest);
+          } else if (rest.length === 0) {
+            results.push(fullPath);
+          } else if (rest.length === 1 && matchGlobPart(entry.name, rest[0])) {
+            results.push(fullPath);
+          }
+        }
+      } catch { /* ignore permission errors */ }
+    } else if (current.includes('*')) {
+      try {
+        const entries = fs.readdirSync(currentPath, { withFileTypes: true });
+        for (const entry of entries) {
+          if (matchGlobPart(entry.name, current)) {
+            const fullPath = path.join(currentPath, entry.name);
+            if (entry.isDirectory()) {
+              searchDir(fullPath, rest);
+            } else if (rest.length === 0) {
+              results.push(fullPath);
+            }
+          }
+        }
+      } catch { /* ignore permission errors */ }
+    } else {
+      const nextPath = path.join(currentPath, current);
+      if (fs.existsSync(nextPath)) {
+        searchDir(nextPath, rest);
+      }
+    }
+  };
+
+  // Handle src/ prefix - check both with and without
+  const srcPath = path.join(basePath, 'src');
+  if (fs.existsSync(srcPath)) {
+    searchDir(srcPath, parts);
+  }
+  searchDir(basePath, parts);
+
+  return [...new Set(results)]; // Dedupe
+}
+
+/**
+ * Match a filename against a glob pattern part (e.g., *.tsx)
+ */
+function matchGlobPart(filename, pattern) {
+  const regex = new RegExp('^' + pattern.replace(/\./g, '\\.').replace(/\*/g, '.*') + '$');
+  return regex.test(filename);
+}
+
+/**
+ * Truncate file content to a reasonable size for examples
+ */
+function truncateForExample(content, maxLines = 60) {
+  const lines = content.split('\n');
+  if (lines.length <= maxLines) return content;
+
+  // Keep imports and first part of file
+  const imports = [];
+  let importEnd = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].startsWith('import ') || lines[i].startsWith('from ') || lines[i].trim() === '') {
+      imports.push(lines[i]);
+      importEnd = i + 1;
+    } else if (imports.length > 0) {
+      break;
+    }
+  }
+
+  const remaining = maxLines - imports.length - 3;
+  const body = lines.slice(importEnd, importEnd + remaining);
+
+  return [
+    ...imports,
+    ...body,
+    '',
+    `// ... (${lines.length - importEnd - remaining} more lines truncated)`,
+    ''
+  ].join('\n');
+}
+
+/**
  * Finds examples of similar implementations
  */
-function loadSimilarExamples(projectRoot, stepType) {
+function loadSimilarExamples(projectRoot, stepType, maxExamples = 2) {
   // Map step types to example search patterns
   const patterns = {
-    'create-component': ['components/**/*.tsx', 'features/**/components/*.tsx'],
-    'create-hook': ['hooks/**/*.ts', 'features/**/hooks/*.ts'],
-    'create-service': ['services/**/*.ts', 'api/**/*.ts'],
+    'create-component': [
+      'components/**/*.tsx',
+      'features/**/components/*.tsx',
+      'app/**/components/*.tsx',
+      'ui/**/*.tsx'
+    ],
+    'create-hook': [
+      'hooks/**/*.ts',
+      'hooks/**/*.tsx',
+      'features/**/hooks/*.ts',
+      'lib/hooks/*.ts'
+    ],
+    'create-service': [
+      'services/**/*.ts',
+      'api/**/*.ts',
+      'lib/api/*.ts',
+      'features/**/api/*.ts'
+    ],
+    'create-util': [
+      'utils/**/*.ts',
+      'lib/**/*.ts',
+      'helpers/**/*.ts'
+    ],
+    'create-test': [
+      '**/*.test.ts',
+      '**/*.test.tsx',
+      '**/*.spec.ts',
+      '__tests__/**/*.ts'
+    ],
     'modify-file': [] // No examples needed for modifications
   };
 
-  const searchPatterns = patterns[stepType] || [];
+  const searchPatterns = patterns[stepType] || patterns['create-component'];
   if (searchPatterns.length === 0) return null;
 
-  // This is a simplified version - in practice, you'd use glob
-  // For now, return null and let the orchestrator handle it
-  return null;
+  const examples = [];
+  const seen = new Set();
+
+  for (const pattern of searchPatterns) {
+    if (examples.length >= maxExamples) break;
+
+    const files = globSync(projectRoot, pattern);
+
+    // Sort by file size (prefer smaller, simpler examples)
+    const sorted = files
+      .map(f => ({ path: f, size: fs.statSync(f).size }))
+      .sort((a, b) => a.size - b.size)
+      .slice(0, 5); // Consider top 5 smallest
+
+    for (const { path: filePath } of sorted) {
+      if (examples.length >= maxExamples) break;
+      if (seen.has(filePath)) continue;
+
+      try {
+        const content = fs.readFileSync(filePath, 'utf8');
+        // Skip files that are too short (likely stubs) or too long
+        const lineCount = content.split('\n').length;
+        if (lineCount < 10 || lineCount > 500) continue;
+
+        seen.add(filePath);
+        const relativePath = path.relative(projectRoot, filePath);
+        const truncated = truncateForExample(content);
+
+        examples.push(`### Example: ${relativePath}\n\`\`\`typescript\n${truncated}\`\`\``);
+      } catch { /* ignore read errors */ }
+    }
+  }
+
+  if (examples.length === 0) return null;
+
+  return `## Similar Examples in This Project\n\nUse these as reference for style and patterns:\n\n${examples.join('\n\n')}`;
 }
 
 // ============================================================

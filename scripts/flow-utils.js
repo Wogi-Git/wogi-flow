@@ -9,12 +9,59 @@
 
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
+
+// ============================================================
+// Project Root Detection
+// ============================================================
+
+/**
+ * Find the project root directory using multiple strategies:
+ * 1. Git root (most reliable in monorepos and submodules)
+ * 2. Walk up looking for .workflow directory
+ * 3. Fall back to process.cwd()
+ *
+ * @returns {string} Absolute path to project root
+ */
+function getProjectRoot() {
+  // Strategy 1: Try git root (works in submodules, worktrees, and nested repos)
+  try {
+    const gitRoot = execSync('git rev-parse --show-toplevel', {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'] // Suppress stderr
+    }).trim();
+
+    if (gitRoot && fs.existsSync(gitRoot)) {
+      // Verify this git root has .workflow (could be parent repo in monorepo)
+      if (fs.existsSync(path.join(gitRoot, '.workflow'))) {
+        return gitRoot;
+      }
+    }
+  } catch {
+    // Not in a git repo or git not available
+  }
+
+  // Strategy 2: Walk up from cwd looking for .workflow
+  let current = process.cwd();
+  const root = path.parse(current).root;
+
+  while (current !== root) {
+    const workflowPath = path.join(current, '.workflow');
+    if (fs.existsSync(workflowPath) && fs.statSync(workflowPath).isDirectory()) {
+      return current;
+    }
+    current = path.dirname(current);
+  }
+
+  // Strategy 3: Fall back to cwd (for new projects without .workflow yet)
+  return process.cwd();
+}
 
 // ============================================================
 // Paths
 // ============================================================
 
-const PROJECT_ROOT = process.cwd();
+const PROJECT_ROOT = getProjectRoot();
 const WORKFLOW_DIR = path.join(PROJECT_ROOT, '.workflow');
 const STATE_DIR = path.join(WORKFLOW_DIR, 'state');
 
@@ -521,6 +568,7 @@ module.exports = {
   PROJECT_ROOT,
   WORKFLOW_DIR,
   STATE_DIR,
+  getProjectRoot,
 
   // Colors & Output
   colors,

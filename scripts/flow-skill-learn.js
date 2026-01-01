@@ -335,25 +335,87 @@ function updateSkillVersion(skillPath) {
 // Feedback Patterns Integration
 // ============================================================
 
+/**
+ * Extract file extensions/types from a list of files
+ */
+function getFileSignature(files) {
+  const exts = files.map(f => {
+    const ext = path.extname(f);
+    // Group common patterns
+    if (f.includes('.module.')) return '.module.*';
+    if (f.includes('.controller.')) return '.controller.*';
+    if (f.includes('.service.')) return '.service.*';
+    if (f.includes('.entity.')) return '.entity.*';
+    if (f.includes('.test.') || f.includes('.spec.')) return '.test.*';
+    return ext || 'no-ext';
+  });
+  return [...new Set(exts)].sort().join(',');
+}
+
+/**
+ * Log unmatched files to feedback-patterns.md with proper count tracking
+ */
 function logToFeedbackPatterns(context, unmatchedFiles) {
   const feedbackPath = path.join(STATE_DIR, 'feedback-patterns.md');
 
   if (!fs.existsSync(feedbackPath)) return;
 
-  const date = context.timestamp.split('T')[0];
-  const entry = `| ${date} | Files changed with no matching skill: ${unmatchedFiles.slice(0, 3).join(', ')} | 1 | - | #needs-skill |`;
-
   let content = fs.readFileSync(feedbackPath, 'utf-8');
+  const date = context.timestamp.split('T')[0];
 
-  // Find the patterns table and append
+  // Get signature for deduplication
+  const signature = getFileSignature(unmatchedFiles);
+  const filesPreview = unmatchedFiles.slice(0, 3).join(', ');
+
+  // Look for existing entry with same pattern (by #needs-skill tag and similar file types)
   const tableMarker = '| Date | Correction | Count |';
   const idx = content.indexOf(tableMarker);
-  if (idx !== -1) {
-    // Find end of table header row
+  if (idx === -1) return;
+
+  // Find all existing #needs-skill entries
+  const lines = content.split('\n');
+  let foundExisting = false;
+  let existingLineIdx = -1;
+  let existingCount = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.includes('#needs-skill') && line.includes('Files changed with no matching skill')) {
+      // Check if same file signature
+      const lineSignature = getFileSignature(
+        (line.match(/Files changed with no matching skill: ([^|]+)/)?.[1] || '')
+          .split(', ')
+          .map(f => f.trim())
+          .filter(f => f)
+      );
+
+      if (lineSignature === signature || lineSignature === '' || signature === '') {
+        // Found existing entry with same pattern - increment count
+        const countMatch = line.match(/\|\s*(\d+)\s*\|/);
+        if (countMatch) {
+          existingCount = parseInt(countMatch[1]);
+          existingLineIdx = i;
+          foundExisting = true;
+          break;
+        }
+      }
+    }
+  }
+
+  if (foundExisting && existingLineIdx >= 0) {
+    // Update existing entry with new count and date
+    const newCount = existingCount + 1;
+    const newEntry = `| ${date} | Files changed with no matching skill: ${filesPreview} | ${newCount} | - | #needs-skill |`;
+    lines[existingLineIdx] = newEntry;
+    content = lines.join('\n');
+  } else {
+    // Add new entry with count 1
+    const entry = `| ${date} | Files changed with no matching skill: ${filesPreview} | 1 | - | #needs-skill |`;
     const headerEnd = content.indexOf('\n', content.indexOf('\n', idx) + 1) + 1;
     content = content.slice(0, headerEnd) + entry + '\n' + content.slice(headerEnd);
-    fs.writeFileSync(feedbackPath, content);
   }
+
+  fs.writeFileSync(feedbackPath, content);
 }
 
 // ============================================================

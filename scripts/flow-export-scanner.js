@@ -139,13 +139,15 @@ function extractExports(filePath) {
 /**
  * Extract props interface and type aliases from a component file
  * @param {string} filePath - Path to the component file
- * @returns {{ props: Object, typeAliases: Object, usageExample: Object|null }}
+ * @returns {{ props: Object, typeAliases: Object, usageExample: Object|null, enums: Object, genericTypes: Object }}
  */
 function extractComponentDetails(filePath) {
   const result = {
     props: {},
     typeAliases: {},
-    usageExample: null
+    usageExample: null,
+    enums: {},
+    genericTypes: {}
   };
 
   if (!fs.existsSync(filePath)) return result;
@@ -153,19 +155,87 @@ function extractComponentDetails(filePath) {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
 
-    // First extract type aliases so we can resolve prop types
-    // e.g., type ButtonVariant = 'primary' | 'secondary' | 'outline'
-    const typeMatches = content.matchAll(/type\s+(\w+)\s*=\s*((['"][^'"]+['"](?:\s*\|\s*['"][^'"]+['"])*)|[^;\n]+)/g);
-    for (const match of typeMatches) {
+    // Extract enums (e.g., enum Status { Active = 'active', Inactive = 'inactive' })
+    const enumMatches = content.matchAll(/enum\s+(\w+)\s*\{([^}]+)\}/g);
+    for (const match of enumMatches) {
+      const enumName = match[1];
+      const enumBody = match[2];
+
+      // Extract enum values
+      const valueMatches = enumBody.matchAll(/(\w+)\s*=\s*['"]([^'"]+)['"]/g);
+      const values = [];
+      for (const vm of valueMatches) {
+        values.push(vm[2]);
+      }
+
+      // Also handle simple enums without explicit values
+      if (values.length === 0) {
+        const simpleValues = enumBody.match(/\b(\w+)\b(?=\s*[,}])/g);
+        if (simpleValues) {
+          values.push(...simpleValues.filter(v => v !== 'const'));
+        }
+      }
+
+      if (values.length > 0) {
+        result.enums[enumName] = values;
+        result.typeAliases[enumName] = values; // Also expose as type alias
+      }
+    }
+
+    // Extract type aliases - handle multiple patterns
+    // Pattern 1: type X = 'a' | 'b' | 'c' (string literal union)
+    const stringUnionMatches = content.matchAll(/type\s+(\w+)\s*=\s*(['"][^'"]+['"](?:\s*\|\s*['"][^'"]+['"])*)/g);
+    for (const match of stringUnionMatches) {
       const typeName = match[1];
       const typeValue = match[2];
-
-      // Check if it's a string literal union
       const literalMatches = typeValue.match(/['"]([^'"]+)['"]/g);
       if (literalMatches) {
-        const values = literalMatches.map(v => v.replace(/['"]/g, ''));
-        result.typeAliases[typeName] = values;
+        result.typeAliases[typeName] = literalMatches.map(v => v.replace(/['"]/g, ''));
       }
+    }
+
+    // Pattern 2: type X = number | string | boolean (primitive union)
+    const primitiveUnionMatches = content.matchAll(/type\s+(\w+)\s*=\s*((?:string|number|boolean|null|undefined)(?:\s*\|\s*(?:string|number|boolean|null|undefined))*)/g);
+    for (const match of primitiveUnionMatches) {
+      result.typeAliases[match[1]] = [match[2]]; // Store as single value representing the union
+    }
+
+    // Pattern 3: type X = typeof Y[number] (indexed access types)
+    const indexedAccessMatches = content.matchAll(/type\s+(\w+)\s*=\s*typeof\s+(\w+)\[(?:number|'[^']+')?\]/g);
+    for (const match of indexedAccessMatches) {
+      const typeName = match[1];
+      const sourceArray = match[2];
+      // Link to the array type alias if we found it
+      if (result.typeAliases[`_array_${sourceArray}`]) {
+        result.typeAliases[typeName] = result.typeAliases[`_array_${sourceArray}`];
+      }
+    }
+
+    // Pattern 4: type X<T> = ... (generic type definitions)
+    const genericTypeMatches = content.matchAll(/type\s+(\w+)<([^>]+)>\s*=\s*([^;\n]+)/g);
+    for (const match of genericTypeMatches) {
+      result.genericTypes[match[1]] = {
+        params: match[2].split(',').map(p => p.trim()),
+        definition: match[3].trim()
+      };
+    }
+
+    // Pattern 5: type Props = { ... } (object type alias - treat like interface)
+    const typeObjectMatches = content.matchAll(/type\s+(\w+Props)\s*=\s*\{/g);
+    for (const match of typeObjectMatches) {
+      const typeName = match[1];
+      const startIndex = match.index + match[0].length;
+
+      let braceCount = 1;
+      let endIndex = startIndex;
+      while (braceCount > 0 && endIndex < content.length) {
+        if (content[endIndex] === '{') braceCount++;
+        if (content[endIndex] === '}') braceCount--;
+        endIndex++;
+      }
+
+      const propsBody = content.slice(startIndex, endIndex - 1);
+      extractPropsFromBody(propsBody, result.props);
     }
 
     // Also check for "as const" arrays that define variants
@@ -185,10 +255,9 @@ function extractComponentDetails(filePath) {
 
     // Extract props interfaces - handle nested braces with balanced matching
     // Match: interface XxxProps { ... } or interface XxxProps extends YYY { ... }
-    const propsInterfaceRegex = /interface\s+(\w+Props)\s*(?:extends[^{]+)?\{/g;
+    const propsInterfaceRegex = /interface\s+(\w+Props)\s*(?:<[^>]+>)?\s*(?:extends[^{]+)?\{/g;
     let propsMatch;
     while ((propsMatch = propsInterfaceRegex.exec(content)) !== null) {
-      const interfaceName = propsMatch[1];
       const startIndex = propsMatch.index + propsMatch[0].length;
 
       // Find matching closing brace with balanced brace counting
@@ -201,26 +270,15 @@ function extractComponentDetails(filePath) {
       }
 
       const propsBody = content.slice(startIndex, endIndex - 1);
+      extractPropsFromBody(propsBody, result.props);
+    }
 
-      // Parse each prop line
-      const propLineRegex = /(\w+)(\?)?:\s*([^;\n]+)/g;
-      let propMatch;
-      while ((propMatch = propLineRegex.exec(propsBody)) !== null) {
-        const propName = propMatch[1];
-        const isOptional = !!propMatch[2];
-        let propType = propMatch[3].trim();
-
-        // Skip internal props (starting with $ or _)
-        if (propName.startsWith('$') || propName.startsWith('_')) continue;
-
-        // Clean up type (remove comments, simplify)
-        propType = propType.replace(/\/\*.*?\*\//g, '').trim();
-
-        result.props[propName] = {
-          type: propType,
-          optional: isOptional
-        };
-      }
+    // Extract React.FC<Props> or FC<Props> style component definitions
+    const fcPropsMatches = content.matchAll(/(?:React\.)?FC<(\w+)>/g);
+    for (const match of fcPropsMatches) {
+      const propsTypeName = match[1];
+      // Mark that this type is used as component props
+      result.typeAliases[`_fcProps_${propsTypeName}`] = propsTypeName;
     }
 
   } catch (e) {
@@ -228,6 +286,53 @@ function extractComponentDetails(filePath) {
   }
 
   return result;
+}
+
+/**
+ * Extract props from an interface/type body
+ * @param {string} propsBody - The body content between braces
+ * @param {Object} propsTarget - Target object to store extracted props
+ */
+function extractPropsFromBody(propsBody, propsTarget) {
+  // Parse each prop line - handle multi-line types
+  const lines = propsBody.split('\n');
+  let currentProp = '';
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // Skip comments
+    if (trimmed.startsWith('//') || trimmed.startsWith('/*')) continue;
+
+    currentProp += ' ' + trimmed;
+
+    // Check if we have a complete property (ends with ; or has balanced brackets)
+    const hasComplete = trimmed.endsWith(';') ||
+                        (currentProp.split('{').length === currentProp.split('}').length &&
+                         currentProp.split('<').length === currentProp.split('>').length);
+
+    if (hasComplete && currentProp.includes(':')) {
+      // Parse the accumulated property
+      const propMatch = currentProp.match(/^\s*(\w+)(\?)?:\s*(.+?)(?:;|$)/);
+      if (propMatch) {
+        const propName = propMatch[1];
+        const isOptional = !!propMatch[2];
+        let propType = propMatch[3].trim();
+
+        // Skip internal props (starting with $ or _)
+        if (!propName.startsWith('$') && !propName.startsWith('_')) {
+          // Clean up type (remove comments, trailing semicolons)
+          propType = propType.replace(/\/\*.*?\*\//g, '').replace(/;$/, '').trim();
+
+          propsTarget[propName] = {
+            type: propType,
+            optional: isOptional
+          };
+        }
+      }
+      currentProp = '';
+    }
+  }
 }
 
 /**

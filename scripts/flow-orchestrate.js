@@ -417,6 +417,9 @@ class LocalLLM {
  * - </think> tags (from models that use thinking tokens)
  * - Markdown code blocks
  * - Trailing explanations
+ * - Model-specific artifacts (Llama, Qwen, DeepSeek, etc.)
+ * - JSON wrapper responses
+ * - Multiple code blocks (selects largest/most relevant)
  */
 function extractCodeFromResponse(response, modelName = '') {
   if (!response || typeof response !== 'string') {
@@ -426,24 +429,85 @@ function extractCodeFromResponse(response, modelName = '') {
   const rawResponse = response;
   let code = response;
 
-  // 1. Remove everything before </think> tag if present
+  // 0. Handle JSON wrapper responses (some models wrap code in JSON)
+  try {
+    const jsonMatch = code.match(/^\s*\{[\s\S]*"code"\s*:\s*"([\s\S]*)"[\s\S]*\}\s*$/);
+    if (jsonMatch) {
+      code = JSON.parse(`"${jsonMatch[1]}"`); // Unescape JSON string
+    }
+  } catch { /* not JSON wrapped */ }
+
+  // 1. Remove model-specific thinking tags and artifacts
+  const thinkingPatterns = [
+    // Standard thinking tags
+    /<think>[\s\S]*?<\/think>/gi,
+    /<thinking>[\s\S]*?<\/thinking>/gi,
+    /<reasoning>[\s\S]*?<\/reasoning>/gi,
+    /<analysis>[\s\S]*?<\/analysis>/gi,
+
+    // Qwen-specific
+    /<\|im_start\|>[\s\S]*?<\|im_end\|>/gi,
+
+    // DeepSeek-specific artifacts
+    /^<\|begin_of_sentence\|>/gm,
+    /<\|end_of_sentence\|>$/gm,
+
+    // Llama-specific
+    /\[INST\][\s\S]*?\[\/INST\]/gi,
+    /<<SYS>>[\s\S]*?<<\/SYS>>/gi,
+
+    // Generic assistant markers
+    /^Assistant:\s*/gim,
+    /^AI:\s*/gim,
+    /^Response:\s*/gim,
+    /^Output:\s*/gim,
+    /^Answer:\s*/gim,
+    /^Code:\s*/gim,
+
+    // Model-specific trailing signatures
+    /---\s*End of (response|code|file)[\s\S]*$/gi,
+    /\n\nPlease let me know[\s\S]*$/gi,
+    /\n\nIs there anything[\s\S]*$/gi,
+    /\n\nFeel free to[\s\S]*$/gi,
+    /\n\nLet me know if[\s\S]*$/gi,
+  ];
+
+  for (const pattern of thinkingPatterns) {
+    code = code.replace(pattern, '');
+  }
+
+  // 2. Handle </think> tag (if partial tag remains)
   const thinkEndMatch = code.match(/<\/think>\s*/i);
   if (thinkEndMatch) {
     code = code.slice(thinkEndMatch.index + thinkEndMatch[0].length);
   }
 
-  // 2. Extract from markdown code blocks if present
-  const codeBlockMatch = code.match(/```(?:typescript|tsx|ts|javascript|jsx|js)?\s*\n([\s\S]*?)```/);
-  if (codeBlockMatch) {
-    code = codeBlockMatch[1];
+  // 3. Extract from markdown code blocks
+  // Find all code blocks and pick the best one
+  const codeBlocks = [...code.matchAll(/```(?:typescript|tsx|ts|javascript|jsx|js|plaintext)?\s*\n([\s\S]*?)```/g)];
+
+  if (codeBlocks.length > 0) {
+    // Score each block and pick the best one
+    let bestBlock = codeBlocks[0][1];
+    let bestScore = scoreCodeBlock(bestBlock);
+
+    for (let i = 1; i < codeBlocks.length; i++) {
+      const blockContent = codeBlocks[i][1];
+      const score = scoreCodeBlock(blockContent);
+      if (score > bestScore) {
+        bestScore = score;
+        bestBlock = blockContent;
+      }
+    }
+    code = bestBlock;
   } else {
     // Also try to remove any remaining markdown code block markers
-    code = code.replace(/^```(?:typescript|tsx|javascript|jsx|ts|js)?\n/gm, '');
+    code = code.replace(/^```(?:typescript|tsx|javascript|jsx|ts|js|plaintext)?\n/gm, '');
     code = code.replace(/\n```$/gm, '');
     code = code.replace(/^```$/gm, '');
   }
 
-  // 3. Find first valid TypeScript/JavaScript line
+  // 4. Find first valid TypeScript/JavaScript line
   const validStartPatterns = [
     /^import\s/m,
     /^export\s/m,
@@ -457,11 +521,14 @@ function extractCodeFromResponse(response, modelName = '') {
     /^type\s/m,
     /^enum\s/m,
     /^declare\s/m,
+    /^module\s/m,
+    /^namespace\s/m,
     /^\/\*\*/m,  // JSDoc comment
     /^\/\*[^*]/m, // Block comment
     /^\/\//m,    // Single line comment at start
     /^'use /m,   // 'use strict' or 'use client'
     /^"use /m,
+    /^@/m,       // Decorators
   ];
 
   let earliestMatch = -1;
@@ -476,14 +543,38 @@ function extractCodeFromResponse(response, modelName = '') {
     code = code.slice(earliestMatch);
   }
 
-  // 4. Remove trailing explanations (text after the last closing brace/semicolon followed by blank lines and prose)
-  // Look for patterns like "}\n\nBut maybe..." or ";\n\nThat should..."
-  const trailingMatch = code.match(/(\}|\;)\s*\n\s*\n+[A-Z][a-z]/);
-  if (trailingMatch) {
-    code = code.slice(0, trailingMatch.index + 1);
+  // 5. Remove trailing explanations and prose
+  const trailingPatterns = [
+    // Standard prose after code
+    /(\}|\;)\s*\n\s*\n+[A-Z][a-z]/,
+    // Numbered explanations
+    /(\}|\;)\s*\n\s*\n+\d+\.\s+/,
+    // Bullet points
+    /(\}|\;)\s*\n\s*\n+[-*•]\s+/,
+    // Notes/explanations
+    /(\}|\;)\s*\n\s*\n+(?:Note:|Explanation:|Summary:|Key |Important:)/i,
+  ];
+
+  for (const pattern of trailingPatterns) {
+    const match = code.match(pattern);
+    if (match) {
+      code = code.slice(0, match.index + 1);
+      break;
+    }
   }
 
-  code = code.trim();
+  // 6. Clean up common artifacts
+  code = code
+    // Remove zero-width characters
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    // Normalize line endings
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    // Remove trailing whitespace on each line
+    .replace(/[ \t]+$/gm, '')
+    // Collapse multiple blank lines to max 2
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 
   // Debug logging
   if (process.env.DEBUG_HYBRID) {
@@ -495,6 +586,40 @@ function extractCodeFromResponse(response, modelName = '') {
   }
 
   return code;
+}
+
+/**
+ * Score a code block to determine which is most likely the actual code
+ * Higher score = more likely to be the real code
+ */
+function scoreCodeBlock(block) {
+  if (!block) return 0;
+
+  let score = 0;
+
+  // Length bonus (longer is usually better, but cap it)
+  score += Math.min(block.length / 100, 50);
+
+  // Valid code patterns
+  if (/^import\s/m.test(block)) score += 20;
+  if (/^export\s/m.test(block)) score += 20;
+  if (/^const\s/m.test(block)) score += 10;
+  if (/^function\s/m.test(block)) score += 10;
+  if (/^class\s/m.test(block)) score += 10;
+  if (/^interface\s/m.test(block)) score += 15;
+  if (/^type\s/m.test(block)) score += 10;
+
+  // Code structure indicators
+  score += (block.match(/\{/g) || []).length * 2;
+  score += (block.match(/\}/g) || []).length * 2;
+  score += (block.match(/=>/g) || []).length * 3;
+  score += (block.match(/return\s/g) || []).length * 3;
+
+  // Penalties for prose/non-code
+  if (/^[A-Z][a-z]+\s+[a-z]+/m.test(block)) score -= 10; // Starts with prose
+  if (/\.$/.test(block.trim())) score -= 5; // Ends with period (prose)
+
+  return score;
 }
 
 /**
