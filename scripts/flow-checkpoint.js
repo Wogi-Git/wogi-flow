@@ -23,23 +23,13 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync, spawnSync } = require('child_process');
+const { getProjectRoot, colors: c } = require('./flow-utils');
 
-const PROJECT_ROOT = process.cwd();
+const PROJECT_ROOT = getProjectRoot();
 const WORKFLOW_DIR = path.join(PROJECT_ROOT, '.workflow');
 const CHECKPOINTS_DIR = path.join(WORKFLOW_DIR, 'checkpoints');
 const CHECKPOINT_LOG = path.join(CHECKPOINTS_DIR, 'checkpoint-log.json');
 const CONFIG_PATH = path.join(WORKFLOW_DIR, 'config.json');
-
-// Colors
-const c = {
-  reset: '\x1b[0m',
-  bold: '\x1b[1m',
-  dim: '\x1b[2m',
-  red: '\x1b[31m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  cyan: '\x1b[36m'
-};
 
 /**
  * Default checkpoint configuration

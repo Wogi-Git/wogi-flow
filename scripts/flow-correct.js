@@ -33,7 +33,20 @@ const {
 // Paths
 // ============================================================
 
-const CORRECTIONS_DIR = path.join(PROJECT_ROOT, '.workflow', 'corrections');
+function getCorrectionsDir() {
+  try {
+    const config = JSON.parse(fs.readFileSync(PATHS.config, 'utf-8'));
+    const detailPath = config?.corrections?.detailPath;
+    if (detailPath) {
+      return path.isAbsolute(detailPath) ? detailPath : path.join(PROJECT_ROOT, detailPath);
+    }
+  } catch (e) {
+    // Fall back to default if config can't be read
+  }
+  return path.join(PROJECT_ROOT, '.workflow', 'corrections');
+}
+
+const CORRECTIONS_DIR = getCorrectionsDir();
 
 // ============================================================
 // Interactive Prompt Utilities

@@ -31,8 +31,9 @@ const { ComponentScanner } = require('./flow-figma-index');
 const { FigmaExtractor } = require('./flow-figma-extract');
 const { SimilarityMatcher, MATCH_CONFIG } = require('./flow-figma-match');
 const { CodeGenerator } = require('./flow-figma-generate');
+const { getProjectRoot } = require('./flow-utils');
 
-const PROJECT_ROOT = process.cwd();
+const PROJECT_ROOT = getProjectRoot();
 const WORKFLOW_DIR = path.join(PROJECT_ROOT, '.workflow');
 const REGISTRY_PATH = path.join(WORKFLOW_DIR, 'state', 'component-registry.json');
 

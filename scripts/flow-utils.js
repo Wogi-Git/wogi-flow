@@ -92,13 +92,16 @@ const colors = {
   bold: '\x1b[1m',
   dim: '\x1b[2m',
 
-  red: '\x1b[0;31m',
-  green: '\x1b[0;32m',
-  yellow: '\x1b[1;33m',
-  blue: '\x1b[0;34m',
-  magenta: '\x1b[0;35m',
-  cyan: '\x1b[0;36m',
-  white: '\x1b[0;37m',
+  red: '\x1b[31m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  blue: '\x1b[34m',
+  magenta: '\x1b[35m',
+  cyan: '\x1b[36m',
+  white: '\x1b[37m',
+
+  bgRed: '\x1b[41m',
+  bgGreen: '\x1b[42m',
 };
 
 /**
@@ -425,6 +428,50 @@ function getLastRequestLogEntry() {
   }
 }
 
+/**
+ * Get next request ID
+ */
+function getNextRequestId() {
+  const count = countRequestLogEntries();
+  return `R-${String(count + 1).padStart(3, '0')}`;
+}
+
+/**
+ * Add an entry to request-log.md
+ * @param {Object} entry - Entry details
+ * @param {string} entry.type - new | fix | change | refactor
+ * @param {string[]} entry.tags - Array of tags (e.g., ['#figma', '#component:Button'])
+ * @param {string} entry.request - What was requested
+ * @param {string} entry.result - What was done
+ * @param {string[]} [entry.files] - Files changed
+ */
+function addRequestLogEntry(entry) {
+  const { type, tags, request, result, files = [] } = entry;
+  const id = getNextRequestId();
+  const now = new Date();
+  const timestamp = now.toISOString().replace('T', ' ').substring(0, 16);
+
+  const filesLine = files.length > 0 ? `\n**Files**: ${files.join(', ')}` : '';
+  const tagsStr = tags.join(' ');
+
+  const logEntry = `
+### ${id} | ${timestamp}
+**Type**: ${type}
+**Tags**: ${tagsStr}
+**Request**: "${request}"
+**Result**: ${result}${filesLine}
+`;
+
+  try {
+    const content = readFile(PATHS.requestLog, '');
+    writeFile(PATHS.requestLog, content + logEntry);
+    return id;
+  } catch (e) {
+    error(`Failed to add request log entry: ${e.message}`);
+    return null;
+  }
+}
+
 // ============================================================
 // App Map Operations
 // ============================================================
@@ -441,6 +488,74 @@ function countAppMapComponents() {
     return count;
   } catch {
     return 0;
+  }
+}
+
+/**
+ * Add a component to app-map.md
+ * @param {Object} component - Component details
+ * @param {string} component.name - Component name
+ * @param {string} component.type - Component type (component, screen, modal, etc.)
+ * @param {string} component.path - Path to component file
+ * @param {string[]} [component.variants] - Available variants
+ * @param {string} [component.description] - Component description
+ * @returns {boolean} - Success status
+ */
+function addAppMapComponent(component) {
+  const { name, type, path: filePath, variants = [], description = '' } = component;
+
+  try {
+    let content = readFile(PATHS.appMap, '');
+
+    // Find the appropriate section based on type
+    const sectionMap = {
+      screen: '## Screens',
+      modal: '## Modals',
+      component: '## Components',
+      layout: '## Layouts'
+    };
+
+    const section = sectionMap[type] || '## Components';
+    const variantsStr = variants.length > 0 ? variants.join(', ') : '-';
+    const descStr = description || '-';
+
+    // Create new row
+    const newRow = `| ${name} | ${filePath} | ${variantsStr} | ${descStr} |`;
+
+    // Find section and add row
+    const sectionIndex = content.indexOf(section);
+    if (sectionIndex === -1) {
+      warn(`Section "${section}" not found in app-map.md`);
+      return false;
+    }
+
+    // Find the end of the table in this section (next section or end of file)
+    const nextSectionMatch = content.substring(sectionIndex + section.length).match(/\n## /);
+    const endIndex = nextSectionMatch
+      ? sectionIndex + section.length + nextSectionMatch.index
+      : content.length;
+
+    // Find last table row in section
+    const sectionContent = content.substring(sectionIndex, endIndex);
+    const lastPipeIndex = sectionContent.lastIndexOf('\n|');
+
+    if (lastPipeIndex !== -1) {
+      const insertIndex = sectionIndex + lastPipeIndex + sectionContent.substring(lastPipeIndex).indexOf('\n', 1);
+      content = content.substring(0, insertIndex) + '\n' + newRow + content.substring(insertIndex);
+    } else {
+      // No table rows yet, add after header
+      const headerEnd = sectionContent.indexOf('\n\n');
+      if (headerEnd !== -1) {
+        const insertIndex = sectionIndex + headerEnd;
+        content = content.substring(0, insertIndex) + '\n' + newRow + content.substring(insertIndex);
+      }
+    }
+
+    writeFile(PATHS.appMap, content);
+    return true;
+  } catch (e) {
+    error(`Failed to add component to app-map: ${e.message}`);
+    return false;
   }
 }
 
@@ -604,9 +719,12 @@ module.exports = {
   // Request Log
   countRequestLogEntries,
   getLastRequestLogEntry,
+  getNextRequestId,
+  addRequestLogEntry,
 
   // App Map
   countAppMapComponents,
+  addAppMapComponent,
 
   // Git
   isGitRepo,

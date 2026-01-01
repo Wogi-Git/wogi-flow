@@ -357,7 +357,7 @@ When user types these commands, execute the corresponding action immediately.
 
 | Command | Action |
 |---------|--------|
-| `/wogi-hybrid-setup` | **Full setup for new projects.** Generates project-specific templates by analyzing codebase, then runs interactive setup to configure local LLM. Run this first after updating to v1.3! |
+| `/wogi-hybrid-setup` | **Full setup for new projects.** Generates project-specific templates by analyzing codebase, then runs interactive setup to configure local LLM. Run this first after updating to v1.5! |
 | `/wogi-hybrid` | Enable hybrid mode. Runs interactive setup to detect local LLM providers (Ollama, LM Studio), select model, and configure. Saves 85-95% tokens. |
 | `/wogi-hybrid-off` | Disable hybrid mode. Returns to normal Claude-only execution. |
 | `/wogi-hybrid-status` | Show current hybrid mode configuration: provider, model, endpoint, and session state. |

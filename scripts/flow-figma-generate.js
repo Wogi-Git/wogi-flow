@@ -20,8 +20,9 @@
 const fs = require('fs');
 const path = require('path');
 const { detectFramework } = require('./flow-figma-index');
+const { getProjectRoot, addRequestLogEntry, addAppMapComponent } = require('./flow-utils');
 
-const PROJECT_ROOT = process.cwd();
+const PROJECT_ROOT = getProjectRoot();
 const WORKFLOW_DIR = path.join(PROJECT_ROOT, '.workflow');
 const DECISIONS_PATH = path.join(WORKFLOW_DIR, 'state', 'figma-decisions.json');
 const REGISTRY_PATH = path.join(WORKFLOW_DIR, 'state', 'component-registry.json');
@@ -628,10 +629,55 @@ ${'─'.repeat(70)}
       console.log(p.prompt);
     });
   }
+
+  // Log to request-log
+  const summary = [];
+  if (output.imports.length > 0) summary.push(`${output.imports.length} imports`);
+  if (output.variants.length > 0) summary.push(`${output.variants.length} variants`);
+  if (output.newComponents.length > 0) summary.push(`${output.newComponents.length} new components`);
+
+  if (summary.length > 0) {
+    const componentNames = [
+      ...output.imports.map(i => i.componentName),
+      ...output.variants.map(v => v.componentName),
+      ...output.newComponents.map(c => c.componentName)
+    ];
+
+    addRequestLogEntry({
+      type: 'new',
+      tags: ['#figma', ...componentNames.slice(0, 3).map(n => `#component:${n}`)],
+      request: 'Figma design analysis and code generation',
+      result: `Generated: ${summary.join(', ')}`,
+      files: [path.relative(PROJECT_ROOT, outputPath)]
+    });
+
+    console.log('\n📝 Logged to request-log.md');
+  }
+
+  // Add new components to app-map
+  if (output.newComponents.length > 0) {
+    let addedCount = 0;
+    for (const comp of output.newComponents) {
+      const added = addAppMapComponent({
+        name: comp.componentName,
+        type: 'component',
+        path: comp.suggestedPath,
+        variants: [],
+        description: `Generated from Figma (${output.framework})`
+      });
+      if (added) addedCount++;
+    }
+    if (addedCount > 0) {
+      console.log(`📋 Added ${addedCount} component(s) to app-map.md`);
+    }
+  }
 }
 
 module.exports = { CodeGenerator, FRAMEWORK_TEMPLATES };
 
 if (require.main === module) {
-  main().catch(console.error);
+  main().catch(err => {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  });
 }

@@ -48,14 +48,17 @@ const {
   setProjectRoot: setExportScannerRoot
 } = require('./flow-export-scanner');
 
-// Set export scanner project root to match orchestrator's cwd
-setExportScannerRoot(process.cwd());
+// Import getProjectRoot for consistent project root detection
+const { getProjectRoot } = require('./flow-utils');
 
 // ============================================================
 // Configuration
 // ============================================================
 
-const PROJECT_ROOT = process.cwd();
+const PROJECT_ROOT = getProjectRoot();
+
+// Set export scanner project root to match orchestrator's
+setExportScannerRoot(PROJECT_ROOT);
 const WORKFLOW_DIR = path.join(PROJECT_ROOT, '.workflow');
 const STATE_DIR = path.join(WORKFLOW_DIR, 'state');
 const TEMPLATES_DIR = path.join(PROJECT_ROOT, 'templates', 'hybrid');
@@ -3601,4 +3604,7 @@ Examples:
   }
 }
 
-main();
+main().catch(err => {
+  console.error(`\x1b[31mFatal error: ${err.message}\x1b[0m`);
+  process.exit(1);
+});

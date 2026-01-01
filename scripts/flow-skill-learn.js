@@ -20,8 +20,9 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { getProjectRoot } = require('./flow-utils');
 
-const PROJECT_ROOT = process.cwd();
+const PROJECT_ROOT = getProjectRoot();
 const WORKFLOW_DIR = path.join(PROJECT_ROOT, '.workflow');
 const SKILLS_DIR = path.join(PROJECT_ROOT, 'skills');
 const STATE_DIR = path.join(WORKFLOW_DIR, 'state');

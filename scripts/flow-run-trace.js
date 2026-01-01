@@ -19,8 +19,9 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { getProjectRoot, colors: c } = require('./flow-utils');
 
-const PROJECT_ROOT = process.cwd();
+const PROJECT_ROOT = getProjectRoot();
 const WORKFLOW_DIR = path.join(PROJECT_ROOT, '.workflow');
 const RUNS_DIR = path.join(WORKFLOW_DIR, 'runs');
 
@@ -44,19 +45,6 @@ const EVENT_TYPES = {
   ERROR: 'error',
   WARNING: 'warning',
   RUN_END: 'run_end'
-};
-
-// Colors for terminal output
-const c = {
-  reset: '\x1b[0m',
-  bold: '\x1b[1m',
-  dim: '\x1b[2m',
-  red: '\x1b[31m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  blue: '\x1b[34m',
-  cyan: '\x1b[36m',
-  magenta: '\x1b[35m'
 };
 
 /**

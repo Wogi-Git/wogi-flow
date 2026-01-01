@@ -16,8 +16,9 @@
 
 const fs = require('fs');
 const path = require('path');
+const { getProjectRoot } = require('./flow-utils');
 
-const PROJECT_ROOT = process.cwd();
+const PROJECT_ROOT = getProjectRoot();
 const WORKFLOW_DIR = path.join(PROJECT_ROOT, '.workflow');
 const REGISTRY_PATH = path.join(WORKFLOW_DIR, 'state', 'component-registry.json');
 
@@ -901,5 +902,8 @@ Usage:
 module.exports = { ComponentScanner, detectFramework };
 
 if (require.main === module) {
-  main().catch(console.error);
+  main().catch(err => {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  });
 }

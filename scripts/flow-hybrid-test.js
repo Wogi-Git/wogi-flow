@@ -9,8 +9,9 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { getProjectRoot } = require('./flow-utils');
 
-const PROJECT_ROOT = process.cwd();
+const PROJECT_ROOT = getProjectRoot();
 const TESTS = [];
 let passed = 0;
 let failed = 0;
