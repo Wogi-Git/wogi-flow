@@ -365,6 +365,131 @@ function runCommand(cmd, args, timeout = 120000) {
 }
 
 /**
+ * TypeScript error code suggestions with self-correction guidance
+ */
+const TS_ERROR_SUGGESTIONS = {
+  // Module/Import errors
+  TS2307: {
+    pattern: /Cannot find module '(.+)'/,
+    suggest: (match, file) => {
+      const moduleName = match[1];
+      if (moduleName.startsWith('.')) {
+        return `Check file path: Does "${moduleName}" exist relative to ${file}? Common issues: wrong extension (.js vs .ts), missing index file, case sensitivity`;
+      }
+      if (moduleName.startsWith('@')) {
+        return `Install missing package: \`npm install ${moduleName}\` or \`npm install -D @types/${moduleName.replace('@', '').split('/')[0]}\``;
+      }
+      return `Install missing package: \`npm install ${moduleName}\` or for types: \`npm install -D @types/${moduleName}\``;
+    }
+  },
+  TS2305: {
+    pattern: /Module '"(.+)"' has no exported member '(.+)'/,
+    suggest: (match) => {
+      const [, modulePath, memberName] = match;
+      return `"${memberName}" is not exported from "${modulePath}". Check: 1) Correct export name (case-sensitive), 2) Named vs default export, 3) Re-export in index.ts`;
+    }
+  },
+  TS2614: {
+    pattern: /Module '"(.+)"' has no default export/,
+    suggest: (match) => {
+      const modulePath = match[1];
+      return `Use named import: \`import { something } from "${modulePath}"\` instead of default import. Or add \`export default\` to the source file.`;
+    }
+  },
+
+  // Type mismatch errors
+  TS2322: {
+    pattern: /Type '(.+)' is not assignable to type '(.+)'/,
+    suggest: (match) => {
+      const [, sourceType, targetType] = match;
+      if (sourceType === 'undefined' || sourceType.includes('undefined')) {
+        return `Handle undefined case: Use optional chaining (?.), nullish coalescing (??), or add a type guard. The value might be undefined but "${targetType}" doesn't allow it.`;
+      }
+      if (targetType === 'never') {
+        return 'Check your type narrowing logic - TypeScript determined this code path is impossible. Verify your conditional checks.';
+      }
+      return `Type mismatch: "${sourceType}" → "${targetType}". Options: 1) Cast with \`as ${targetType}\` if safe, 2) Add type guard, 3) Update the expected type, 4) Transform the value`;
+    }
+  },
+  TS2345: {
+    pattern: /Argument of type '(.+)' is not assignable to parameter of type '(.+)'/,
+    suggest: (match) => {
+      const [, argType, paramType] = match;
+      return `Wrong argument type. Expected "${paramType}" but got "${argType}". Check: 1) Correct function signature, 2) Transform argument before passing, 3) Update function to accept both types`;
+    }
+  },
+  TS2339: {
+    pattern: /Property '(.+)' does not exist on type '(.+)'/,
+    suggest: (match) => {
+      const [, propName, typeName] = match;
+      if (typeName.includes('|')) {
+        return `"${propName}" doesn't exist on all union members. Use type narrowing: \`if ('${propName}' in obj)\` or discriminated unions.`;
+      }
+      return `Property "${propName}" not in type "${typeName}". Options: 1) Add property to interface, 2) Use \`(obj as any).${propName}\` (not recommended), 3) Check for typo in property name`;
+    }
+  },
+
+  // Declaration errors
+  TS2304: {
+    pattern: /Cannot find name '(.+)'/,
+    suggest: (match) => {
+      const name = match[1];
+      const builtins = ['console', 'setTimeout', 'Promise', 'Array', 'Object', 'JSON'];
+      if (builtins.includes(name)) {
+        return `Add "dom" and/or "es2020" to compilerOptions.lib in tsconfig.json, or check that @types/node is installed.`;
+      }
+      return `"${name}" is not defined. Check: 1) Import the symbol, 2) Typo in name, 3) Declaration in scope, 4) Missing type definition`;
+    }
+  },
+  TS2451: {
+    pattern: /Cannot redeclare block-scoped variable '(.+)'/,
+    suggest: (match) => {
+      const varName = match[1];
+      return `"${varName}" is declared multiple times. This often happens with global declarations or missing export statements. Wrap in a module: add \`export {}\` to make file a module.`;
+    }
+  },
+
+  // Async/Promise errors
+  TS2705: {
+    pattern: /An async function/,
+    suggest: () => 'Async function needs Promise. Add "es2017" or higher to compilerOptions.lib in tsconfig.json.'
+  },
+  TS1064: {
+    pattern: /The return type of an async function/,
+    suggest: () => 'Async functions must return a Promise. Use `Promise<YourType>` as return type or let TypeScript infer it.'
+  },
+
+  // Generic/inference errors
+  TS2558: {
+    pattern: /Expected (\d+) type arguments?, but got (\d+)/,
+    suggest: (match) => {
+      const [, expected, got] = match;
+      return `Generic type expects ${expected} type argument(s), got ${got}. Check the generic definition and provide correct number of types.`;
+    }
+  },
+  TS7006: {
+    pattern: /Parameter '(.+)' implicitly has an 'any' type/,
+    suggest: (match) => {
+      const paramName = match[1];
+      return `Add type annotation to "${paramName}". Example: \`${paramName}: string\` or \`${paramName}: SomeType\`. If truly unknown, use \`${paramName}: unknown\` (safer than any).`;
+    }
+  },
+
+  // Object literal errors
+  TS2353: {
+    pattern: /Object literal may only specify known properties/,
+    suggest: () => 'Extra property in object literal. Either: 1) Remove the property, 2) Add it to the type definition, 3) Use type assertion to bypass (not recommended)'
+  },
+  TS2741: {
+    pattern: /Property '(.+)' is missing in type/,
+    suggest: (match) => {
+      const propName = match[1];
+      return `Required property "${propName}" is missing. Add it to the object, or make it optional in the type with \`${propName}?: Type\``;
+    }
+  }
+};
+
+/**
  * Generate fix suggestions based on errors
  */
 function generateFixSuggestions(gateName, errors) {
@@ -392,14 +517,44 @@ function generateFixSuggestions(gateName, errors) {
   }
 
   if (gateName === 'typecheck') {
-    const missingTypes = errors.filter(e => e.code === 'TS2307');
-    if (missingTypes.length > 0) {
-      suggestions.push('Some type definitions may be missing - check @types packages');
+    // Enhanced TypeScript suggestions with self-correction guidance
+    const seenSuggestions = new Set();
+
+    for (const err of errors) {
+      if (err.code && TS_ERROR_SUGGESTIONS[err.code]) {
+        const suggestionDef = TS_ERROR_SUGGESTIONS[err.code];
+        const match = err.message.match(suggestionDef.pattern);
+
+        if (match) {
+          const suggestion = suggestionDef.suggest(match, err.file);
+          // Dedupe similar suggestions
+          const key = `${err.code}:${suggestion.slice(0, 50)}`;
+          if (!seenSuggestions.has(key)) {
+            seenSuggestions.add(key);
+            suggestions.push(`[${err.code}] ${suggestion}`);
+          }
+        }
+      }
     }
 
-    const anyErrors = errors.filter(e => e.message.includes('any'));
-    if (anyErrors.length > 0) {
-      suggestions.push('Consider adding proper type annotations instead of `any`');
+    // Fallback generic suggestions if no specific ones matched
+    if (suggestions.length === 0) {
+      const missingTypes = errors.filter(e => e.code === 'TS2307');
+      if (missingTypes.length > 0) {
+        suggestions.push('Some type definitions may be missing - check @types packages');
+      }
+
+      const anyErrors = errors.filter(e => e.message.includes('any'));
+      if (anyErrors.length > 0) {
+        suggestions.push('Consider adding proper type annotations instead of `any`');
+      }
+    }
+
+    // Limit suggestions to most relevant
+    if (suggestions.length > 5) {
+      const limited = suggestions.slice(0, 5);
+      limited.push(`... and ${suggestions.length - 5} more suggestions`);
+      return limited;
     }
   }
 

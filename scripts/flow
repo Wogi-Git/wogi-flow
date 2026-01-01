@@ -57,10 +57,15 @@ show_help() {
     echo "  map-index scan       Rescan codebase"
     echo "  map-sync             Compare index with app-map"
     echo ""
-    echo "Skills:"
+    echo "Skills & Learning:"
     echo "  skill-learn          Extract learnings from recent changes"
     echo "  skill-create <name>  Create a new skill"
     echo "  skill-create --list  List existing skills"
+    echo "  correct              Capture a correction/learning"
+    echo "  correct \"desc\"       Quick mode with description"
+    echo "  correct list         List recent corrections"
+    echo "  aggregate            Aggregate learnings across skills"
+    echo "  aggregate --promote  Interactive promotion wizard"
     echo ""
     echo "Code Traces:"
     echo "  trace \"<prompt>\"     Generate task-focused code trace"
@@ -226,6 +231,12 @@ case "${1:-}" in
         ;;
     skill-learn)
         node "$SCRIPT_DIR/flow-skill-learn.js" "${@:2}"
+        ;;
+    correct)
+        node "$SCRIPT_DIR/flow-correct.js" "${@:2}"
+        ;;
+    aggregate)
+        node "$SCRIPT_DIR/flow-aggregate.js" "${@:2}"
         ;;
     skill-create)
         node "$SCRIPT_DIR/flow-skill-create.js" "${@:2}"

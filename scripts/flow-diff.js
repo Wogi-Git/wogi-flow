@@ -298,6 +298,137 @@ function saveDiffsToRun(runId, diffs) {
 }
 
 /**
+ * Parse SEARCH/REPLACE blocks from LLM output
+ * Format:
+ *   <<<<<<< SEARCH
+ *   old content
+ *   =======
+ *   new content
+ *   >>>>>>> REPLACE
+ *
+ * IMPORTANT: Uses EXACT matching only - no fuzzy matching.
+ * If the search text doesn't match exactly, the operation fails.
+ */
+function parseSearchReplaceBlocks(content) {
+  const blocks = [];
+  const regex = /<<<<<<< SEARCH\n([\s\S]*?)\n=======\n([\s\S]*?)\n>>>>>>> REPLACE/g;
+
+  let match;
+  while ((match = regex.exec(content)) !== null) {
+    blocks.push({
+      search: match[1],
+      replace: match[2]
+    });
+  }
+
+  return blocks;
+}
+
+/**
+ * Apply SEARCH/REPLACE blocks to file content
+ * EXACT MATCH ONLY - fails if search text not found exactly
+ *
+ * @returns { content: string, applied: number, failed: { search: string, reason: string }[] }
+ */
+function applySearchReplaceBlocks(fileContent, blocks) {
+  let content = fileContent;
+  let applied = 0;
+  const failed = [];
+
+  for (const block of blocks) {
+    // Exact match only - no fuzzy matching
+    if (content.includes(block.search)) {
+      // Count occurrences
+      const occurrences = content.split(block.search).length - 1;
+
+      if (occurrences > 1) {
+        // Multiple matches - fail to avoid unintended changes
+        failed.push({
+          search: block.search.slice(0, 100) + (block.search.length > 100 ? '...' : ''),
+          reason: `Found ${occurrences} matches - search text is not unique. Add more context.`
+        });
+      } else {
+        // Single exact match - apply
+        content = content.replace(block.search, block.replace);
+        applied++;
+      }
+    } else {
+      // No match found
+      failed.push({
+        search: block.search.slice(0, 100) + (block.search.length > 100 ? '...' : ''),
+        reason: 'Search text not found (exact match required)'
+      });
+    }
+  }
+
+  return { content, applied, failed };
+}
+
+/**
+ * Apply SEARCH/REPLACE changes to a file
+ * Returns success status and details
+ */
+function applySearchReplaceToFile(filePath, searchReplaceContent) {
+  const blocks = parseSearchReplaceBlocks(searchReplaceContent);
+
+  if (blocks.length === 0) {
+    return {
+      success: false,
+      error: 'No SEARCH/REPLACE blocks found in content',
+      applied: 0,
+      failed: []
+    };
+  }
+
+  if (!fs.existsSync(filePath)) {
+    return {
+      success: false,
+      error: `File not found: ${filePath}`,
+      applied: 0,
+      failed: blocks.map(b => ({
+        search: b.search.slice(0, 50),
+        reason: 'File does not exist'
+      }))
+    };
+  }
+
+  const originalContent = fs.readFileSync(filePath, 'utf-8');
+  const result = applySearchReplaceBlocks(originalContent, blocks);
+
+  if (result.failed.length === 0) {
+    // All blocks applied successfully
+    fs.writeFileSync(filePath, result.content);
+    return {
+      success: true,
+      applied: result.applied,
+      failed: [],
+      originalContent,
+      newContent: result.content
+    };
+  }
+
+  if (result.applied > 0) {
+    // Partial success - write what we could apply
+    fs.writeFileSync(filePath, result.content);
+    return {
+      success: false,
+      partial: true,
+      applied: result.applied,
+      failed: result.failed,
+      originalContent,
+      newContent: result.content
+    };
+  }
+
+  // Complete failure
+  return {
+    success: false,
+    applied: 0,
+    failed: result.failed
+  };
+}
+
+/**
  * Apply diffs (write files)
  */
 function applyDiffs(operations) {
@@ -407,7 +538,11 @@ module.exports = {
   saveDiffsToRun,
   applyDiffs,
   previewAndApply,
-  confirmApply
+  confirmApply,
+  // SEARCH/REPLACE exact-match functions
+  parseSearchReplaceBlocks,
+  applySearchReplaceBlocks,
+  applySearchReplaceToFile
 };
 
 // CLI Handler
@@ -423,17 +558,29 @@ ${c.bold}Usage:${c.reset}
   flow diff --preview <operations.json>  Preview proposed changes
   flow diff --apply <operations.json>    Apply changes from JSON
   flow diff --dry-run <operations.json>  Show diff without prompting
+  flow diff --search-replace <file> <changes.txt>  Apply SEARCH/REPLACE blocks
 
 ${c.bold}Options:${c.reset}
-  --apply       Auto-apply without confirmation
-  --dry-run     Show preview only, don't apply
-  --json        Output diff in JSON format
+  --apply         Auto-apply without confirmation
+  --dry-run       Show preview only, don't apply
+  --json          Output diff in JSON format
+  --search-replace Apply SEARCH/REPLACE format changes (exact match only)
 
 ${c.bold}Operations JSON Format:${c.reset}
   [
     { "type": "write", "path": "src/file.ts", "content": "..." },
     { "type": "delete", "path": "old-file.ts" }
   ]
+
+${c.bold}SEARCH/REPLACE Format:${c.reset}
+  <<<<<<< SEARCH
+  old code to find (must match exactly)
+  =======
+  new code to replace with
+  >>>>>>> REPLACE
+
+  ${c.yellow}Note: Uses EXACT matching only. No fuzzy matching.${c.reset}
+  If search text isn't found exactly, the operation fails.
     `);
     process.exit(0);
   }
@@ -445,7 +592,68 @@ ${c.bold}Operations JSON Format:${c.reset}
   // Filter out flags
   const positionalArgs = args.filter(a => !a.startsWith('--'));
 
-  if (args.includes('--preview') || args.includes('--apply') || args.includes('--dry-run')) {
+  if (args.includes('--search-replace')) {
+    // Apply SEARCH/REPLACE blocks to a file
+    if (positionalArgs.length < 2) {
+      console.error(`${c.red}Error: --search-replace requires <target-file> <changes-file>${c.reset}`);
+      process.exit(1);
+    }
+
+    const [targetFile, changesFile] = positionalArgs;
+
+    if (!fs.existsSync(targetFile)) {
+      console.error(`${c.red}Error: Target file not found: ${targetFile}${c.reset}`);
+      process.exit(1);
+    }
+
+    let changesContent;
+    if (fs.existsSync(changesFile)) {
+      changesContent = fs.readFileSync(changesFile, 'utf-8');
+    } else {
+      // Maybe it's inline content
+      changesContent = changesFile;
+    }
+
+    const blocks = parseSearchReplaceBlocks(changesContent);
+    console.log(`\n${c.cyan}Applying ${blocks.length} SEARCH/REPLACE block(s) to ${targetFile}${c.reset}\n`);
+
+    if (blocks.length === 0) {
+      console.error(`${c.red}No SEARCH/REPLACE blocks found in changes${c.reset}`);
+      process.exit(1);
+    }
+
+    if (dryRun) {
+      // Show preview only
+      for (let i = 0; i < blocks.length; i++) {
+        console.log(`${c.yellow}Block ${i + 1}:${c.reset}`);
+        console.log(`${c.red}- ${blocks[i].search.split('\n')[0]}...${c.reset}`);
+        console.log(`${c.green}+ ${blocks[i].replace.split('\n')[0]}...${c.reset}`);
+        console.log('');
+      }
+      console.log(`${c.dim}(dry run - no changes applied)${c.reset}`);
+      process.exit(0);
+    }
+
+    const result = applySearchReplaceToFile(targetFile, changesContent);
+
+    if (result.success) {
+      console.log(`${c.green}✅ Applied ${result.applied} change(s) successfully${c.reset}`);
+    } else if (result.partial) {
+      console.log(`${c.yellow}⚠️  Partial success: ${result.applied} applied, ${result.failed.length} failed${c.reset}`);
+      for (const f of result.failed) {
+        console.log(`   ${c.red}✗${c.reset} ${f.reason}`);
+        console.log(`     ${c.dim}Search: ${f.search}${c.reset}`);
+      }
+      process.exit(1);
+    } else {
+      console.log(`${c.red}❌ All changes failed${c.reset}`);
+      for (const f of result.failed) {
+        console.log(`   ${c.red}✗${c.reset} ${f.reason}`);
+        console.log(`     ${c.dim}Search: ${f.search}${c.reset}`);
+      }
+      process.exit(1);
+    }
+  } else if (args.includes('--preview') || args.includes('--apply') || args.includes('--dry-run')) {
     // Preview/apply operations from JSON file
     const jsonFile = positionalArgs[0];
     if (!jsonFile || !fs.existsSync(jsonFile)) {

@@ -51,6 +51,103 @@ const PROVIDER_TYPES = {
 };
 
 /**
+ * Model capability heuristics
+ * Used as fallback when API doesn't provide capability info
+ */
+const MODEL_CAPABILITIES = {
+  // High-quality code models
+  'qwen': { codeQuality: 'high', instructionFollowing: 'high', contextWindow: 32768 },
+  'qwen3': { codeQuality: 'excellent', instructionFollowing: 'excellent', contextWindow: 131072 },
+  'codellama': { codeQuality: 'high', instructionFollowing: 'medium', contextWindow: 16384 },
+  'deepseek': { codeQuality: 'excellent', instructionFollowing: 'high', contextWindow: 32768 },
+  'deepseek-coder': { codeQuality: 'excellent', instructionFollowing: 'high', contextWindow: 16384 },
+  'nemotron': { codeQuality: 'high', instructionFollowing: 'excellent', contextWindow: 32768 },
+  'starcoder': { codeQuality: 'high', instructionFollowing: 'medium', contextWindow: 8192 },
+
+  // General purpose models
+  'llama3': { codeQuality: 'medium', instructionFollowing: 'high', contextWindow: 8192 },
+  'llama3.1': { codeQuality: 'high', instructionFollowing: 'high', contextWindow: 131072 },
+  'llama3.2': { codeQuality: 'medium', instructionFollowing: 'high', contextWindow: 131072 },
+  'mistral': { codeQuality: 'medium', instructionFollowing: 'high', contextWindow: 32768 },
+  'mixtral': { codeQuality: 'high', instructionFollowing: 'high', contextWindow: 32768 },
+  'phi': { codeQuality: 'medium', instructionFollowing: 'medium', contextWindow: 4096 },
+  'phi3': { codeQuality: 'high', instructionFollowing: 'high', contextWindow: 128000 },
+  'gemma': { codeQuality: 'medium', instructionFollowing: 'high', contextWindow: 8192 },
+  'gemma2': { codeQuality: 'high', instructionFollowing: 'high', contextWindow: 8192 },
+
+  // Cloud models
+  'claude': { codeQuality: 'excellent', instructionFollowing: 'excellent', contextWindow: 200000 },
+  'gpt-4': { codeQuality: 'excellent', instructionFollowing: 'excellent', contextWindow: 128000 },
+  'gpt-3.5': { codeQuality: 'medium', instructionFollowing: 'high', contextWindow: 16385 },
+};
+
+/**
+ * Detect model capabilities from model name
+ */
+function detectModelCapabilities(modelName) {
+  if (!modelName) return null;
+
+  const nameLower = modelName.toLowerCase();
+
+  // Try exact matches first
+  for (const [pattern, caps] of Object.entries(MODEL_CAPABILITIES)) {
+    if (nameLower.includes(pattern)) {
+      return {
+        ...caps,
+        source: 'heuristic',
+        matchedPattern: pattern
+      };
+    }
+  }
+
+  // Default fallback for unknown models
+  return {
+    codeQuality: 'unknown',
+    instructionFollowing: 'unknown',
+    contextWindow: 4096,
+    source: 'default'
+  };
+}
+
+/**
+ * Get recommended model for a task type
+ */
+function getRecommendedModel(availableModels, taskType = 'code') {
+  if (!availableModels || availableModels.length === 0) return null;
+
+  const withCaps = availableModels.map(m => ({
+    ...m,
+    capabilities: detectModelCapabilities(m.id || m.name)
+  }));
+
+  // Score models based on task
+  const scored = withCaps.map(m => {
+    let score = 0;
+    const caps = m.capabilities;
+
+    if (taskType === 'code') {
+      if (caps.codeQuality === 'excellent') score += 10;
+      else if (caps.codeQuality === 'high') score += 7;
+      else if (caps.codeQuality === 'medium') score += 4;
+    }
+
+    if (caps.instructionFollowing === 'excellent') score += 5;
+    else if (caps.instructionFollowing === 'high') score += 3;
+
+    // Prefer larger context windows for complex tasks
+    if (caps.contextWindow >= 32768) score += 3;
+    else if (caps.contextWindow >= 16384) score += 2;
+
+    return { ...m, score };
+  });
+
+  // Sort by score descending
+  scored.sort((a, b) => b.score - a.score);
+
+  return scored[0] || null;
+}
+
+/**
  * Default provider configurations
  */
 const DEFAULT_CONFIGS = {
@@ -157,10 +254,55 @@ class OllamaProvider extends BaseProvider {
       return (response.models || []).map(m => ({
         id: m.name,
         name: m.name,
-        size: m.size
+        size: m.size,
+        capabilities: detectModelCapabilities(m.name)
       }));
     } catch {
       return [];
+    }
+  }
+
+  /**
+   * Get detailed model info from Ollama API
+   */
+  async getModelInfo(modelName) {
+    const endpoint = this.config.endpoint || DEFAULT_CONFIGS.ollama.endpoint;
+    const url = new URL('/api/show', endpoint);
+
+    try {
+      const response = await this._request(url, { name: modelName });
+
+      // Extract capabilities from model metadata if available
+      const modelfile = response.modelfile || '';
+      const parameters = response.parameters || '';
+
+      // Parse context length from modelfile or parameters
+      let contextWindow = 4096;
+      const ctxMatch = modelfile.match(/num_ctx\s+(\d+)/i) ||
+                       parameters.match(/num_ctx\s+(\d+)/i);
+      if (ctxMatch) {
+        contextWindow = parseInt(ctxMatch[1], 10);
+      }
+
+      // Get heuristic capabilities and override with API data
+      const heuristicCaps = detectModelCapabilities(modelName);
+
+      return {
+        name: modelName,
+        modelfile: modelfile.slice(0, 500), // Truncate for display
+        parameters,
+        capabilities: {
+          ...heuristicCaps,
+          contextWindow: Math.max(contextWindow, heuristicCaps.contextWindow),
+          source: 'api+heuristic'
+        }
+      };
+    } catch {
+      // Fall back to heuristic only
+      return {
+        name: modelName,
+        capabilities: detectModelCapabilities(modelName)
+      };
     }
   }
 
@@ -603,6 +745,7 @@ function loadProviderFromConfig() {
 module.exports = {
   PROVIDER_TYPES,
   DEFAULT_CONFIGS,
+  MODEL_CAPABILITIES,
   BaseProvider,
   OllamaProvider,
   LMStudioProvider,
@@ -611,8 +754,23 @@ module.exports = {
   createProvider,
   listProviders,
   detectProviders,
-  loadProviderFromConfig
+  loadProviderFromConfig,
+  detectModelCapabilities,
+  getRecommendedModel
 };
+
+/**
+ * Format capability level with color
+ */
+function formatCapability(level) {
+  switch (level) {
+    case 'excellent': return `${c.green}excellent${c.reset}`;
+    case 'high': return `${c.green}high${c.reset}`;
+    case 'medium': return `${c.yellow}medium${c.reset}`;
+    case 'unknown': return `${c.dim}unknown${c.reset}`;
+    default: return level;
+  }
+}
 
 // CLI Handler
 if (require.main === module) {
@@ -685,20 +843,91 @@ if (require.main === module) {
         break;
       }
 
+      case 'capabilities': {
+        const modelName = args[1];
+
+        if (modelName) {
+          // Show capabilities for specific model
+          const caps = detectModelCapabilities(modelName);
+          console.log(`\n${c.cyan}${c.bold}Model Capabilities: ${modelName}${c.reset}\n`);
+          console.log(`  Code Quality:        ${formatCapability(caps.codeQuality)}`);
+          console.log(`  Instruction Following: ${formatCapability(caps.instructionFollowing)}`);
+          console.log(`  Context Window:      ${caps.contextWindow.toLocaleString()} tokens`);
+          console.log(`  Detection Source:    ${caps.source}`);
+          if (caps.matchedPattern) {
+            console.log(`  Matched Pattern:     ${caps.matchedPattern}`);
+          }
+        } else {
+          // List all known capabilities
+          console.log(`\n${c.cyan}${c.bold}Known Model Capabilities${c.reset}\n`);
+          console.log(`${c.dim}Pattern            Code Quality   Instructions   Context${c.reset}`);
+          console.log(`${c.dim}${'─'.repeat(60)}${c.reset}`);
+
+          for (const [pattern, caps] of Object.entries(MODEL_CAPABILITIES)) {
+            const cq = caps.codeQuality.padEnd(12);
+            const inf = caps.instructionFollowing.padEnd(12);
+            const ctx = caps.contextWindow.toLocaleString().padStart(10);
+            console.log(`  ${pattern.padEnd(16)} ${cq} ${inf} ${ctx}`);
+          }
+
+          console.log('');
+          console.log(`${c.dim}Use "flow providers capabilities <model-name>" to check a specific model${c.reset}`);
+        }
+        break;
+      }
+
+      case 'recommend': {
+        console.log(`\n${c.cyan}Finding best model for code tasks...${c.reset}\n`);
+
+        const available = await detectProviders();
+
+        if (available.length === 0) {
+          console.log(`${c.yellow}No providers detected.${c.reset}`);
+          process.exit(1);
+        }
+
+        for (const provider of available) {
+          if (provider.models && provider.models.length > 0) {
+            const recommended = getRecommendedModel(provider.models, 'code');
+            if (recommended) {
+              console.log(`${c.green}${provider.name}:${c.reset} ${recommended.id || recommended.name}`);
+              const caps = recommended.capabilities;
+              console.log(`   Code: ${caps.codeQuality} | Instructions: ${caps.instructionFollowing}`);
+              console.log(`   Context: ${caps.contextWindow.toLocaleString()} tokens | Score: ${recommended.score}`);
+              console.log('');
+            }
+          }
+        }
+        break;
+      }
+
       default: {
         console.log(`
 ${c.cyan}Wogi Flow - Model Providers${c.reset}
 
 ${c.bold}Usage:${c.reset}
-  flow providers list              List all available providers
-  flow providers detect            Detect running local providers
-  flow providers test <type>       Test a provider connection
+  flow providers list                  List all available providers
+  flow providers detect                Detect running local providers
+  flow providers test <type>           Test a provider connection
+  flow providers capabilities          List known model capabilities
+  flow providers capabilities <model>  Show capabilities for a model
+  flow providers recommend             Find best model for code tasks
 
 ${c.bold}Supported Providers:${c.reset}
   ollama        Local Ollama instance
   lm-studio     Local LM Studio instance
   anthropic     Anthropic API (requires ANTHROPIC_API_KEY)
   openai        OpenAI API (requires OPENAI_API_KEY)
+
+${c.bold}Model Capabilities:${c.reset}
+  The system detects model capabilities using:
+  1. API queries (when available, e.g., Ollama /api/show)
+  2. Heuristics based on model name patterns
+
+  Capabilities tracked:
+  - Code Quality: How well the model generates code
+  - Instruction Following: How well it follows prompts
+  - Context Window: Maximum tokens supported
 
 ${c.bold}Configuration:${c.reset}
   Set in .workflow/config.json under "hybrid":

@@ -242,6 +242,148 @@ function scanComponentExports(componentDir) {
 }
 
 /**
+ * Generate glob patterns for component discovery based on detected framework
+ * This is a simplified, one-time detection that generates patterns for later use
+ */
+function generateComponentGlobPatterns(uiFramework, componentDirs) {
+  const patterns = [];
+
+  // Base component patterns
+  for (const dir of componentDirs) {
+    patterns.push(`${dir}/**/*.tsx`);
+    patterns.push(`${dir}/**/*.jsx`);
+  }
+
+  // Framework-specific patterns
+  switch (uiFramework) {
+    case 'next':
+      // Next.js app router components
+      patterns.push('app/**/*.tsx');
+      patterns.push('app/**/page.tsx');
+      patterns.push('app/**/layout.tsx');
+      // Pages router
+      patterns.push('pages/**/*.tsx');
+      break;
+
+    case 'react':
+    case 'react-native':
+      // Common React patterns
+      patterns.push('src/**/*.tsx');
+      patterns.push('src/**/*.jsx');
+      break;
+
+    case 'vue':
+      patterns.push('src/**/*.vue');
+      patterns.push('components/**/*.vue');
+      break;
+
+    case 'angular':
+      patterns.push('src/**/*.component.ts');
+      patterns.push('src/**/*.component.html');
+      break;
+
+    case 'svelte':
+      patterns.push('src/**/*.svelte');
+      break;
+
+    case 'nestjs':
+      // NestJS modules and controllers
+      patterns.push('src/**/*.module.ts');
+      patterns.push('src/**/*.controller.ts');
+      patterns.push('src/**/*.service.ts');
+      break;
+
+    case 'express':
+    case 'fastify':
+      patterns.push('src/**/*.ts');
+      patterns.push('src/routes/**/*.ts');
+      patterns.push('src/controllers/**/*.ts');
+      break;
+  }
+
+  // Default fallback if no framework detected
+  if (patterns.length === 0) {
+    patterns.push('src/**/*.ts');
+    patterns.push('src/**/*.tsx');
+    patterns.push('src/**/*.js');
+    patterns.push('src/**/*.jsx');
+  }
+
+  return [...new Set(patterns)]; // Dedupe
+}
+
+/**
+ * Generate simplified framework config for storing in config.json
+ * This provides all the info needed without re-detection
+ */
+function generateFrameworkConfig(analysis) {
+  return {
+    framework: analysis.uiFramework,
+    styling: analysis.stylingApproach,
+    componentPatterns: generateComponentGlobPatterns(analysis.uiFramework, analysis.componentDirs),
+    testPatterns: generateTestGlobPatterns(analysis.uiFramework),
+    configFiles: detectConfigFiles(),
+    detectedAt: new Date().toISOString()
+  };
+}
+
+/**
+ * Generate test file glob patterns based on framework
+ */
+function generateTestGlobPatterns(uiFramework) {
+  const patterns = [
+    '**/*.test.ts',
+    '**/*.test.tsx',
+    '**/*.spec.ts',
+    '**/*.spec.tsx',
+    '__tests__/**/*.ts',
+    '__tests__/**/*.tsx',
+  ];
+
+  // Framework-specific test patterns
+  if (uiFramework === 'angular') {
+    patterns.push('**/*.spec.ts');
+  }
+
+  if (uiFramework === 'nestjs') {
+    patterns.push('test/**/*.e2e-spec.ts');
+  }
+
+  return patterns;
+}
+
+/**
+ * Detect important config files in the project
+ */
+function detectConfigFiles() {
+  const configFiles = {};
+  const checkFiles = [
+    'tsconfig.json',
+    'package.json',
+    'tailwind.config.js',
+    'tailwind.config.ts',
+    'next.config.js',
+    'next.config.mjs',
+    'vite.config.ts',
+    'webpack.config.js',
+    '.eslintrc',
+    '.eslintrc.js',
+    '.eslintrc.json',
+    'jest.config.js',
+    'vitest.config.ts',
+  ];
+
+  for (const file of checkFiles) {
+    const fullPath = path.join(PROJECT_ROOT, file);
+    if (fs.existsSync(fullPath)) {
+      configFiles[file] = true;
+    }
+  }
+
+  return configFiles;
+}
+
+/**
  * Detect type import locations based on project structure
  */
 function detectTypeLocations() {
@@ -398,10 +540,17 @@ function updateConfig(analysis) {
     ctx.projectWarnings = analysis.projectWarnings;
     ctx.customRules = analysis.customRules;
 
+    // Add simplified framework config with glob patterns
+    // This is the one-time detection result that can be used without re-scanning
+    config.frameworkConfig = generateFrameworkConfig(analysis);
+
     // Write back
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
 
     console.log('✓ Updated config.json with project context');
+    console.log(`  Framework: ${analysis.uiFramework || 'not detected'}`);
+    console.log(`  Styling: ${analysis.stylingApproach || 'not detected'}`);
+    console.log(`  Component patterns: ${config.frameworkConfig.componentPatterns.length}`);
     return true;
   } catch (e) {
     console.log(`Error updating config: ${e.message}`);
@@ -471,4 +620,7 @@ module.exports = {
   detectUIFramework,
   detectStylingApproach,
   scanComponentExports,
+  generateComponentGlobPatterns,
+  generateFrameworkConfig,
+  detectConfigFiles,
 };
