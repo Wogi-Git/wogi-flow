@@ -271,6 +271,79 @@ function validateJson(filePath) {
 let _configCache = null;
 let _configMtime = null;
 
+// Known config keys for validation (prevents typos causing silent failures)
+const KNOWN_CONFIG_KEYS = [
+  'hybrid',
+  'parallel',
+  'worktree',
+  'qualityGates',
+  'testing',
+  'componentRules',
+  'mandatorySteps',
+  'phases',
+  'corrections',
+  'skills',
+  'autoContext',
+  'metrics',
+  'figmaAnalyzer',
+  'learning',
+  'hooks',
+  'project',
+  'projectType'
+];
+
+// Known nested keys for common config sections
+const KNOWN_NESTED_KEYS = {
+  hybrid: ['enabled', 'provider', 'providerEndpoint', 'model', 'settings', 'maxContextTokens', 'apiKey'],
+  parallel: ['enabled', 'maxConcurrent', 'autoApprove', 'requireWorktree', 'showProgress'],
+  worktree: ['enabled', 'autoCleanupHours', 'keepOnFailure', 'squashOnMerge'],
+  testing: ['runAfterTask', 'runBeforeCommit', 'command'],
+  learning: ['autoPromote', 'enabled', 'threshold', 'mode'],
+  qualityGates: ['feature', 'bugfix'],
+  autoContext: ['enabled', 'maxFiles', 'searchDepth']
+};
+
+/**
+ * Validate config object for unknown keys
+ * Warns about typos that could cause silent failures
+ */
+function validateConfig(config, warnOnUnknown = true) {
+  if (!warnOnUnknown || !config || typeof config !== 'object') return;
+
+  const warnings = [];
+
+  // Check top-level keys
+  for (const key of Object.keys(config)) {
+    if (!KNOWN_CONFIG_KEYS.includes(key)) {
+      warnings.push(`Unknown config key: "${key}"`);
+    }
+  }
+
+  // Check known nested sections
+  for (const [section, knownKeys] of Object.entries(KNOWN_NESTED_KEYS)) {
+    const sectionConfig = config[section];
+    if (sectionConfig && typeof sectionConfig === 'object') {
+      for (const key of Object.keys(sectionConfig)) {
+        if (!knownKeys.includes(key)) {
+          warnings.push(`Unknown key in ${section}: "${key}"`);
+        }
+      }
+    }
+  }
+
+  // Only warn once per session (avoid spam)
+  if (warnings.length > 0 && !_configValidationDone) {
+    _configValidationDone = true;
+    for (const warning of warnings) {
+      console.warn(`⚠️  ${warning}`);
+    }
+    console.warn('   Check for typos in .workflow/config.json');
+  }
+}
+
+// Track if we've already warned about config issues this session
+let _configValidationDone = false;
+
 /**
  * Read workflow config (cached, invalidates on file change)
  */
@@ -286,6 +359,12 @@ function getConfig() {
 
     _configCache = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
     _configMtime = stat.mtimeMs;
+
+    // Validate on first load (DEBUG mode or explicit request)
+    if (process.env.DEBUG || process.env.VALIDATE_CONFIG) {
+      validateConfig(_configCache);
+    }
+
     return _configCache;
   } catch (err) {
     // Log warning instead of silently returning empty config
@@ -619,9 +698,11 @@ function addAppMapComponent(component) {
 
 /**
  * Check if current directory is a git repo
+ * Note: .git can be a directory (normal repo) or file (worktree)
  */
 function isGitRepo() {
-  return dirExists(path.join(PROJECT_ROOT, '.git'));
+  const gitPath = path.join(PROJECT_ROOT, '.git');
+  return fs.existsSync(gitPath);
 }
 
 /**
@@ -740,6 +821,176 @@ function countFiles(dirPath, extensions = [], maxDepth = 10) {
 }
 
 // ============================================================
+// File Locking (for parallel execution safety)
+// ============================================================
+
+/**
+ * Simple file locking without external dependencies.
+ * Uses mkdir (atomic on most filesystems) for lock acquisition.
+ *
+ * @param {string} filePath - File to lock
+ * @param {Object} options - Lock options
+ * @param {number} [options.retries=5] - Number of retry attempts
+ * @param {number} [options.retryDelay=100] - Delay between retries (ms)
+ * @param {number} [options.staleMs=30000] - Consider lock stale after this many ms
+ * @returns {Promise<Function>} Release function
+ */
+async function acquireLock(filePath, options = {}) {
+  const {
+    retries = 5,
+    retryDelay = 100,
+    staleMs = 30000
+  } = options;
+
+  const lockDir = `${filePath}.lock`;
+  const lockInfoFile = path.join(lockDir, 'info.json');
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      // mkdir is atomic - will fail if directory already exists
+      fs.mkdirSync(lockDir, { recursive: false });
+
+      // Write lock info for stale detection
+      fs.writeFileSync(lockInfoFile, JSON.stringify({
+        pid: process.pid,
+        timestamp: Date.now(),
+        file: filePath
+      }));
+
+      // Return release function
+      return () => {
+        try {
+          fs.unlinkSync(lockInfoFile);
+          fs.rmdirSync(lockDir);
+        } catch {
+          // Lock already released or cleaned up
+        }
+      };
+    } catch (err) {
+      if (err.code === 'EEXIST') {
+        // Lock exists - check if stale
+        try {
+          const info = JSON.parse(fs.readFileSync(lockInfoFile, 'utf-8'));
+          const age = Date.now() - info.timestamp;
+
+          if (age > staleMs) {
+            // Stale lock - force cleanup
+            if (process.env.DEBUG) {
+              console.warn(`[DEBUG] Removing stale lock (${age}ms old) for ${filePath}`);
+            }
+            try {
+              fs.unlinkSync(lockInfoFile);
+              fs.rmdirSync(lockDir);
+            } catch {
+              // May have been cleaned up by another process
+            }
+            // Try again immediately
+            continue;
+          }
+        } catch {
+          // Can't read lock info - treat as stale after delay
+        }
+
+        if (attempt < retries) {
+          // Wait and retry
+          await new Promise(resolve => setTimeout(resolve, retryDelay * (attempt + 1)));
+          continue;
+        }
+      }
+
+      throw new Error(`Failed to acquire lock for ${filePath}: ${err.message}`);
+    }
+  }
+
+  throw new Error(`Failed to acquire lock for ${filePath} after ${retries} retries`);
+}
+
+/**
+ * Execute a function while holding a lock on a file
+ *
+ * @param {string} filePath - File to lock
+ * @param {Function} fn - Async function to execute
+ * @param {Object} [options] - Lock options
+ * @returns {Promise<*>} Result of fn
+ *
+ * @example
+ * const data = await withLock(PATHS.ready, async () => {
+ *   const current = readJson(PATHS.ready);
+ *   current.tasks.push(newTask);
+ *   writeJson(PATHS.ready, current);
+ *   return current;
+ * });
+ */
+async function withLock(filePath, fn, options = {}) {
+  const release = await acquireLock(filePath, options);
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
+/**
+ * Synchronous version of withLock for simpler use cases
+ * Note: Still uses async for lock acquisition, but fn is sync
+ */
+async function withLockSync(filePath, fn, options = {}) {
+  const release = await acquireLock(filePath, options);
+  try {
+    return fn();
+  } finally {
+    release();
+  }
+}
+
+/**
+ * Clean up any stale locks in a directory
+ * Useful for cleanup after crashes
+ */
+function cleanupStaleLocks(dirPath, staleMs = 30000) {
+  try {
+    if (!dirExists(dirPath)) return 0;
+
+    let cleaned = 0;
+    const entries = fs.readdirSync(dirPath);
+
+    for (const entry of entries) {
+      if (!entry.endsWith('.lock')) continue;
+
+      const lockDir = path.join(dirPath, entry);
+      const lockInfoFile = path.join(lockDir, 'info.json');
+
+      try {
+        const info = JSON.parse(fs.readFileSync(lockInfoFile, 'utf-8'));
+        const age = Date.now() - info.timestamp;
+
+        if (age > staleMs) {
+          fs.unlinkSync(lockInfoFile);
+          fs.rmdirSync(lockDir);
+          cleaned++;
+        }
+      } catch {
+        // Can't read - try to remove anyway if old enough
+        try {
+          const stat = fs.statSync(lockDir);
+          const age = Date.now() - stat.mtimeMs;
+          if (age > staleMs) {
+            fs.rmSync(lockDir, { recursive: true, force: true });
+            cleaned++;
+          }
+        } catch {
+          // Ignore
+        }
+      }
+    }
+
+    return cleaned;
+  } catch {
+    return 0;
+  }
+}
+
+// ============================================================
 // Exports
 // ============================================================
 
@@ -775,6 +1026,8 @@ module.exports = {
   getConfigValue,
   setConfigValue,
   invalidateConfigCache,
+  validateConfig,
+  KNOWN_CONFIG_KEYS,
 
   // Ready.json
   getReadyData,
@@ -801,4 +1054,10 @@ module.exports = {
   listDirs,
   listFiles,
   countFiles,
+
+  // File Locking
+  acquireLock,
+  withLock,
+  withLockSync,
+  cleanupStaleLocks,
 };

@@ -7,6 +7,7 @@
  */
 
 const { execSync, execFileSync, spawnSync } = require('child_process');
+const path = require('path');
 const {
   PATHS,
   fileExists,
@@ -14,18 +15,35 @@ const {
   moveTask,
   findTask,
   readFile,
+  writeJson,
   color,
   success,
   warn,
   error
 } = require('./flow-utils');
 
+// Path for last failure artifact
+const LAST_FAILURE_PATH = path.join(PATHS.state, 'last-failure.json');
+
+/**
+ * Truncate error output to reasonable length
+ */
+function truncateOutput(text, maxLines = 30, maxChars = 2000) {
+  if (!text) return '';
+  const lines = text.split('\n').slice(0, maxLines);
+  let result = lines.join('\n');
+  if (result.length > maxChars) {
+    result = result.substring(0, maxChars) + '\n... (truncated)';
+  }
+  return result;
+}
+
 /**
  * Run quality gates from config
  */
 function runQualityGates(taskId) {
   if (!fileExists(PATHS.config)) {
-    return { passed: true, failed: [] };
+    return { passed: true, failed: [], errors: {} };
   }
 
   console.log(color('yellow', 'Running quality gates...'));
@@ -35,6 +53,7 @@ function runQualityGates(taskId) {
   const gates = config.qualityGates?.feature?.require || [];
   const testing = config.testing || {};
   const failed = [];
+  const errors = {}; // Store error output for correction artifact
 
   for (const gate of gates) {
     if (gate === 'tests') {
@@ -48,10 +67,80 @@ function runQualityGates(taskId) {
           console.log(`  ${color('green', '✓')} tests passed`);
         } else {
           console.log(`  ${color('red', '✗')} tests failed`);
+          // Capture error output
+          const errorOutput = result.stderr || result.stdout || '';
+          if (errorOutput) {
+            console.log(color('dim', '  Error output:'));
+            const truncated = truncateOutput(errorOutput, 20, 1000);
+            truncated.split('\n').forEach(line => {
+              console.log(color('dim', `    ${line}`));
+            });
+          }
+          errors.tests = errorOutput;
           failed.push('tests');
         }
       } else {
         console.log(`  ${color('yellow', '○')} tests (not configured to run)`);
+      }
+    } else if (gate === 'lint') {
+      console.log('  Running lint...');
+      let result = spawnSync('npm', ['run', 'lint'], {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+
+      if (result.status !== 0) {
+        // Try auto-fix
+        console.log(`  ${color('yellow', '⟳')} lint issues found, attempting auto-fix...`);
+        const fixResult = spawnSync('npm', ['run', 'lint', '--', '--fix'], {
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe']
+        });
+
+        // Re-run lint to check if issues are fixed
+        result = spawnSync('npm', ['run', 'lint'], {
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe']
+        });
+
+        if (result.status === 0) {
+          console.log(`  ${color('green', '✓')} lint passed (auto-fixed)`);
+        } else {
+          console.log(`  ${color('red', '✗')} lint failed (manual fix required)`);
+          const errorOutput = result.stderr || result.stdout || '';
+          if (errorOutput) {
+            console.log(color('dim', '  Remaining issues:'));
+            const truncated = truncateOutput(errorOutput, 15, 800);
+            truncated.split('\n').forEach(line => {
+              console.log(color('dim', `    ${line}`));
+            });
+          }
+          errors.lint = errorOutput;
+          failed.push('lint');
+        }
+      } else {
+        console.log(`  ${color('green', '✓')} lint passed`);
+      }
+    } else if (gate === 'typecheck') {
+      console.log('  Running typecheck...');
+      const result = spawnSync('npm', ['run', 'typecheck'], {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+      if (result.status === 0) {
+        console.log(`  ${color('green', '✓')} typecheck passed`);
+      } else {
+        console.log(`  ${color('red', '✗')} typecheck failed`);
+        const errorOutput = result.stderr || result.stdout || '';
+        if (errorOutput) {
+          console.log(color('dim', '  Type errors:'));
+          const truncated = truncateOutput(errorOutput, 20, 1000);
+          truncated.split('\n').forEach(line => {
+            console.log(color('dim', `    ${line}`));
+          });
+        }
+        errors.typecheck = errorOutput;
+        failed.push('typecheck');
       }
     } else if (gate === 'requestLogEntry') {
       // Check if request-log has an entry for this task
@@ -78,7 +167,7 @@ function runQualityGates(taskId) {
     console.log(color('red', `Failed gates: ${failed.join(', ')}`));
   }
 
-  return { passed: failed.length === 0, failed };
+  return { passed: failed.length === 0, failed, errors };
 }
 
 /**
@@ -123,8 +212,23 @@ function main() {
   const gateResult = runQualityGates(taskId);
 
   if (!gateResult.passed) {
+    // Create correction artifact for AI self-repair
+    try {
+      writeJson(LAST_FAILURE_PATH, {
+        taskId,
+        timestamp: new Date().toISOString(),
+        failedGates: gateResult.failed,
+        errors: gateResult.errors
+      });
+      console.log('');
+      console.log(color('dim', `Failure details saved to: ${LAST_FAILURE_PATH}`));
+    } catch (err) {
+      if (process.env.DEBUG) console.error(`[DEBUG] Failed to save failure artifact: ${err.message}`);
+    }
+
     console.log('');
     error('Quality gates failed. Fix issues before completing.');
+    console.log(color('dim', 'Tip: Review the error output above or check .workflow/state/last-failure.json'));
     process.exit(1);
   }
 

@@ -1,44 +1,50 @@
-# Universal Rules
+## ⚠️ CRITICAL OUTPUT RULES (READ FIRST)
+
+**Your output will be written directly to a file. Follow these rules EXACTLY:**
+
+1. Output ONLY valid code - no explanations, no markdown
+2. Do NOT wrap code in ``` code blocks
+3. Do NOT include any text before the code
+4. Do NOT include any text after the code
+5. Start with imports (or 'use client' directive if needed)
+6. Do NOT include thinking or reasoning text in your output
+
+**WRONG OUTPUT:**
+```
+Here's the code you need:
+import React from 'react'
+```
+
+**CORRECT OUTPUT:**
+import { useState } from 'react';
+
+**You MAY use `<thinking>...</thinking>` tags to reason through complex problems.**
+Only the code OUTSIDE these tags will be extracted and written to the file.
+
+═══════════════════════════════════════════════════════════════════════════════
+
+# Project Context
 
 You are generating code for this project.
 
 {{#if uiFramework}}
-## Project Framework: {{uiFramework}}
+## Framework: {{uiFramework}}
 {{/if}}
 
 {{#if stylingApproach}}
 ## Styling: {{stylingApproach}}
 {{/if}}
 
-## CRITICAL OUTPUT RULES
-
-1. Output ONLY valid code - no explanations, no markdown
-2. Do NOT wrap code in ``` code blocks
-3. Do NOT include any text before the first import/export statement
-4. Do NOT include any text after the code
-5. Start directly with the code (import statements or exports)
-6. Do NOT include thinking or reasoning text
-7. Do NOT include </think> tags or similar markers
-
-WRONG OUTPUT:
-```
-Here's the code you need:
-import React from 'react'
-```
-
-CORRECT OUTPUT:
-import { useState } from 'react';
-
-## CRITICAL IMPORT RULES
+## Import Rules
 
 {{#if doNotImport}}
 ### Forbidden Imports (DO NOT USE)
 DO NOT import these: {{doNotImport}}
 {{/if}}
 
-### Available Imports (USE THESE EXACT PATHS)
+### Available Project Imports
 
-**ONLY use imports listed below. Any other import path is FORBIDDEN.**
+**Use ONLY imports listed below for project code. Other paths are FORBIDDEN.**
 
 {{#if availableComponents}}
 #### Components
@@ -80,22 +86,36 @@ DO NOT import these: {{doNotImport}}
 {{typeLocations}}
 {{/if}}
 
+### Standard Library Imports (Always Allowed)
+
+These imports are always safe to use without being listed above:
+
+**React:**
+- `useState`, `useEffect`, `useCallback`, `useMemo`, `useRef`, `useContext`
+- `useReducer`, `useLayoutEffect`, `useImperativeHandle`, `useDebugValue`
+- `forwardRef`, `memo`, `lazy`, `Suspense`, `Fragment`
+
+**Next.js:**
+- `Link`, `Image`, `Script` from `next/link`, `next/image`, `next/script`
+- `useRouter`, `usePathname`, `useSearchParams` from `next/navigation`
+- `notFound`, `redirect` from `next/navigation`
+- `headers`, `cookies` from `next/headers`
+
+**Node.js (for server code):**
+- `fs`, `path`, `os`, `crypto`, `util`, `stream`, `events`
+- `child_process`, `http`, `https`, `url`, `querystring`
+
 {{#if projectWarnings}}
 ### Project-Specific Warnings
 {{projectWarnings}}
 {{/if}}
 
-**NEVER INVENT IMPORTS.** Only use imports that:
-1. Are explicitly listed in the "Available Imports" section above
-2. Are shown in the current file content (for modify-file tasks)
-3. Are standard library imports (react hooks, useState, useEffect, etc.)
-
-**If you're unsure about an import path:**
+**If you're unsure about a project import path:**
 - DON'T USE IT
 - Write the code inline instead
 - Use a TODO comment: `// TODO: import X from '?'`
 
-## CRITICAL: Component Usage Rules
+## Component Usage Rules
 
 These rules prevent the most common LLM mistakes:
 
@@ -164,6 +184,33 @@ All imports, types, and patterns above are accurate and verified.
 
 Use ALL the context provided above. The imports, props, and types shown are
 the source of truth. Do not guess or invent alternatives.
+
+{{#if requiresPlan}}
+## Planning Requirement
+
+**IMPORTANT: This task requires explicit planning before implementation.**
+
+Task complexity: {{complexity}}
+
+Before writing any code, first output your plan inside `<thinking>` tags:
+1. What changes are needed
+2. Which imports you will use
+3. Key implementation decisions
+4. Any potential edge cases
+
+Example:
+```
+<thinking>
+Plan:
+1. Create UserCard component with name/email props
+2. Import Button from @/components/ui/Button
+3. Use useState for hover state
+4. Handle optional onEdit callback
+</thinking>
+```
+
+Then output ONLY the code (outside the thinking tags).
+{{/if}}
 
 ## Validation
 

@@ -232,17 +232,38 @@ async function executeParallel(tasks, executor, options = {}) {
   } = options;
 
   const dependencies = detectDependencies(tasks);
-  const completed = new Set();
+  const finished = new Set();   // All tasks that have run (success or failure)
+  const succeeded = new Set();  // Only tasks that succeeded
   const tracker = showProgress ? createProgressTracker(tasks) : null;
 
   // Process tasks in waves (respecting dependencies)
-  while (completed.size < tasks.length) {
-    const parallelizable = findParallelizable(tasks, completed, dependencies);
+  while (finished.size < tasks.length) {
+    // Use 'succeeded' for dependency checking - tasks with failed dependencies won't run
+    const parallelizable = findParallelizable(tasks, succeeded, dependencies)
+      .filter(t => !finished.has(t.id)); // Don't re-run finished tasks
 
     if (parallelizable.length === 0) {
-      // Check for circular dependencies
-      const remaining = tasks.filter(t => !completed.has(t.id));
+      // Check if we're stuck due to failed dependencies or circular deps
+      const remaining = tasks.filter(t => !finished.has(t.id));
       if (remaining.length > 0) {
+        // Check if remaining tasks have unmet dependencies due to failures
+        const blockedByFailure = remaining.filter(t => {
+          const taskDeps = dependencies[t.id] || [];
+          return taskDeps.some(d => finished.has(d) && !succeeded.has(d));
+        });
+
+        if (blockedByFailure.length > 0) {
+          // Tasks are blocked because their dependencies failed
+          console.warn(`\n⚠️  ${blockedByFailure.length} task(s) skipped due to failed dependencies:`);
+          blockedByFailure.forEach(t => {
+            const failedDeps = (dependencies[t.id] || []).filter(d => finished.has(d) && !succeeded.has(d));
+            console.warn(`   ${t.id} (blocked by: ${failedDeps.join(', ')})`);
+            finished.add(t.id); // Mark as finished (skipped)
+          });
+          continue; // Try next wave
+        }
+
+        // No tasks blocked by failure - must be circular dependency
         throw new Error(`Circular dependency detected among: ${remaining.map(t => t.id).join(', ')}`);
       }
       break;
@@ -256,14 +277,15 @@ async function executeParallel(tasks, executor, options = {}) {
 
       try {
         const result = await executor(task);
-        completed.add(task.id);
+        finished.add(task.id);
+        succeeded.add(task.id);
 
         if (tracker) tracker.complete(task.id, result);
         if (onComplete) onComplete(task, result);
 
         return { taskId: task.id, success: true, result };
       } catch (error) {
-        completed.add(task.id); // Mark as done even on failure to prevent infinite loop
+        finished.add(task.id); // Mark as finished but NOT succeeded
 
         if (tracker) tracker.fail(task.id, error);
         if (onError) onError(task, error);
@@ -275,7 +297,7 @@ async function executeParallel(tasks, executor, options = {}) {
     await Promise.all(promises);
   }
 
-  return tracker ? tracker.getSummary() : { completed: completed.size };
+  return tracker ? tracker.getSummary() : { finished: finished.size, succeeded: succeeded.size };
 }
 
 /**

@@ -2483,6 +2483,17 @@ class TemplateEngine {
 
     let result = substitute(template, augmentedParams);
 
+    // Process conditionals: {{#if var}}content{{/if}}
+    // Supports nested object access: {{#if obj.prop}}
+    result = result.replace(/\{\{#if\s+([\w.]+)\}\}([\s\S]*?)\{\{\/if\}\}/g, (match, varPath, content) => {
+      // Support dot notation for nested access
+      const value = varPath.split('.').reduce((obj, key) => obj?.[key], augmentedParams);
+      return value ? content : '';
+    });
+
+    // Clean up any remaining unprocessed conditionals (variables not in params)
+    result = result.replace(/\{\{#if\s+[\w.]+\}\}[\s\S]*?\{\{\/if\}\}/g, '');
+
     // Add richness-specific sections if available
     if (this.richness && (this.richness.includePatterns || this.richness.includeTypeDefinitions || this.richness.includeRelatedCode)) {
       let additionalContext = '\n\n## Additional Context (Based on Task Complexity)\n\n';

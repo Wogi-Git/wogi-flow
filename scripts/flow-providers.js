@@ -731,6 +731,180 @@ function loadProviderFromConfig() {
   }
 }
 
+// ============================================================
+// Token Budgeting with Auto-Detection
+// ============================================================
+
+/**
+ * Auto-detect model context limit from provider API
+ * No manual config needed - queries Ollama/LM Studio directly
+ *
+ * @param {string} providerType - 'ollama' or 'lm-studio'
+ * @param {string} endpoint - Provider endpoint URL
+ * @param {string} modelName - Model name to check
+ * @returns {Promise<number>} Context window size in tokens
+ */
+async function getModelContextLimit(providerType, endpoint, modelName) {
+  try {
+    if (providerType === PROVIDER_TYPES.OLLAMA || providerType === 'ollama') {
+      // Ollama /api/show returns model metadata including num_ctx
+      const provider = new OllamaProvider({ endpoint });
+      const info = await provider.getModelInfo(modelName);
+
+      if (info?.capabilities?.contextWindow) {
+        return info.capabilities.contextWindow;
+      }
+      return 4096; // Ollama default
+    }
+
+    if (providerType === PROVIDER_TYPES.LM_STUDIO || providerType === 'lm-studio' || providerType === 'lmstudio') {
+      // LM Studio /v1/models returns context_length in model metadata
+      const url = new URL('/v1/models', endpoint);
+
+      return new Promise((resolve) => {
+        const req = http.get(url.toString(), { timeout: 5000 }, (res) => {
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => {
+            try {
+              const parsed = JSON.parse(data);
+              // LM Studio returns context_length in model data
+              const model = parsed.data?.find(m => m.id === modelName) || parsed.data?.[0];
+              if (model?.context_length) {
+                resolve(model.context_length);
+              } else {
+                // Default for LM Studio
+                resolve(8192);
+              }
+            } catch {
+              resolve(8192);
+            }
+          });
+        });
+
+        req.on('error', () => resolve(8192));
+        req.on('timeout', () => {
+          req.destroy();
+          resolve(8192);
+        });
+      });
+    }
+
+    // Cloud providers - use known limits from capabilities
+    const caps = detectModelCapabilities(modelName);
+    return caps?.contextWindow || 8192;
+
+  } catch (err) {
+    if (process.env.DEBUG) {
+      console.warn(`Could not detect context limit: ${err.message}`);
+    }
+    return 8192; // Safe fallback
+  }
+}
+
+/**
+ * Estimate token count from text
+ * Uses conservative 4 chars per token estimate for English/code
+ *
+ * @param {string} text - Text to estimate
+ * @returns {number} Estimated token count
+ */
+function estimateTokens(text) {
+  if (!text) return 0;
+  // 4 chars per token is conservative estimate
+  // Actual tokenizers vary but this is a reasonable approximation
+  return Math.ceil(text.length / 4);
+}
+
+/**
+ * Create a token budgeting helper for a model
+ *
+ * @param {number} contextLimit - Total context window
+ * @param {number} reserveForResponse - Tokens to reserve for response (default: 20%)
+ * @returns {Object} Budget helper functions
+ */
+function createTokenBudget(contextLimit, reserveForResponse = null) {
+  // Reserve 20% for response by default, minimum 1000 tokens
+  const responseReserve = reserveForResponse || Math.max(1000, Math.floor(contextLimit * 0.2));
+  const promptBudget = contextLimit - responseReserve;
+
+  return {
+    contextLimit,
+    responseReserve,
+    promptBudget,
+
+    /**
+     * Check if prompt fits within budget
+     */
+    fitsWithin(text) {
+      return estimateTokens(text) <= promptBudget;
+    },
+
+    /**
+     * Get remaining budget after some text
+     */
+    remaining(text) {
+      return promptBudget - estimateTokens(text);
+    },
+
+    /**
+     * Truncate text to fit budget with optional ellipsis
+     */
+    truncateToFit(text, targetTokens = promptBudget) {
+      const currentTokens = estimateTokens(text);
+      if (currentTokens <= targetTokens) return text;
+
+      // Truncate to approximate target (4 chars per token)
+      const targetChars = targetTokens * 4;
+      return text.substring(0, targetChars - 50) + '\n\n... (truncated to fit context window)';
+    },
+
+    /**
+     * Get usage summary
+     */
+    summarize(text) {
+      const used = estimateTokens(text);
+      const percent = Math.round((used / promptBudget) * 100);
+      return {
+        used,
+        budget: promptBudget,
+        remaining: promptBudget - used,
+        percent,
+        overBudget: used > promptBudget,
+        contextLimit
+      };
+    }
+  };
+}
+
+/**
+ * Initialize token budgeting for a hybrid session
+ * Auto-detects context limit from provider
+ *
+ * @param {Object} config - Hybrid config from config.json
+ * @returns {Promise<Object>} Token budget helper
+ */
+async function initializeTokenBudget(config) {
+  const {
+    provider,
+    providerEndpoint,
+    model,
+    maxContextTokens // Optional manual override
+  } = config;
+
+  // Use manual override if provided
+  if (maxContextTokens && maxContextTokens > 0) {
+    console.log(`📊 Using configured context window: ${maxContextTokens.toLocaleString()} tokens`);
+    return createTokenBudget(maxContextTokens);
+  }
+
+  // Auto-detect from provider
+  const contextLimit = await getModelContextLimit(provider, providerEndpoint, model);
+  console.log(`📊 Detected context window: ${contextLimit.toLocaleString()} tokens`);
+
+  return createTokenBudget(contextLimit);
+}
+
 // Module exports
 module.exports = {
   PROVIDER_TYPES,
@@ -746,7 +920,13 @@ module.exports = {
   detectProviders,
   loadProviderFromConfig,
   detectModelCapabilities,
-  getRecommendedModel
+  getRecommendedModel,
+
+  // Token budgeting
+  getModelContextLimit,
+  estimateTokens,
+  createTokenBudget,
+  initializeTokenBudget
 };
 
 /**

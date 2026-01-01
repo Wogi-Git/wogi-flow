@@ -548,6 +548,84 @@ this without guessing anything. Local LLM tokens are FREE - don't hold back!
 // Exports
 // ============================================================
 
+// ============================================================
+// Lightweight Type Hints Generator
+// ============================================================
+
+/**
+ * Generate lightweight type hints for common project types
+ * These are condensed summaries to help LLMs understand type shapes
+ * without loading entire type files.
+ *
+ * @param {string} projectRoot - Project root directory
+ * @param {Object} options - Options
+ * @returns {string|null} Formatted type hints
+ */
+function generateTypeHints(projectRoot, options = {}) {
+  const { maxTypes = 10, taskDescription = '' } = options;
+  const typeHints = [];
+
+  // Common type file locations
+  const typeFiles = [
+    path.join(projectRoot, 'src', 'types', 'index.ts'),
+    path.join(projectRoot, 'src', 'types.ts'),
+    path.join(projectRoot, 'types', 'index.ts'),
+    path.join(projectRoot, 'src', 'lib', 'types.ts')
+  ];
+
+  for (const typePath of typeFiles) {
+    if (!fs.existsSync(typePath)) continue;
+
+    try {
+      const content = fs.readFileSync(typePath, 'utf-8');
+
+      // Extract interface/type definitions
+      const interfaceRegex = /(?:export\s+)?interface\s+(\w+)\s*(?:extends\s+[\w,\s]+)?\s*\{([^}]+)\}/g;
+      const typeRegex = /(?:export\s+)?type\s+(\w+)\s*=\s*([^;]+);/g;
+
+      let match;
+
+      // Extract interfaces with their key properties
+      while ((match = interfaceRegex.exec(content)) !== null && typeHints.length < maxTypes) {
+        const name = match[1];
+        const body = match[2];
+
+        // Extract key properties (first 5 lines or so)
+        const props = body
+          .split('\n')
+          .map(line => line.trim())
+          .filter(line => line && !line.startsWith('//'))
+          .slice(0, 5)
+          .map(line => '  ' + line);
+
+        if (props.length > 0) {
+          typeHints.push(`${name}: { ${props.join(' ').replace(/\s+/g, ' ').slice(0, 100)}${props.length > 5 ? ' ...' : ''} }`);
+        }
+      }
+
+      // Extract type aliases (simpler)
+      while ((match = typeRegex.exec(content)) !== null && typeHints.length < maxTypes) {
+        const name = match[1];
+        const value = match[2].trim().slice(0, 80);
+
+        // Only include simple types, not complex unions
+        if (!value.includes('\n') && value.length < 80) {
+          typeHints.push(`${name}: ${value}`);
+        }
+      }
+
+    } catch (err) {
+      if (process.env.DEBUG) {
+        console.warn(`Could not parse types from ${typePath}: ${err.message}`);
+      }
+    }
+  }
+
+  if (typeHints.length === 0) return null;
+
+  return `**Type Hints (condensed):**\n${typeHints.map(h => `- ${h}`).join('\n')}`;
+}
+
 module.exports = {
   INSTRUCTION_RICHNESS,
   COMPLEXITY_TO_RICHNESS,
@@ -558,7 +636,9 @@ module.exports = {
   loadPatterns,
   loadRelevantTypes,
   loadRelatedCode,
-  loadSimilarExamples
+  loadSimilarExamples,
+  // Type hints
+  generateTypeHints
 };
 
 // ============================================================

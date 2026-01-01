@@ -12,6 +12,7 @@ const {
   dirExists,
   getTaskCounts,
   getConfig,
+  getReadyData,
   countRequestLogEntries,
   countAppMapComponents,
   getGitStatus,
@@ -96,8 +97,90 @@ function main() {
     }
   }
 
+  // Action-oriented recommendation
+  printSection('📌 Recommended Next Action');
+  const recommendation = getRecommendation();
+  console.log(`  ${recommendation.action}`);
+  if (recommendation.command) {
+    console.log(color('dim', `  Run: ${recommendation.command}`));
+  }
+
   console.log('');
   console.log(color('cyan', '═'.repeat(50)));
+}
+
+/**
+ * Get recommended next action based on current state
+ */
+function getRecommendation() {
+  const config = getConfig();
+
+  // Check for uncommitted changes first
+  const git = getGitStatus();
+  if (git.isRepo && git.uncommitted > 0) {
+    return {
+      action: `Commit ${git.uncommitted} uncommitted file(s)`,
+      command: 'git add -A && git commit -m "message"'
+    };
+  }
+
+  // Check task state
+  if (!fileExists(PATHS.ready)) {
+    return {
+      action: 'Initialize workflow to start tracking tasks',
+      command: 'flow install'
+    };
+  }
+
+  const data = getReadyData();
+
+  // Check in-progress tasks first
+  const inProgress = data.inProgress || [];
+  if (inProgress.length > 0) {
+    const task = inProgress[0];
+    const taskId = typeof task === 'string' ? task : task.id;
+    const taskTitle = typeof task === 'object' ? (task.title || task.description || '') : '';
+    return {
+      action: `Continue working on ${taskId}${taskTitle ? `: ${taskTitle.slice(0, 40)}` : ''}`,
+      command: null
+    };
+  }
+
+  // Check ready tasks
+  const ready = data.ready || [];
+  if (ready.length > 0) {
+    // Find highest priority task
+    const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+    const sorted = [...ready].sort((a, b) => {
+      const aPriority = priorityOrder[a.priority] ?? 2;
+      const bPriority = priorityOrder[b.priority] ?? 2;
+      return aPriority - bPriority;
+    });
+
+    const task = sorted[0];
+    const taskId = typeof task === 'string' ? task : task.id;
+    const taskTitle = typeof task === 'object' ? (task.title || task.description || '') : '';
+    const priority = typeof task === 'object' && task.priority ? ` [${task.priority}]` : '';
+    return {
+      action: `Start ${taskId}${priority}${taskTitle ? `: ${taskTitle.slice(0, 35)}` : ''}`,
+      command: `flow start ${taskId}`
+    };
+  }
+
+  // Check blocked tasks
+  const blocked = data.blocked || [];
+  if (blocked.length > 0) {
+    return {
+      action: `${blocked.length} task(s) are blocked - resolve dependencies`,
+      command: 'flow ready'
+    };
+  }
+
+  // No tasks at all
+  return {
+    action: 'Create a new task to work on',
+    command: 'flow story "Your task title"'
+  };
 }
 
 if (require.main === module) {

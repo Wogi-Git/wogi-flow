@@ -16,6 +16,20 @@ show_version() {
     fi
 }
 
+show_quick_help() {
+    show_version
+    echo ""
+    echo "Quick Start:"
+    echo "  flow install          # Set up workflow in project"
+    echo "  flow ready            # See tasks ready to work on"
+    echo "  flow start TASK-XXX   # Start a task"
+    echo "  flow done TASK-XXX    # Complete a task"
+    echo "  flow status           # Project overview"
+    echo ""
+    echo "Run 'flow help' for full command list"
+    echo "Run 'flow help <command>' for command details"
+}
+
 show_help() {
     show_version
     echo ""
@@ -294,16 +308,13 @@ case "${1:-}" in
                 node "$SCRIPT_DIR/flow-parallel.js" check
                 ;;
             enable)
-                jq '.parallel.enabled = true' "$PROJECT_ROOT/.workflow/config.json" > /tmp/cfg.tmp && mv /tmp/cfg.tmp "$PROJECT_ROOT/.workflow/config.json"
-                echo "✅ Parallel execution enabled"
+                node "$SCRIPT_DIR/flow-config-set.js" parallel.enabled true
                 ;;
             disable)
-                jq '.parallel.enabled = false' "$PROJECT_ROOT/.workflow/config.json" > /tmp/cfg.tmp && mv /tmp/cfg.tmp "$PROJECT_ROOT/.workflow/config.json"
-                echo "✅ Parallel execution disabled"
+                node "$SCRIPT_DIR/flow-config-set.js" parallel.enabled false
                 ;;
             auto-approve)
-                jq '.parallel.autoApprove = true' "$PROJECT_ROOT/.workflow/config.json" > /tmp/cfg.tmp && mv /tmp/cfg.tmp "$PROJECT_ROOT/.workflow/config.json"
-                echo "✅ Parallel auto-approve enabled"
+                node "$SCRIPT_DIR/flow-config-set.js" parallel.autoApprove true
                 ;;
             *)
                 echo "Usage: flow parallel [config|check|enable|disable|auto-approve]"
@@ -313,13 +324,11 @@ case "${1:-}" in
     worktree)
         case "${2:-list}" in
             enable)
-                jq '.worktree.enabled = true' "$PROJECT_ROOT/.workflow/config.json" > /tmp/cfg.tmp && mv /tmp/cfg.tmp "$PROJECT_ROOT/.workflow/config.json"
-                echo "✅ Worktree isolation enabled"
+                node "$SCRIPT_DIR/flow-config-set.js" worktree.enabled true
                 echo "Tasks will now run in isolated git worktrees for safe parallel execution"
                 ;;
             disable)
-                jq '.worktree.enabled = false' "$PROJECT_ROOT/.workflow/config.json" > /tmp/cfg.tmp && mv /tmp/cfg.tmp "$PROJECT_ROOT/.workflow/config.json"
-                echo "✅ Worktree isolation disabled"
+                node "$SCRIPT_DIR/flow-config-set.js" worktree.enabled false
                 ;;
             list)
                 node "$SCRIPT_DIR/flow-worktree.js" list
@@ -328,7 +337,7 @@ case "${1:-}" in
                 node "$SCRIPT_DIR/flow-worktree.js" cleanup
                 ;;
             status)
-                jq '.worktree' "$PROJECT_ROOT/.workflow/config.json"
+                node "$SCRIPT_DIR/flow-config-set.js" worktree
                 ;;
             *)
                 echo "Usage: flow worktree [enable|disable|list|cleanup|status]"
@@ -350,11 +359,10 @@ case "${1:-}" in
                 node "$SCRIPT_DIR/flow-hybrid-interactive.js"
                 ;;
             disable)
-                jq '.hybrid.enabled = false' "$PROJECT_ROOT/.workflow/config.json" > /tmp/cfg.tmp && mv /tmp/cfg.tmp "$PROJECT_ROOT/.workflow/config.json"
-                echo "✅ Hybrid mode disabled"
+                node "$SCRIPT_DIR/flow-config-set.js" hybrid.enabled false
                 ;;
             status)
-                jq '.hybrid' "$PROJECT_ROOT/.workflow/config.json"
+                node "$SCRIPT_DIR/flow-config-set.js" hybrid
                 ;;
             execute)
                 node "$SCRIPT_DIR/flow-orchestrate.js" "$3"
@@ -467,10 +475,36 @@ case "${1:-}" in
         show_version
         ;;
     help|--help|-h)
-        show_help
+        case "${2:-}" in
+            --quick|-q)
+                show_quick_help
+                ;;
+            "")
+                show_help
+                ;;
+            *)
+                # Show help for specific command
+                echo "Help for: $2"
+                echo ""
+                case "$2" in
+                    ready) echo "Show tasks ready to work on. Reads from .workflow/state/ready.json" ;;
+                    start) echo "Start working on a task. Usage: flow start TASK-XXX" ;;
+                    done) echo "Complete a task, run quality gates. Usage: flow done TASK-XXX" ;;
+                    status) echo "Show project overview: tasks, git status, recent activity" ;;
+                    health) echo "Check workflow health: validate config, check files" ;;
+                    story) echo "Create detailed story with acceptance criteria. Usage: flow story \"title\"" ;;
+                    hybrid) echo "Manage hybrid mode. Subcommands: enable, disable, status, execute, test" ;;
+                    parallel) echo "Manage parallel execution. Subcommands: config, check, enable, disable" ;;
+                    worktree) echo "Manage worktree isolation. Subcommands: enable, disable, list, cleanup" ;;
+                    *) echo "No detailed help for '$2'. Run 'flow help' for all commands." ;;
+                esac
+                ;;
+        esac
         ;;
     *)
-        show_help
+        show_quick_help
+        echo ""
+        echo "Unknown command: ${1:-}"
         exit 1
         ;;
 esac
