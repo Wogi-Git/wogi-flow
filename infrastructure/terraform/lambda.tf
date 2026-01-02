@@ -1,14 +1,8 @@
 # Lambda Functions for Wogi Flow Team Backend
 
-# Create deployment package placeholder
-data "archive_file" "lambda_placeholder" {
-  type        = "zip"
-  output_path = "${path.module}/lambda_placeholder.zip"
-
-  source {
-    content  = "exports.handler = async (event) => { return { statusCode: 200, body: JSON.stringify({ message: 'Placeholder' }) }; };"
-    filename = "index.js"
-  }
+# Lambda packages - built from infrastructure/lambda/
+locals {
+  lambda_dir = "${path.module}/../lambda/dist"
 }
 
 # Teams API Lambda
@@ -20,8 +14,8 @@ resource "aws_lambda_function" "teams_api" {
   memory_size   = var.lambda_memory_size
   timeout       = var.lambda_timeout
 
-  filename         = data.archive_file.lambda_placeholder.output_path
-  source_code_hash = data.archive_file.lambda_placeholder.output_base64sha256
+  filename         = "${local.lambda_dir}/teams.zip"
+  source_code_hash = filebase64sha256("${local.lambda_dir}/teams.zip")
 
   environment {
     variables = {
@@ -45,8 +39,8 @@ resource "aws_lambda_function" "proposals_api" {
   memory_size   = var.lambda_memory_size
   timeout       = var.lambda_timeout
 
-  filename         = data.archive_file.lambda_placeholder.output_path
-  source_code_hash = data.archive_file.lambda_placeholder.output_base64sha256
+  filename         = "${local.lambda_dir}/proposals.zip"
+  source_code_hash = filebase64sha256("${local.lambda_dir}/proposals.zip")
 
   environment {
     variables = {
@@ -71,8 +65,8 @@ resource "aws_lambda_function" "memory_api" {
   memory_size   = var.lambda_memory_size
   timeout       = var.lambda_timeout
 
-  filename         = data.archive_file.lambda_placeholder.output_path
-  source_code_hash = data.archive_file.lambda_placeholder.output_base64sha256
+  filename         = "${local.lambda_dir}/memory.zip"
+  source_code_hash = filebase64sha256("${local.lambda_dir}/memory.zip")
 
   environment {
     variables = {
@@ -98,8 +92,8 @@ resource "aws_lambda_function" "activity_api" {
   memory_size   = var.lambda_memory_size
   timeout       = var.lambda_timeout
 
-  filename         = data.archive_file.lambda_placeholder.output_path
-  source_code_hash = data.archive_file.lambda_placeholder.output_base64sha256
+  filename         = "${local.lambda_dir}/activity.zip"
+  source_code_hash = filebase64sha256("${local.lambda_dir}/activity.zip")
 
   environment {
     variables = {

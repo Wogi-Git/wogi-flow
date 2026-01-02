@@ -360,7 +360,13 @@
     "apiKey": null,
     "backendUrl": "https://api.wogi-flow.com",
     "syncInterval": 300000,
-    "autoSync": true
+    "autoSync": true,
+    "aws": {
+      "apiEndpoint": "https://slbche87zj.execute-api.eu-west-1.amazonaws.com/v1",
+      "cognitoUserPool": "eu-west-1_RnQtfENnx",
+      "cognitoClientId": "3fb5530dnciblc1acdkkih2gq8",
+      "region": "eu-west-1"
+    }
   },
   "memory": {
     "enabled": true,
