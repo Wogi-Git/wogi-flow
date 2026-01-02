@@ -20,6 +20,14 @@
 const fs = require('fs');
 const path = require('path');
 
+// LSP integration for accurate type information
+let lspModule = null;
+try {
+  lspModule = require('./flow-lsp');
+} catch (e) {
+  // LSP module not available, will use fallback
+}
+
 // ============================================================
 // Instruction Richness Levels (Guidance, NOT Limits)
 // ============================================================
@@ -268,6 +276,126 @@ function loadRelevantTypes(projectRoot, filePath, options = {}) {
   }
 
   return types.length > 0 ? types.join('\n\n') : null;
+}
+
+/**
+ * LSP-enhanced type loading
+ * Uses Language Server Protocol when available for accurate type info,
+ * falls back to regex-based loading otherwise.
+ *
+ * @param {string} projectRoot - Project root directory
+ * @param {string} filePath - Target file path
+ * @param {object} options - Options (taskDescription, maxTypes)
+ * @returns {Promise<string|null>} Formatted type information
+ */
+async function loadRelevantTypesWithLSP(projectRoot, filePath, options = {}) {
+  const { getConfig } = require('./flow-utils');
+  const config = getConfig();
+
+  // Check if LSP is enabled
+  if (!config.lsp?.enabled || !lspModule) {
+    return loadRelevantTypes(projectRoot, filePath, options);
+  }
+
+  try {
+    const lsp = await lspModule.getLSP(projectRoot);
+    if (!lsp) {
+      return loadRelevantTypes(projectRoot, filePath, options);
+    }
+
+    const types = [];
+    const { taskDescription = '', maxTypes = 5 } = options;
+    const keywords = extractTaskKeywords(taskDescription);
+
+    // If we have a target file, extract identifiers and get their types
+    const absPath = path.isAbsolute(filePath) ? filePath : path.join(projectRoot, filePath);
+    if (fs.existsSync(absPath)) {
+      const content = fs.readFileSync(absPath, 'utf-8');
+      const identifiers = extractIdentifiersForLSP(content, keywords);
+
+      // Get types for identified positions
+      for (const id of identifiers.slice(0, maxTypes)) {
+        try {
+          const typeInfo = await lsp.getTypeAtPosition(absPath, id.line, id.character);
+          if (typeInfo) {
+            types.push(`// ${id.name}\n${typeInfo}`);
+          }
+        } catch (e) {
+          // Skip individual errors
+        }
+      }
+    }
+
+    // If LSP didn't find enough types, supplement with regex-based loading
+    if (types.length < maxTypes) {
+      const regexTypes = loadRelevantTypes(projectRoot, filePath, {
+        ...options,
+        maxTypes: maxTypes - types.length
+      });
+      if (regexTypes) {
+        types.push(regexTypes);
+      }
+    }
+
+    return types.length > 0 ? types.join('\n\n') : null;
+  } catch (e) {
+    // Fallback to regex-based loading on any error
+    return loadRelevantTypes(projectRoot, filePath, options);
+  }
+}
+
+/**
+ * Extract identifiers from code that we want to get types for
+ * @param {string} content - File content
+ * @param {string[]} keywords - Task-related keywords to prioritize
+ * @returns {Array<{name: string, line: number, character: number}>}
+ */
+function extractIdentifiersForLSP(content, keywords = []) {
+  const identifiers = [];
+  const lines = content.split('\n');
+
+  for (let lineNum = 0; lineNum < lines.length; lineNum++) {
+    const line = lines[lineNum];
+
+    // Look for function/const/interface declarations
+    const patterns = [
+      // function name(
+      /\bfunction\s+(\w+)\s*\(/g,
+      // const name = or const name:
+      /\bconst\s+(\w+)\s*[=:]/g,
+      // interface Name
+      /\binterface\s+(\w+)/g,
+      // type Name
+      /\btype\s+(\w+)\s*=/g,
+      // : TypeName (for type annotations)
+      /:\s*(\w+)(?:[<\s,\[\]>|&]|$)/g
+    ];
+
+    for (const pattern of patterns) {
+      let match;
+      while ((match = pattern.exec(line)) !== null) {
+        const name = match[1];
+        const character = match.index + match[0].indexOf(name);
+
+        // Prioritize keywords
+        const priority = keywords.some(k =>
+          name.toLowerCase().includes(k.toLowerCase())
+        ) ? 0 : 1;
+
+        identifiers.push({
+          name,
+          line: lineNum,
+          character,
+          priority
+        });
+      }
+    }
+  }
+
+  // Sort by priority (keyword matches first)
+  identifiers.sort((a, b) => a.priority - b.priority);
+
+  return identifiers;
 }
 
 /**
@@ -635,10 +763,13 @@ module.exports = {
   loadProjectContext,
   loadPatterns,
   loadRelevantTypes,
+  loadRelevantTypesWithLSP,  // LSP-enhanced version
   loadRelatedCode,
   loadSimilarExamples,
   // Type hints
-  generateTypeHints
+  generateTypeHints,
+  // LSP helpers
+  extractIdentifiersForLSP
 };
 
 // ============================================================

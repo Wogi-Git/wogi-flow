@@ -22,7 +22,18 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-const { getProjectRoot, getConfig, PATHS, colors } = require('./flow-utils');
+const {
+  getProjectRoot,
+  getConfig,
+  PATHS,
+  colors,
+  isAstGrepAvailable,
+  astGrepSearch,
+  AST_PATTERNS,
+  findReactComponents,
+  findCustomHooks,
+  findTypeDefinitions
+} = require('./flow-utils');
 
 const PROJECT_ROOT = getProjectRoot();
 
@@ -91,6 +102,47 @@ function extractKeywords(description) {
   return result;
 }
 
+/**
+ * Infer task type from extracted keywords
+ * Used to customize AST-grep search patterns
+ */
+function inferTaskType(keywords) {
+  const allKeywords = [...keywords.high, ...keywords.medium, ...keywords.actions].map(k => k.toLowerCase());
+
+  // Check for component-related keywords
+  if (allKeywords.some(k => ['component', 'button', 'form', 'modal', 'card', 'dialog', 'page', 'view', 'ui'].includes(k))) {
+    if (allKeywords.includes('create') || allKeywords.includes('add') || allKeywords.includes('new')) {
+      return 'create-component';
+    }
+    return 'modify-component';
+  }
+
+  // Check for hook-related keywords
+  if (allKeywords.some(k => k.startsWith('use') || k === 'hook' || k === 'state' || k === 'effect')) {
+    if (allKeywords.includes('create') || allKeywords.includes('add') || allKeywords.includes('new')) {
+      return 'create-hook';
+    }
+    return 'modify-hook';
+  }
+
+  // Check for service/API keywords
+  if (allKeywords.some(k => ['api', 'service', 'fetch', 'request', 'endpoint'].includes(k))) {
+    return 'create-service';
+  }
+
+  // Check for fix/bug keywords
+  if (allKeywords.some(k => ['fix', 'bug', 'issue', 'error', 'broken'].includes(k))) {
+    return 'fix-bug';
+  }
+
+  // Check for refactor keywords
+  if (allKeywords.some(k => ['refactor', 'cleanup', 'optimize', 'improve'].includes(k))) {
+    return 'refactor';
+  }
+
+  return 'generic';
+}
+
 // ============================================================
 // Context Sources
 // ============================================================
@@ -142,18 +194,25 @@ function searchAppMap(keywords) {
 
 /**
  * Search component-index.json for matching files
+ * @param {object} keywords - Extracted keywords object
+ * @param {object} config - Config object with autoContext settings
  */
-function searchComponentIndex(keywords) {
+function searchComponentIndex(keywords, config = null) {
   const results = [];
   const indexPath = path.join(PATHS.state, 'component-index.json');
 
   if (!fs.existsSync(indexPath)) return results;
+
+  // Use config values if available
+  const cfg = config || getConfig();
+  const maxComponentMatches = cfg.autoContext?.maxComponentMatches || 15;
 
   try {
     const index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
     const components = index.components || [];
 
     const allKeywords = [...keywords.high, ...keywords.medium];
+    let totalMatches = 0;
 
     for (const comp of components) {
       const name = (comp.name || '').toLowerCase();
@@ -162,17 +221,29 @@ function searchComponentIndex(keywords) {
       for (const keyword of allKeywords) {
         const kw = keyword.toLowerCase();
         if (name.includes(kw) || filePath.toLowerCase().includes(kw)) {
-          results.push({
-            source: 'component-index',
-            keyword,
-            path: filePath,
-            name: comp.name,
-            exports: comp.exports || [],
-            score: keywords.high.includes(keyword) ? 3 : 1
-          });
+          totalMatches++;
+          if (results.length < maxComponentMatches) {
+            results.push({
+              source: 'component-index',
+              keyword,
+              path: filePath,
+              name: comp.name,
+              exports: comp.exports || [],
+              score: keywords.high.includes(keyword) ? 3 : 1
+            });
+          }
           break; // Don't add same component multiple times
         }
       }
+    }
+
+    // Add truncation notice if we limited results
+    if (totalMatches > maxComponentMatches) {
+      results.push({
+        source: 'truncation_notice',
+        message: `... and ${totalMatches - maxComponentMatches} more component matches (limited to ${maxComponentMatches})`,
+        score: 0
+      });
     }
   } catch {
     // Ignore errors
@@ -183,32 +254,65 @@ function searchComponentIndex(keywords) {
 
 /**
  * Grep codebase for keyword matches
+ * @param {object} keywords - Extracted keywords object
+ * @param {number} maxResults - Maximum results to return
+ * @param {object} config - Config object with autoContext settings
  */
-function grepCodebase(keywords, maxResults = 10) {
+function grepCodebase(keywords, maxResults = 10, config = null) {
   const results = [];
   const srcDir = path.join(PROJECT_ROOT, 'src');
 
   if (!fs.existsSync(srcDir)) return results;
 
+  // Use config values if available
+  const cfg = config || getConfig();
+  const effectiveMaxResults = cfg.autoContext?.maxGrepResults || maxResults;
+  const maxContentLines = cfg.autoContext?.maxContentLines || 50;
+
   // Only grep for high-value keywords to avoid noise
   const searchKeywords = keywords.high.slice(0, 5);
+  let totalMatches = 0;
 
   for (const keyword of searchKeywords) {
     try {
       // Case-insensitive grep for the keyword
       const output = execSync(
-        `grep -ril "${keyword}" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" "${srcDir}" 2>/dev/null | head -5`,
+        `grep -ril "${keyword}" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" "${srcDir}" 2>/dev/null | head -20`,
         { encoding: 'utf-8', timeout: 5000 }
       );
 
       const files = output.split('\n').filter(f => f.trim());
+      totalMatches += files.length;
+
       for (const file of files) {
+        if (results.length >= effectiveMaxResults) break;
+
         const relPath = path.relative(PROJECT_ROOT, file);
         if (!results.some(r => r.path === relPath)) {
+          // Optionally read file content with truncation
+          let content = null;
+          if (cfg.autoContext?.includeContent) {
+            try {
+              const fullContent = fs.readFileSync(file, 'utf-8');
+              const lines = fullContent.split('\n');
+              if (lines.length > maxContentLines) {
+                content = [
+                  ...lines.slice(0, maxContentLines),
+                  `\n... ${lines.length - maxContentLines} more lines truncated ...`
+                ].join('\n');
+              } else {
+                content = fullContent;
+              }
+            } catch {
+              // Ignore read errors
+            }
+          }
+
           results.push({
             source: 'grep',
             keyword,
             path: relPath,
+            content,
             score: 2
           });
         }
@@ -217,7 +321,16 @@ function grepCodebase(keywords, maxResults = 10) {
       // Ignore grep errors (no matches, timeout, etc.)
     }
 
-    if (results.length >= maxResults) break;
+    if (results.length >= effectiveMaxResults) break;
+  }
+
+  // Add truncation notice if we limited results
+  if (totalMatches > effectiveMaxResults) {
+    results.push({
+      source: 'truncation_notice',
+      message: `... and ${totalMatches - effectiveMaxResults} more grep matches (limited to ${effectiveMaxResults})`,
+      score: 0
+    });
   }
 
   return results;
@@ -265,6 +378,126 @@ function searchRelatedTasks(keywords) {
   return results;
 }
 
+/**
+ * Search codebase using AST-grep for structural patterns
+ * Falls back gracefully if ast-grep is not installed
+ *
+ * @param {object} keywords - Extracted keywords
+ * @param {string} taskType - Type of task (create-component, create-hook, etc.)
+ * @param {object} config - Config object
+ */
+function searchWithAstGrep(keywords, taskType = null, config = null) {
+  const cfg = config || getConfig();
+
+  // Skip if disabled or ast-grep not available
+  if (!cfg.autoContext?.useAstGrep || !isAstGrepAvailable()) {
+    return [];
+  }
+
+  const results = [];
+  const maxResults = cfg.autoContext?.maxAstGrepResults || 5;
+
+  try {
+    // Determine search strategy based on task type
+    if (taskType === 'create-component' || keywords.high.some(k =>
+      ['component', 'button', 'form', 'modal', 'card', 'list'].includes(k.toLowerCase())
+    )) {
+      // Find similar React components for reference
+      const components = findReactComponents({ maxResults: maxResults * 2 });
+      if (components) {
+        for (const comp of components.slice(0, maxResults)) {
+          results.push({
+            source: 'ast-grep',
+            type: 'component',
+            path: comp.file,
+            line: comp.line,
+            preview: comp.content?.slice(0, 100),
+            score: 2.5  // Higher than grep, lower than app-map
+          });
+        }
+      }
+    }
+
+    if (taskType === 'create-hook' || keywords.high.some(k =>
+      ['hook', 'usestate', 'useeffect', 'usememo'].includes(k.toLowerCase())
+    )) {
+      // Find existing hooks for patterns
+      const hooks = findCustomHooks({ maxResults });
+      if (hooks) {
+        for (const hook of hooks.slice(0, Math.ceil(maxResults / 2))) {
+          results.push({
+            source: 'ast-grep',
+            type: 'hook',
+            path: hook.file,
+            line: hook.line,
+            preview: hook.content?.slice(0, 100),
+            score: 2.5
+          });
+        }
+      }
+    }
+
+    // Search for type definitions matching keywords
+    for (const keyword of keywords.high.slice(0, 3)) {
+      const types = findTypeDefinitions(keyword, { maxResults: 2 });
+      if (types && types.length > 0) {
+        for (const type of types) {
+          if (!results.some(r => r.path === type.file)) {
+            results.push({
+              source: 'ast-grep',
+              type: 'type-definition',
+              keyword,
+              path: type.file,
+              line: type.line,
+              preview: type.content?.slice(0, 100),
+              score: 2.5
+            });
+          }
+        }
+      }
+    }
+
+    // Generic pattern search for high-value keywords
+    for (const keyword of keywords.high.slice(0, 2)) {
+      // Search for exported functions/consts with this name
+      const pattern = `export $_ ${keyword}$_`;
+      const matches = astGrepSearch(pattern, { maxResults: 2 });
+      if (matches) {
+        for (const match of matches) {
+          if (!results.some(r => r.path === match.file)) {
+            results.push({
+              source: 'ast-grep',
+              type: 'export',
+              keyword,
+              path: match.file,
+              line: match.line,
+              score: 2
+            });
+          }
+        }
+      }
+    }
+  } catch (err) {
+    // Graceful fallback - AST-grep is optional
+    if (cfg.debug) {
+      console.warn(`AST-grep search failed: ${err.message}`);
+    }
+  }
+
+  // Truncate if too many results
+  if (results.length > maxResults * 2) {
+    const truncated = results.slice(0, maxResults * 2);
+    truncated.push({
+      source: 'truncation_notice',
+      message: `... and ${results.length - maxResults * 2} more AST matches`,
+      score: 0
+    });
+    return truncated;
+  }
+
+  return results;
+}
+
 // ============================================================
 // Main Context Loading
 // ============================================================
@@ -296,19 +529,27 @@ function getAutoContext(description, options = {}) {
     };
   }
 
-  // Gather context from all sources
+  // Determine task type from keywords/options for ast-grep
+  const taskType = options.taskType || inferTaskType(keywords);
+
+  // Gather context from all sources (pass config for truncation settings)
   const allResults = [
     ...searchAppMap(keywords),
-    ...searchComponentIndex(keywords),
-    ...grepCodebase(keywords),
+    ...searchComponentIndex(keywords, config),
+    ...searchWithAstGrep(keywords, taskType, config),  // AST-grep search (if enabled)
+    ...grepCodebase(keywords, 10, config),
     ...searchRelatedTasks(keywords)
   ];
+
+  // Collect truncation notices separately
+  const truncationNotices = allResults.filter(r => r.source === 'truncation_notice');
+  const actualResults = allResults.filter(r => r.source !== 'truncation_notice');
 
   // Dedupe by path and sort by score
   const seen = new Set();
   const unique = [];
 
-  for (const result of allResults) {
+  for (const result of actualResults) {
     const key = result.path || result.taskId || result.keyword;
     if (!seen.has(key)) {
       seen.add(key);
@@ -342,7 +583,9 @@ function getAutoContext(description, options = {}) {
     },
     relatedTasks: topResults
       .filter(r => r.source === 'related-task')
-      .map(r => ({ id: r.taskId, title: r.title }))
+      .map(r => ({ id: r.taskId, title: r.title })),
+    truncated: truncationNotices.length > 0,
+    truncationNotices: truncationNotices.map(t => t.message)
   };
 
   return {
@@ -350,8 +593,9 @@ function getAutoContext(description, options = {}) {
     files,
     results: topResults,
     context,
+    truncationNotices,
     message: files.length > 0
-      ? `Found ${files.length} relevant file(s)`
+      ? `Found ${files.length} relevant file(s)${truncationNotices.length > 0 ? ' (results truncated)' : ''}`
       : 'No directly relevant files found'
   };
 }
@@ -382,6 +626,14 @@ function formatAutoContext(result) {
     output += `\n${colors.cyan}📋 Related tasks:${colors.reset}\n`;
     for (const task of result.context.relatedTasks.slice(0, 3)) {
       output += `   ${colors.dim}•${colors.reset} ${task.id}: ${task.title}\n`;
+    }
+  }
+
+  // Show truncation notices if any
+  if (result.truncationNotices?.length > 0) {
+    output += `\n${colors.dim}ℹ️  Results truncated:${colors.reset}\n`;
+    for (const notice of result.truncationNotices) {
+      output += `   ${colors.dim}${notice}${colors.reset}\n`;
     }
   }
 

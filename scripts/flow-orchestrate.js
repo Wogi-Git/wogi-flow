@@ -2198,6 +2198,43 @@ const compactionStrategies = {
     // Remove detailed explanations
     trimmed = trimmed.replace(/\*\*Note:\*\*[\s\S]*?(?=\n\n|$)/gi, '');
     return trimmed;
+  },
+
+  /**
+   * Truncate search results array to prevent context overflow
+   * @param {Array} results - Array of search results with optional content
+   * @param {number} maxResults - Maximum number of results to keep
+   * @param {number} maxLinesPerResult - Maximum lines per result content
+   */
+  truncateSearchResults(results, maxResults = 10, maxLinesPerResult = 30) {
+    if (!Array.isArray(results)) return results;
+
+    const truncated = results.slice(0, maxResults).map(r => {
+      // If result has content, truncate it
+      if (r.content && typeof r.content === 'string') {
+        const lines = r.content.split('\n');
+        if (lines.length > maxLinesPerResult) {
+          return {
+            ...r,
+            content: [
+              ...lines.slice(0, maxLinesPerResult),
+              `... ${lines.length - maxLinesPerResult} more lines truncated ...`
+            ].join('\n')
+          };
+        }
+      }
+      return r;
+    });
+
+    // Add truncation notice if we cut results
+    if (results.length > maxResults) {
+      truncated.push({
+        _notice: true,
+        message: `... and ${results.length - maxResults} more results (truncated to save context)`
+      });
+    }
+
+    return truncated;
   }
 };
 

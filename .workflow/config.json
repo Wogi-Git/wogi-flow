@@ -268,7 +268,12 @@
   "autoContext": {
     "enabled": true,
     "showLoadedFiles": true,
-    "maxFilesToLoad": 10
+    "maxFilesToLoad": 10,
+    "maxGrepResults": 10,
+    "maxComponentMatches": 15,
+    "maxContentLines": 50,
+    "includeContent": false,
+    "useAstGrep": false
   },
   "metrics": {
     "enabled": true,
@@ -294,5 +299,11 @@
   "codebaseInsights": {
     "enabled": true,
     "generateOn": ["onboarding", "manual"]
+  },
+  "lsp": {
+    "enabled": false,
+    "server": "typescript-language-server",
+    "timeout": 5000,
+    "cacheTypes": true
   }
 }

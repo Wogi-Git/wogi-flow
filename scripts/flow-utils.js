@@ -991,6 +991,184 @@ function cleanupStaleLocks(dirPath, staleMs = 30000) {
 }
 
 // ============================================================
+// AST-Grep Integration
+// ============================================================
+
+/**
+ * Common AST patterns for code discovery
+ */
+const AST_PATTERNS = {
+  // React patterns
+  reactComponent: 'function $NAME($PROPS) { return <$_>$$$</$_> }',
+  reactArrowComponent: 'const $NAME = ($PROPS) => { return <$_>$$$</$_> }',
+  useStateHook: 'const [$STATE, $SETTER] = useState($INIT)',
+  useEffectHook: 'useEffect($FN, [$$$DEPS])',
+  useCustomHook: 'const $RESULT = use$NAME($$$ARGS)',
+
+  // TypeScript patterns
+  interfaceDefinition: 'interface $NAME { $$$ }',
+  typeDefinition: 'type $NAME = $$$',
+  exportedFunction: 'export function $NAME($$$PARAMS) { $$$ }',
+  exportedConst: 'export const $NAME = $$$',
+
+  // Import patterns
+  namedImport: 'import { $$$IMPORTS } from "$PATH"',
+  defaultImport: 'import $NAME from "$PATH"',
+
+  // Class patterns
+  classDefinition: 'class $NAME { $$$ }',
+  classExtends: 'class $NAME extends $BASE { $$$ }'
+};
+
+/**
+ * Check if ast-grep CLI (sg) is available
+ */
+function isAstGrepAvailable() {
+  try {
+    execSync('which sg', { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Search codebase using ast-grep for structural patterns
+ * @param {string} pattern - AST pattern (e.g., "useState($INIT)")
+ * @param {object} options - { lang, cwd, maxResults }
+ * @returns {Array|null} Array of matches or null if ast-grep unavailable
+ */
+function astGrepSearch(pattern, options = {}) {
+  const {
+    lang = 'typescript',
+    cwd = PROJECT_ROOT,
+    maxResults = 20,
+    searchDir = 'src'
+  } = options;
+
+  // Check if ast-grep is available
+  if (!isAstGrepAvailable()) {
+    return null;
+  }
+
+  const searchPath = path.join(cwd, searchDir);
+  if (!dirExists(searchPath)) {
+    return [];
+  }
+
+  try {
+    const result = execSync(
+      `sg --pattern "${pattern.replace(/"/g, '\\"')}" --lang ${lang} --json "${searchPath}"`,
+      {
+        encoding: 'utf-8',
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: 30000
+      }
+    );
+
+    const matches = JSON.parse(result || '[]');
+    return matches.slice(0, maxResults).map(m => ({
+      file: path.relative(cwd, m.file || m.path),
+      line: m.range?.start?.line ?? m.startLine ?? 0,
+      endLine: m.range?.end?.line ?? m.endLine ?? 0,
+      content: m.text || m.match,
+      meta: m.metaVariables || {}  // Captured $VARS
+    }));
+  } catch (err) {
+    // Parse error, timeout, or no matches
+    if (err.stdout) {
+      try {
+        const matches = JSON.parse(err.stdout);
+        return matches.slice(0, maxResults).map(m => ({
+          file: path.relative(cwd, m.file || m.path),
+          line: m.range?.start?.line ?? 0,
+          content: m.text || m.match,
+          meta: m.metaVariables || {}
+        }));
+      } catch {
+        // Ignore parse errors
+      }
+    }
+    return [];
+  }
+}
+
+/**
+ * Search for React components in the codebase
+ * @param {object} options - Search options
+ */
+function findReactComponents(options = {}) {
+  const { maxResults = 10, cwd = PROJECT_ROOT } = options;
+
+  // Try function components first
+  let results = astGrepSearch(AST_PATTERNS.reactComponent, { ...options, maxResults });
+
+  // If ast-grep not available, return null
+  if (results === null) return null;
+
+  // Also search arrow function components
+  const arrowResults = astGrepSearch(AST_PATTERNS.reactArrowComponent, { ...options, maxResults });
+  if (arrowResults) {
+    results = [...results, ...arrowResults];
+  }
+
+  // Dedupe by file
+  const seen = new Set();
+  return results.filter(r => {
+    if (seen.has(r.file)) return false;
+    seen.add(r.file);
+    return true;
+  }).slice(0, maxResults);
+}
+
+/**
+ * Search for custom hooks in the codebase
+ * @param {object} options - Search options
+ */
+function findCustomHooks(options = {}) {
+  const { maxResults = 10 } = options;
+
+  // Search for function use* pattern
+  const results = astGrepSearch('function use$NAME($$$) { $$$ }', { ...options, maxResults });
+
+  if (results === null) return null;
+
+  return results.filter(r => {
+    // Filter to only actual hook files
+    const fileName = path.basename(r.file).toLowerCase();
+    return fileName.startsWith('use') || fileName.includes('hook');
+  });
+}
+
+/**
+ * Search for TypeScript interfaces/types
+ * @param {string} namePattern - Optional name pattern to filter by
+ * @param {object} options - Search options
+ */
+function findTypeDefinitions(namePattern = null, options = {}) {
+  const { maxResults = 10 } = options;
+
+  // Search interfaces
+  let results = astGrepSearch(AST_PATTERNS.interfaceDefinition, { ...options, maxResults });
+
+  if (results === null) return null;
+
+  // Also search type aliases
+  const typeResults = astGrepSearch(AST_PATTERNS.typeDefinition, { ...options, maxResults });
+  if (typeResults) {
+    results = [...results, ...typeResults];
+  }
+
+  // Filter by name pattern if provided
+  if (namePattern) {
+    const regex = new RegExp(namePattern, 'i');
+    results = results.filter(r => regex.test(r.content));
+  }
+
+  return results.slice(0, maxResults);
+}
+
+// ============================================================
 // Exports
 // ============================================================
 
@@ -1060,4 +1238,12 @@ module.exports = {
   withLock,
   withLockSync,
   cleanupStaleLocks,
+
+  // AST-Grep Integration
+  AST_PATTERNS,
+  isAstGrepAvailable,
+  astGrepSearch,
+  findReactComponents,
+  findCustomHooks,
+  findTypeDefinitions,
 };
