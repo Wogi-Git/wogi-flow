@@ -1,4 +1,4 @@
-# Wogi Flow v1.6
+# Wogi Flow v1.7
 
 A self-improving AI development workflow that learns from your feedback and accumulates knowledge over time.
 
@@ -22,6 +22,7 @@ A self-improving AI development workflow that learns from your feedback and accu
 | **Quality Gates**         | Configurable mandatory steps per task type                                                  |
 | **Skills System**         | Modular add-ons for specific tech stacks with accumulated knowledge                         |
 | **Profile Sharing**       | Export refined workflows for your team                                                      |
+| **Team Backend**          | AWS-powered team sync: shared memory, proposals, activity logging                           |
 
 ## Quick Start
 
@@ -93,6 +94,7 @@ Daily commands for working with Wogi Flow. Start with `/wogi-ready` to see tasks
 - [Component Registry](#component-registry)
 - [Code Traces](#code-traces)
 - [Skills System](#skills-system)
+- [Team Backend](#team-backend)
 - [Configuration](#configuration)
 - [CLI Reference](#cli-reference)
 - [Slash Commands](#slash-commands)
@@ -713,6 +715,91 @@ When working on files that match a skill's patterns, Claude automatically:
 
 ---
 
+## Team Backend
+
+AWS-powered backend for team collaboration with shared memory, proposals, and activity tracking.
+
+### Architecture
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Wogi Flow CLI  │ ──▶ │   API Gateway   │ ──▶ │     Lambda      │
+│   (Local)       │     │   (HTTP API)    │     │   Functions     │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+                                                        │
+        ┌───────────────────────────────────────────────┼───────────────────────────────────────────────┐
+        ▼                       ▼                       ▼                       ▼
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│     Teams       │     │   Proposals     │     │  Shared Memory  │     │    Activity     │
+│   (DynamoDB)    │     │   (DynamoDB)    │     │   (DynamoDB)    │     │   (DynamoDB)    │
+└─────────────────┘     └─────────────────┘     └─────────────────┘     └─────────────────┘
+```
+
+### Features
+
+| API | Description |
+|-----|-------------|
+| **Teams** | Create teams, invite members, manage roles |
+| **Proposals** | Team decision voting system for workflow changes |
+| **Memory Sync** | Share learned patterns across team members |
+| **Activity** | Track team activity and generate reports |
+
+### Setup
+
+1. **Sign up** via Cognito hosted UI to get authentication token
+2. **Configure** team settings in `config.json`:
+
+```json
+{
+  "team": {
+    "enabled": true,
+    "teamId": "your-team-id",
+    "aws": {
+      "apiEndpoint": "https://your-api.execute-api.region.amazonaws.com/v1",
+      "cognitoUserPool": "region_PoolId",
+      "cognitoClientId": "your-client-id",
+      "region": "eu-west-1"
+    }
+  }
+}
+```
+
+### API Endpoints
+
+| Endpoint | Methods | Description |
+|----------|---------|-------------|
+| `/teams` | GET, POST | List/create teams |
+| `/teams/{id}` | GET, PUT, DELETE | Team operations |
+| `/teams/{id}/members` | GET | List team members |
+| `/teams/{id}/invite` | POST | Invite member |
+| `/teams/{id}/proposals` | GET, POST | Team proposals |
+| `/teams/{id}/proposals/{id}` | GET | Proposal details |
+| `/teams/{id}/proposals/{id}/vote` | POST | Cast vote |
+| `/teams/{id}/memory` | GET, POST | Shared memory |
+| `/teams/{id}/memory/sync` | POST | Sync local memory |
+| `/teams/{id}/activity` | GET, POST | Activity log |
+
+### Infrastructure
+
+The backend is deployed via Terraform in `infrastructure/terraform/`:
+
+```bash
+cd infrastructure/terraform
+terraform init
+terraform plan
+terraform apply
+```
+
+**Resources created:**
+- API Gateway v2 (HTTP API)
+- 4 Lambda functions (teams, proposals, memory, activity)
+- 6 DynamoDB tables
+- Cognito User Pool
+- S3 bucket for artifacts
+- IAM roles and policies
+
+---
+
 ## Configuration
 
 ### Main Config (`config.json`)
@@ -857,6 +944,11 @@ flow export-profile <name>      # Export workflow
 flow import-profile <file>      # Import workflow
 flow changelog                  # Generate changelog
 
+# Team Backend (AWS)
+flow team status                # Show team connection status
+flow team sync                  # Sync local memory to team
+flow team activity              # Show team activity
+
 # Hooks
 flow setup-hooks install        # Install git hooks
 flow setup-hooks uninstall      # Remove hooks
@@ -951,6 +1043,15 @@ After 3+ similar corrections → Claude suggests promoting to permanent instruct
 ---
 
 ## Changelog
+
+### v1.7.0 - Team Backend
+
+- **AWS Team Backend**: Full serverless infrastructure for team collaboration
+- **Team APIs**: Teams, proposals, shared memory, activity logging
+- **Cognito Auth**: JWT-based authentication for secure team access
+- **Memory Sync**: Share learned patterns across team members
+- **Proposal Voting**: Democratic decision-making for workflow changes
+- **Infrastructure as Code**: Terraform-managed AWS resources
 
 ### v1.6.0 - Enterprise Safety & Automation
 
