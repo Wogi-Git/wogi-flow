@@ -232,6 +232,7 @@ create_structure() {
     mkdir -p ".claude/commands"
     mkdir -p ".claude/rules"
     mkdir -p ".claude/skills"
+    mkdir -p ".claude/docs"
     
     if [ "$AGENT_STRUCTURE" = "split" ]; then
         mkdir -p ".claude/agents/developer"
@@ -261,6 +262,30 @@ generate_config() {
 {
   "version": "1.8",
   "projectName": "$PROJECT_NAME",
+
+  "enforcement": {
+    "strictMode": true,
+    "requireTaskForImplementation": true,
+    "requireStoryForMediumTasks": true,
+    "taskSizeThresholds": {
+      "small": { "maxFiles": 3, "maxHours": 1 },
+      "medium": { "maxFiles": 10, "maxHours": 4 },
+      "large": { "minFiles": 10, "minHours": 4 }
+    }
+  },
+
+  "commits": {
+    "requireApproval": {
+      "feature": true,
+      "bugfix": false,
+      "refactor": true,
+      "docs": false
+    },
+    "autoCommitSmallFixes": true,
+    "smallFixThreshold": 3,
+    "squashTaskCommits": true,
+    "commitMessageFormat": "conventional"
+  },
 
   "workflow": {
     "planningStyle": "$PLANNING_STYLE",
@@ -742,14 +767,21 @@ EOF
 # Copy core files
 copy_core_files() {
     echo -e "${CYAN}Copying core files...${NC}"
-    
+
     # Copy CLAUDE.md
     if [ -f "$SCRIPT_DIR/../CLAUDE.md" ]; then
         cp "$SCRIPT_DIR/../CLAUDE.md" "./CLAUDE.md"
         # Update project name in CLAUDE.md
         sed -i "s/projectName\": \"\"/projectName\": \"$PROJECT_NAME\"/" "./CLAUDE.md" 2>/dev/null || true
     fi
-    
+
+    # Copy .claude/docs directory
+    if [ -d "$SCRIPT_DIR/../.claude/docs" ]; then
+        mkdir -p ".claude/docs"
+        cp -r "$SCRIPT_DIR/../.claude/docs/"* ".claude/docs/" 2>/dev/null || true
+        echo -e "${GREEN}✓${NC} Documentation files copied"
+    fi
+
     # Copy agents based on structure
     if [ "$AGENT_STRUCTURE" = "unified" ]; then
         if [ -d "$SCRIPT_DIR/../agents" ]; then
@@ -792,6 +824,17 @@ print_completion() {
     echo -e "${GREEN}║           ✅ Wogi Flow installed successfully!               ║${NC}"
     echo -e "${GREEN}║                                                               ║${NC}"
     echo -e "${GREEN}╚═══════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${YELLOW}╔═══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${YELLOW}║  ⚠️  STRICT MODE ENABLED (default)                            ║${NC}"
+    echo -e "${YELLOW}║                                                               ║${NC}"
+    echo -e "${YELLOW}║  Claude will now STOP before any implementation to:          ║${NC}"
+    echo -e "${YELLOW}║  • Create a task (for all work)                               ║${NC}"
+    echo -e "${YELLOW}║  • Create a story (for medium/large tasks)                    ║${NC}"
+    echo -e "${YELLOW}║  • Get your approval before proceeding                        ║${NC}"
+    echo -e "${YELLOW}║                                                               ║${NC}"
+    echo -e "${YELLOW}║  To disable: edit .workflow/config.json → enforcement.strictMode${NC}"
+    echo -e "${YELLOW}╚═══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${BOLD}Next steps:${NC}"
     echo ""
@@ -854,6 +897,11 @@ if [ "${1:-}" = "--quick" ]; then
     generate_state_files
     copy_core_files
     echo -e "${GREEN}✓ Quick install complete${NC}"
+    echo ""
+    echo -e "${YELLOW}⚠️  STRICT MODE ENABLED (default)${NC}"
+    echo -e "   Claude will STOP before implementation to create tasks/stories."
+    echo -e "   To disable: edit .workflow/config.json → enforcement.strictMode"
+    echo ""
     exit 0
 fi
 

@@ -1,6 +1,28 @@
 {
   "version": "1.8.0",
   "projectName": "",
+  "enforcement": {
+    "strictMode": true,
+    "requireTaskForImplementation": true,
+    "requireStoryForMediumTasks": true,
+    "taskSizeThresholds": {
+      "small": { "maxFiles": 3, "maxHours": 1 },
+      "medium": { "maxFiles": 10, "maxHours": 4 },
+      "large": { "minFiles": 10, "minHours": 4 }
+    }
+  },
+  "commits": {
+    "requireApproval": {
+      "feature": true,
+      "bugfix": false,
+      "refactor": true,
+      "docs": false
+    },
+    "autoCommitSmallFixes": true,
+    "smallFixThreshold": 3,
+    "squashTaskCommits": true,
+    "commitMessageFormat": "conventional"
+  },
   "workflow": {
     "planningStyle": "feature-based",
     "agentStructure": "unified"

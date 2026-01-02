@@ -106,6 +106,56 @@ function main() {
     }
   }
 
+  // Check enforcement settings
+  console.log('');
+  printSection('Checking enforcement...');
+
+  const claudeMdPath = path.join(PROJECT_ROOT, 'CLAUDE.md');
+  if (fileExists(claudeMdPath)) {
+    const fs = require('fs');
+    const claudeMdContent = fs.readFileSync(claudeMdPath, 'utf-8');
+    const claudeMdSize = fs.statSync(claudeMdPath).size;
+    const sizeKb = Math.round(claudeMdSize / 1024);
+
+    // Check CLAUDE.md size (should be under 20KB for reliable loading)
+    if (sizeKb <= 20) {
+      console.log(`  ${color('green', '✓')} CLAUDE.md size: ${sizeKb}KB (under 20KB limit)`);
+    } else {
+      console.log(`  ${color('yellow', '⚠')} CLAUDE.md size: ${sizeKb}KB (over 20KB - may get truncated)`);
+      warnings++;
+    }
+
+    // Check if enforcement section is at top (within first 100 lines)
+    const lines = claudeMdContent.split('\n').slice(0, 100);
+    const hasEnforcementAtTop = lines.some(line =>
+      line.includes('MANDATORY') && line.includes('Task Gating')
+    );
+
+    if (hasEnforcementAtTop) {
+      console.log(`  ${color('green', '✓')} Enforcement section: FOUND at top of CLAUDE.md`);
+    } else {
+      console.log(`  ${color('yellow', '⚠')} Enforcement section not found at top of CLAUDE.md`);
+      warnings++;
+    }
+  }
+
+  // Check strict mode in config
+  if (fileExists(PATHS.config)) {
+    const configResult = validateJson(PATHS.config);
+    if (configResult.valid) {
+      const config = JSON.parse(require('fs').readFileSync(PATHS.config, 'utf-8'));
+      if (config.enforcement?.strictMode === true) {
+        console.log(`  ${color('green', '✓')} Strict mode: ENABLED`);
+      } else if (config.enforcement?.strictMode === false) {
+        console.log(`  ${color('yellow', '⚠')} Strict mode: DISABLED (Claude may skip task creation)`);
+        warnings++;
+      } else {
+        console.log(`  ${color('yellow', '⚠')} Strict mode: NOT CONFIGURED (add enforcement section to config.json)`);
+        warnings++;
+      }
+    }
+  }
+
   // Check app-map sync
   console.log('');
   printSection('Checking app-map sync...');
