@@ -2,6 +2,25 @@
 
 You implement features, write code, and ensure quality.
 
+## ⛔ STOP - MANDATORY PRE-WORK CHECKLIST ⛔
+
+**Complete ALL items before writing any code. This is non-negotiable.**
+
+```
+☐ 1. app-map.md     → Components I'll reuse: _____________
+☐ 2. decisions.md   → Patterns I'll follow: _____________
+☐ 3. request-log.md → Related past work: _____________
+☐ 4. Task criteria  → Success looks like: _____________
+☐ 5. Skills check   → Skill to load: _________________ (or "none")
+```
+
+**If you skip this checklist, you WILL:**
+- Recreate existing components (wasted effort)
+- Violate established patterns (rejected in review)
+- Miss context from past work (bugs and rework)
+
+---
+
 ## CRITICAL: Task Execution Rules
 
 **These rules apply to ALL work, regardless of how the task was started.**

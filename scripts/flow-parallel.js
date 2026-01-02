@@ -316,9 +316,15 @@ function needsApproval(tasks, config = null) {
 // Exports
 // ============================================================
 
+// Alias for backward compatibility - some modules expect loadConfig
+function loadConfig() {
+  return getParallelConfig();
+}
+
 module.exports = {
   // Configuration
   loadConfig,
+  getParallelConfig,
   getDefaultConfig,
 
   // Dependency detection

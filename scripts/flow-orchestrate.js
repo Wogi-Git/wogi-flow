@@ -72,6 +72,73 @@ function log(color, ...args) {
 }
 
 // ============================================================
+// Structured Failure Output
+// ============================================================
+
+/**
+ * Save structured failure info for retry context
+ * This helps the AI understand what failed and how to fix it
+ */
+function saveStructuredFailure(step, errorHistory, attempts, config) {
+  const failurePath = path.join(STATE_DIR, 'last-failure.json');
+
+  const failureInfo = {
+    timestamp: new Date().toISOString(),
+    taskId: step.taskId || step.description || 'unknown',
+    stepAction: step.action || 'unknown',
+    targetFile: step.file || null,
+    attempts: attempts,
+    maxRetries: config.maxRetries,
+    model: config.model,
+    errors: errorHistory.slice(-5).map(e => ({
+      category: e.category,
+      signature: e.signature,
+      message: e.message?.slice(0, 500) || ''
+    })),
+    suggestion: generateFixSuggestion(errorHistory),
+    lastErrorCategory: errorHistory[errorHistory.length - 1]?.category || 'unknown'
+  };
+
+  try {
+    fs.writeFileSync(failurePath, JSON.stringify(failureInfo, null, 2));
+    log('dim', `   📝 Failure context saved to ${failurePath}`);
+  } catch (e) {
+    log('dim', `   ⚠️ Could not save failure context: ${e.message}`);
+  }
+
+  return failureInfo;
+}
+
+/**
+ * Generate a fix suggestion based on error history
+ */
+function generateFixSuggestion(errorHistory) {
+  if (!errorHistory || errorHistory.length === 0) {
+    return 'Review the task requirements and try again';
+  }
+
+  const lastError = errorHistory[errorHistory.length - 1];
+  const errorCounts = {};
+
+  for (const e of errorHistory) {
+    errorCounts[e.category] = (errorCounts[e.category] || 0) + 1;
+  }
+
+  const mostCommon = Object.entries(errorCounts)
+    .sort((a, b) => b[1] - a[1])[0];
+
+  const suggestions = {
+    import: 'Check import paths match the Available Imports section exactly',
+    type: 'Verify prop types match the component definitions',
+    syntax: 'Ensure output is pure code without markdown or explanations',
+    runtime: 'Check for null/undefined handling and async/await usage',
+    unknown: 'Review the error message for specific guidance'
+  };
+
+  return suggestions[mostCommon?.[0]] || suggestions.unknown;
+}
+
+// ============================================================
 // Config Loader (uses centralized getConfig from flow-utils)
 // ============================================================
 
@@ -3552,6 +3619,9 @@ class Orchestrator {
       errorType: errorHistory[0]?.category || 'unknown',
       errorContext: errorHistory[0]?.message?.slice(0, 200) || null
     });
+
+    // Save structured failure info for retry context
+    saveStructuredFailure(step, errorHistory, result.attempts, this.config);
 
     return result;
   }
