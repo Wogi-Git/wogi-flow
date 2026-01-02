@@ -19,6 +19,7 @@ const { storeSingleLearning, getAdapterPath } = require('./flow-model-adapter');
 
 const PROJECT_ROOT = getProjectRoot();
 const LEARNING_LOG_PATH = path.join(PROJECT_ROOT, '.workflow', 'state', 'adaptive-learning.json');
+const STRATEGY_STATS_PATH = path.join(PROJECT_ROOT, '.workflow', 'state', 'strategy-effectiveness.json');
 
 // ============================================================
 // Failure Analysis
@@ -325,12 +326,18 @@ ${refinements.suffix}`;
 function recordSuccessfulRecovery(modelName, failures, successContext = {}) {
   if (!failures || failures.length === 0) return;
 
+  // Track strategy effectiveness for all strategies used
+  const strategiesUsed = [...new Set(failures.map(f => f.strategy))];
+  for (const strategy of strategiesUsed) {
+    trackStrategyEffectiveness(modelName, strategy, true);
+  }
+
   // Group failures by category
   const categoryCounts = {};
   for (const failure of failures) {
     const cat = failure.primaryCategory;
     if (!categoryCounts[cat]) {
-      categoryCounts[cat] = { count: 0, details: [] };
+      categoryCounts[cat] = { count: 0, details: [], strategy: failure.strategy };
     }
     categoryCounts[cat].count++;
     if (failure.details && Object.keys(failure.details).length > 0) {
@@ -338,14 +345,21 @@ function recordSuccessfulRecovery(modelName, failures, successContext = {}) {
     }
   }
 
-  // Generate learning entry
+  // Generate learning entry (with deduplication)
   const learnings = [];
   const date = new Date().toISOString().split('T')[0];
+  let newLearningsCount = 0;
 
   for (const [category, data] of Object.entries(categoryCounts)) {
     const config = ERROR_CATEGORIES[category];
     if (!config) continue;
 
+    // Skip if we already have a recent learning for this category
+    if (isDuplicateLearning(modelName, category, data.details)) {
+      continue;
+    }
+
+    newLearningsCount++;
     learnings.push(`### ${date} - Learned from ${data.count} ${category} failures`);
     learnings.push('');
     learnings.push(`**Issue**: ${config.description}`);
@@ -361,6 +375,9 @@ function recordSuccessfulRecovery(modelName, failures, successContext = {}) {
     learnings.push('');
   }
 
+  // Always log to adaptive learning log (for stats)
+  logLearning(modelName, failures, successContext);
+
   if (learnings.length > 0) {
     // Add to model adapter file
     const learningText = learnings.join('\n');
@@ -370,10 +387,9 @@ function recordSuccessfulRecovery(modelName, failures, successContext = {}) {
       sourceContext: `Recovered after ${failures.length} failures`
     });
 
-    // Also log to adaptive learning log
-    logLearning(modelName, failures, successContext);
-
-    console.log(`${colors.green}   ✅ Learning recorded to ${modelName} adapter${colors.reset}`);
+    console.log(`${colors.green}   ✅ ${newLearningsCount} new learning(s) recorded to ${modelName} adapter${colors.reset}`);
+  } else {
+    console.log(`${colors.dim}   ℹ️  No new learnings (duplicates skipped)${colors.reset}`);
   }
 }
 
@@ -434,6 +450,7 @@ function logLearning(modelName, failures, context) {
     model: modelName,
     failureCount: failures.length,
     categories: failures.map(f => f.primaryCategory),
+    strategies: failures.map(f => f.strategy),
     context: context.taskId || 'unknown',
     recovered: true
   });
@@ -449,6 +466,126 @@ function logLearning(modelName, failures, context) {
   }
 
   fs.writeFileSync(LEARNING_LOG_PATH, JSON.stringify(log, null, 2));
+}
+
+// ============================================================
+// Strategy Effectiveness Tracking
+// ============================================================
+
+/**
+ * Track which strategies lead to successful recovery
+ * This helps us learn which refinement strategies work best per model
+ */
+function trackStrategyEffectiveness(modelName, strategy, succeeded) {
+  let stats = {};
+
+  if (fs.existsSync(STRATEGY_STATS_PATH)) {
+    try {
+      stats = JSON.parse(fs.readFileSync(STRATEGY_STATS_PATH, 'utf-8'));
+    } catch (e) {
+      stats = {};
+    }
+  }
+
+  if (!stats[modelName]) {
+    stats[modelName] = {};
+  }
+
+  if (!stats[modelName][strategy]) {
+    stats[modelName][strategy] = { successes: 0, failures: 0 };
+  }
+
+  if (succeeded) {
+    stats[modelName][strategy].successes++;
+  } else {
+    stats[modelName][strategy].failures++;
+  }
+
+  // Calculate effectiveness rate
+  const s = stats[modelName][strategy];
+  s.rate = s.successes / (s.successes + s.failures);
+
+  const dir = path.dirname(STRATEGY_STATS_PATH);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
+  fs.writeFileSync(STRATEGY_STATS_PATH, JSON.stringify(stats, null, 2));
+}
+
+/**
+ * Get strategy effectiveness for a model
+ */
+function getStrategyEffectiveness(modelName) {
+  if (!fs.existsSync(STRATEGY_STATS_PATH)) {
+    return null;
+  }
+
+  try {
+    const stats = JSON.parse(fs.readFileSync(STRATEGY_STATS_PATH, 'utf-8'));
+    return stats[modelName] || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Get the best strategy for a model and error category
+ */
+function getBestStrategy(modelName, category) {
+  const effectiveness = getStrategyEffectiveness(modelName);
+  if (!effectiveness) return null;
+
+  const categoryStrategy = ERROR_CATEGORIES[category]?.strategy;
+  if (categoryStrategy && effectiveness[categoryStrategy]) {
+    const rate = effectiveness[categoryStrategy].rate;
+    if (rate < 0.5) {
+      // This strategy isn't working well, try generic
+      return 'generic_fix';
+    }
+  }
+
+  return categoryStrategy;
+}
+
+// ============================================================
+// Learning Deduplication
+// ============================================================
+
+/**
+ * Check if a similar learning already exists
+ */
+function isDuplicateLearning(modelName, category, details) {
+  const adapterPath = getAdapterPath(modelName);
+  if (!fs.existsSync(adapterPath)) return false;
+
+  const content = fs.readFileSync(adapterPath, 'utf-8');
+  const learningsMatch = content.match(/## Learnings\n([\s\S]*?)(?=\n## |$)/);
+  if (!learningsMatch) return false;
+
+  const learnings = learningsMatch[1];
+
+  // Check if we have a learning for this category in the last 7 days
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const dateStr = sevenDaysAgo.toISOString().split('T')[0];
+
+  // Simple pattern match - if we have the same category learning recently, skip
+  const categoryPattern = new RegExp(`### \\d{4}-\\d{2}-\\d{2}.*${category}`, 'i');
+  if (categoryPattern.test(learnings)) {
+    // Check if the date is recent
+    const matches = learnings.match(/### (\d{4}-\d{2}-\d{2})/g);
+    if (matches) {
+      for (const match of matches) {
+        const date = match.replace('### ', '');
+        if (date >= dateStr && learnings.includes(category)) {
+          return true; // Recent duplicate found
+        }
+      }
+    }
+  }
+
+  return false;
 }
 
 // ============================================================
@@ -678,6 +815,214 @@ function formatExportForPR(exportData) {
 }
 
 // ============================================================
+// Automatic PR Contribution
+// ============================================================
+
+const { execSync, spawnSync } = require('child_process');
+
+/**
+ * Check if gh CLI is available and authenticated
+ */
+function checkGitHubCLI() {
+  try {
+    execSync('gh auth status', { stdio: 'pipe' });
+    return { available: true };
+  } catch (e) {
+    return { available: false, error: 'gh CLI not authenticated. Run: gh auth login' };
+  }
+}
+
+/**
+ * Create a PR with learnings to the wogi-flow repository
+ * @param {string} upstreamRepo - The upstream repo (e.g., 'owner/wogi-flow')
+ * @param {object} options - Options
+ */
+async function contributeLearnings(upstreamRepo = 'your-org/wogi-flow', options = {}) {
+  const { dryRun = false } = options;
+
+  // Check prerequisites
+  const ghCheck = checkGitHubCLI();
+  if (!ghCheck.available) {
+    return { success: false, error: ghCheck.error };
+  }
+
+  // Export learnings
+  const exportResult = exportLearningsForSharing();
+  if (!exportResult.success) {
+    return { success: false, error: 'No learnings to contribute' };
+  }
+
+  const { data } = exportResult;
+  if (data.summary.totalLearnings === 0) {
+    return { success: false, error: 'No new learnings to contribute' };
+  }
+
+  // Generate unique branch name
+  const timestamp = Date.now();
+  const branchName = `learnings-contribution-${timestamp}`;
+
+  if (dryRun) {
+    console.log(`${colors.cyan}[DRY RUN] Would create PR with:${colors.reset}`);
+    console.log(`  Branch: ${branchName}`);
+    console.log(`  Models: ${data.summary.totalModels}`);
+    console.log(`  Learnings: ${data.summary.totalLearnings}`);
+    return { success: true, dryRun: true };
+  }
+
+  try {
+    // Create contribution file
+    const contributionDir = path.join(PROJECT_ROOT, '.workflow', 'contributions');
+    if (!fs.existsSync(contributionDir)) {
+      fs.mkdirSync(contributionDir, { recursive: true });
+    }
+
+    const contributionFile = path.join(contributionDir, `contribution-${timestamp}.md`);
+    fs.writeFileSync(contributionFile, formatExportForPR(data));
+
+    // Also create/update model adapter patches
+    const patchesDir = path.join(contributionDir, 'patches');
+    if (!fs.existsSync(patchesDir)) {
+      fs.mkdirSync(patchesDir, { recursive: true });
+    }
+
+    for (const [model, modelData] of Object.entries(data.models)) {
+      if (modelData.learnings.length === 0) continue;
+
+      const patchContent = [
+        `# Learnings for ${model}`,
+        '',
+        `Contributed: ${data.exportedAt}`,
+        `Recoveries: ${modelData.totalRecoveries}`,
+        '',
+        '## New Learnings',
+        '',
+        ...modelData.learnings.map(l => `### ${l}`),
+        ''
+      ].join('\n');
+
+      fs.writeFileSync(path.join(patchesDir, `${model}.md`), patchContent);
+    }
+
+    console.log(`${colors.green}✅ Contribution files created in ${contributionDir}${colors.reset}`);
+    console.log('');
+    console.log(`${colors.cyan}To submit a PR:${colors.reset}`);
+    console.log(`  1. Fork ${upstreamRepo} on GitHub`);
+    console.log(`  2. Clone your fork`);
+    console.log(`  3. Copy files from ${contributionDir} to .workflow/model-adapters/`);
+    console.log(`  4. Commit and push`);
+    console.log(`  5. Create PR with title: "model-adapters: community learnings"`);
+    console.log('');
+    console.log(`${colors.dim}Or run with --auto-pr to attempt automatic PR creation (requires fork)${colors.reset}`);
+
+    return {
+      success: true,
+      contributionDir,
+      models: Object.keys(data.models),
+      learnings: data.summary.totalLearnings
+    };
+
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Attempt to create PR automatically using gh CLI
+ * This requires the user to have forked the wogi-flow repo
+ */
+async function createAutoPR(upstreamRepo, options = {}) {
+  const { forkRepo } = options;
+
+  if (!forkRepo) {
+    return { success: false, error: 'Fork repo required. Use --fork=username/wogi-flow' };
+  }
+
+  const ghCheck = checkGitHubCLI();
+  if (!ghCheck.available) {
+    return { success: false, error: ghCheck.error };
+  }
+
+  // Export and prepare
+  const contribution = await contributeLearnings(upstreamRepo, { dryRun: false });
+  if (!contribution.success) {
+    return contribution;
+  }
+
+  const timestamp = Date.now();
+  const branchName = `learnings-${timestamp}`;
+
+  try {
+    // Clone fork, create branch, add files, push, create PR
+    const tempDir = path.join(PROJECT_ROOT, '.workflow', 'temp-pr');
+
+    console.log(`${colors.cyan}Creating PR automatically...${colors.reset}`);
+
+    // Clone the fork
+    execSync(`git clone --depth 1 https://github.com/${forkRepo}.git "${tempDir}"`, { stdio: 'pipe' });
+
+    // Create branch
+    execSync(`git checkout -b ${branchName}`, { cwd: tempDir, stdio: 'pipe' });
+
+    // Copy contribution files
+    const patchesDir = path.join(contribution.contributionDir, 'patches');
+    const targetDir = path.join(tempDir, '.workflow', 'model-adapters');
+
+    if (fs.existsSync(patchesDir)) {
+      const patches = fs.readdirSync(patchesDir);
+      for (const patch of patches) {
+        const src = path.join(patchesDir, patch);
+        const dest = path.join(targetDir, patch);
+
+        // Append learnings to existing adapter or create new
+        if (fs.existsSync(dest)) {
+          const existing = fs.readFileSync(dest, 'utf-8');
+          const addition = fs.readFileSync(src, 'utf-8');
+          // Append new learnings section
+          fs.writeFileSync(dest, existing + '\n' + addition);
+        } else {
+          fs.copyFileSync(src, dest);
+        }
+      }
+    }
+
+    // Commit
+    execSync('git add .', { cwd: tempDir, stdio: 'pipe' });
+    execSync(`git commit -m "model-adapters: community learnings from adaptive learning"`, { cwd: tempDir, stdio: 'pipe' });
+
+    // Push
+    execSync(`git push origin ${branchName}`, { cwd: tempDir, stdio: 'pipe' });
+
+    // Create PR using gh
+    const prTitle = 'model-adapters: community learnings contribution';
+    const prBody = `## Community Learnings Contribution
+
+This PR adds learnings from adaptive learning sessions.
+
+**Models:** ${contribution.models.join(', ')}
+**New Learnings:** ${contribution.learnings}
+
+These learnings help improve prompt refinement for all wogi-flow users.
+
+---
+*Auto-generated by wogi-flow adaptive learning system*`;
+
+    execSync(
+      `gh pr create --repo ${upstreamRepo} --head ${forkRepo.split('/')[0]}:${branchName} --title "${prTitle}" --body "${prBody.replace(/"/g, '\\"')}"`,
+      { cwd: tempDir, stdio: 'inherit' }
+    );
+
+    // Cleanup
+    fs.rmSync(tempDir, { recursive: true, force: true });
+
+    console.log(`${colors.green}✅ PR created successfully!${colors.reset}`);
+    return { success: true };
+
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+// ============================================================
 // Exports
 // ============================================================
 
@@ -697,9 +1042,20 @@ module.exports = {
   generateGuidanceFromFailures,
   logLearning,
 
+  // Strategy effectiveness
+  trackStrategyEffectiveness,
+  getStrategyEffectiveness,
+  getBestStrategy,
+
+  // Deduplication
+  isDuplicateLearning,
+
   // Community sharing
   exportLearningsForSharing,
-  formatExportForPR
+  formatExportForPR,
+  contributeLearnings,
+  createAutoPR,
+  checkGitHubCLI
 };
 
 // ============================================================
@@ -707,10 +1063,11 @@ module.exports = {
 // ============================================================
 
 if (require.main === module) {
-  const args = process.argv.slice(2);
-  const command = args[0];
+  (async () => {
+    const args = process.argv.slice(2);
+    const command = args[0];
 
-  switch (command) {
+    switch (command) {
     case 'stats': {
       // Show learning statistics
       if (fs.existsSync(LEARNING_LOG_PATH)) {
@@ -803,8 +1160,63 @@ ${colors.cyan}To contribute these learnings to wogi-flow:${colors.reset}
 2. Copy ${prPath} content to your PR
 3. Submit PR with title: "model-adapters: community learnings"
 
-Your learnings help all wogi-flow users get better results!
+Or use: flow hybrid learning contribute --auto-pr --fork=yourusername/wogi-flow
 `);
+      break;
+    }
+
+    case 'contribute': {
+      // Contribute learnings via PR
+      console.log('\n🤝 Contributing Learnings to Community\n');
+
+      const autoPR = args.includes('--auto-pr');
+      const forkArg = args.find(a => a.startsWith('--fork='));
+      const forkRepo = forkArg ? forkArg.split('=')[1] : null;
+      const upstreamArg = args.find(a => a.startsWith('--upstream='));
+      const upstreamRepo = upstreamArg ? upstreamArg.split('=')[1] : 'your-org/wogi-flow';
+
+      if (autoPR) {
+        if (!forkRepo) {
+          console.log(`${colors.red}Error: --fork=username/wogi-flow required for auto-PR${colors.reset}`);
+          console.log('Example: flow hybrid learning contribute --auto-pr --fork=myuser/wogi-flow');
+          process.exit(1);
+        }
+
+        const result = await createAutoPR(upstreamRepo, { forkRepo });
+        if (!result.success) {
+          console.log(`${colors.red}Error: ${result.error}${colors.reset}`);
+          process.exit(1);
+        }
+      } else {
+        const result = await contributeLearnings(upstreamRepo);
+        if (!result.success) {
+          console.log(`${colors.red}Error: ${result.error}${colors.reset}`);
+          process.exit(1);
+        }
+      }
+      break;
+    }
+
+    case 'effectiveness': {
+      // Show strategy effectiveness stats
+      console.log('\n📈 Strategy Effectiveness\n');
+
+      if (!fs.existsSync(STRATEGY_STATS_PATH)) {
+        console.log('No strategy effectiveness data yet.');
+        console.log('Run some hybrid mode tasks first to generate data.');
+        break;
+      }
+
+      const stats = JSON.parse(fs.readFileSync(STRATEGY_STATS_PATH, 'utf-8'));
+
+      for (const [model, strategies] of Object.entries(stats)) {
+        console.log(`\n${colors.cyan}${model}${colors.reset}`);
+        for (const [strategy, data] of Object.entries(strategies)) {
+          const rate = (data.rate * 100).toFixed(0);
+          const color = data.rate > 0.7 ? colors.green : data.rate > 0.5 ? colors.yellow : colors.red;
+          console.log(`  ${strategy}: ${color}${rate}%${colors.reset} (${data.successes}/${data.successes + data.failures})`);
+        }
+      }
       break;
     }
 
@@ -816,16 +1228,24 @@ Usage:
   node flow-adaptive-learning.js <command>
 
 Commands:
-  stats     Show learning statistics
-  test      Test failure analysis with sample errors
-  export    Export learnings for community contribution
+  stats           Show learning statistics
+  test            Test failure analysis with sample errors
+  export          Export learnings for community contribution
+  contribute      Create contribution files for PR
+  effectiveness   Show strategy effectiveness per model
+
+Options for contribute:
+  --auto-pr       Automatically create GitHub PR
+  --fork=user/repo  Your fork of wogi-flow (required for --auto-pr)
+  --upstream=user/repo  Upstream repo (default: your-org/wogi-flow)
 
 This module enables hybrid mode to learn from failures:
 1. When executor fails, analyze WHY
 2. Refine prompt based on failure category
 3. Retry with improved instructions
 4. On success, update model adapter with learnings
-5. Export learnings to share with the community
+5. Share learnings with the community via PR
 `);
-  }
+    }
+  })();
 }

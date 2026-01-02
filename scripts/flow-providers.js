@@ -852,7 +852,7 @@ function listProviders() {
 async function detectProviders() {
   const available = [];
 
-  // Check Ollama
+  // Check Ollama (local)
   try {
     const ollama = new OllamaProvider({});
     const models = await ollama.listModels();
@@ -860,6 +860,8 @@ async function detectProviders() {
       available.push({
         type: PROVIDER_TYPES.OLLAMA,
         name: 'Ollama',
+        local: true,
+        cost: 'free',
         models: models.slice(0, 5)
       });
     }
@@ -867,7 +869,7 @@ async function detectProviders() {
     // Not available
   }
 
-  // Check LM Studio
+  // Check LM Studio (local)
   try {
     const lmStudio = new LMStudioProvider({});
     const result = await lmStudio.test();
@@ -875,6 +877,8 @@ async function detectProviders() {
       available.push({
         type: PROVIDER_TYPES.LM_STUDIO,
         name: 'LM Studio',
+        local: true,
+        cost: 'free',
         models: []
       });
     }
@@ -882,39 +886,44 @@ async function detectProviders() {
     // Not available
   }
 
-  // Check Anthropic (if key present)
+  // Check Anthropic (cloud - if key present)
   if (process.env.ANTHROPIC_API_KEY) {
     available.push({
       type: PROVIDER_TYPES.ANTHROPIC,
       name: 'Anthropic',
+      local: false,
+      cost: 'paid',
       models: [
+        { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku (Best for executor)', recommended: true },
         { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' },
         { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet' }
       ]
     });
   }
 
-  // Check OpenAI (if key present)
+  // Check OpenAI (cloud - if key present)
   if (process.env.OPENAI_API_KEY) {
     available.push({
       type: PROVIDER_TYPES.OPENAI,
       name: 'OpenAI',
       local: false,
+      cost: 'paid',
       models: [
-        { id: 'gpt-4o-mini', name: 'GPT-4o Mini (Recommended for executor)' },
+        { id: 'gpt-4o-mini', name: 'GPT-4o Mini (Best for executor)', recommended: true },
         { id: 'gpt-4o', name: 'GPT-4o' }
       ]
     });
   }
 
-  // Check Google (if key present)
+  // Check Google (cloud - if key present)
   if (process.env.GOOGLE_API_KEY) {
     available.push({
       type: PROVIDER_TYPES.GOOGLE,
       name: 'Google (Gemini)',
       local: false,
+      cost: 'paid',
       models: [
-        { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash (Recommended for executor)' },
+        { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash (Best for executor)', recommended: true },
         { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash' }
       ]
     });

@@ -3725,18 +3725,18 @@ class Orchestrator {
 
           // ADAPTIVE LEARNING: If we had failures before success, record what we learned
           if (errorHistory.length > 0) {
-            const adaptiveFailures = errorHistory.map(e => analyzeFailure(e.message, null, {
-              taskType: step.action,
-              targetFile: step.params?.path
-            }));
+            // Use cached failure analyses from errorHistory (already analyzed during retry loop)
+            const adaptiveFailures = errorHistory
+              .map(e => e.analysis)
+              .filter(Boolean);
 
-            recordSuccessfulRecovery(this.config.model, adaptiveFailures, {
-              taskId: step.id || step.description,
-              attemptsTaken: result.attempts,
-              taskType: step.action
-            });
-
-            log('cyan', `   📚 Recorded ${errorHistory.length} learnings to model adapter`);
+            if (adaptiveFailures.length > 0) {
+              recordSuccessfulRecovery(this.config.model, adaptiveFailures, {
+                taskId: step.id || step.description,
+                attemptsTaken: result.attempts,
+                taskType: step.action
+              });
+            }
           }
 
           log('green', `   ✅ Step completed`);
@@ -3770,9 +3770,13 @@ class Orchestrator {
             targetFile: step.params?.path
           });
 
-          const previousFailures = errorHistory.slice(0, -1).map(e =>
-            analyzeFailure(e.message, null, { taskType: step.action })
-          );
+          // Store analysis in errorHistory for later use (avoid duplicate analysis)
+          errorHistory[errorHistory.length - 1].analysis = failureAnalysis;
+
+          // Use cached analyses from previous errors
+          const previousFailures = errorHistory.slice(0, -1)
+            .map(e => e.analysis)
+            .filter(Boolean);
 
           const refined = refinePromptForRetry(originalPrompt, failureAnalysis, previousFailures);
           prompt = refined.prompt;

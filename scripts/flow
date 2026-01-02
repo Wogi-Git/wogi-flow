@@ -472,13 +472,26 @@ case "${1:-}" in
                     test)
                         node "$SCRIPT_DIR/flow-adaptive-learning.js" test
                         ;;
+                    contribute)
+                        shift 3
+                        node "$SCRIPT_DIR/flow-adaptive-learning.js" contribute "$@"
+                        ;;
+                    effectiveness)
+                        node "$SCRIPT_DIR/flow-adaptive-learning.js" effectiveness
+                        ;;
                     *)
-                        echo "Usage: flow hybrid learning [stats|export|test]"
+                        echo "Usage: flow hybrid learning [stats|export|test|contribute|effectiveness]"
                         echo ""
                         echo "Commands:"
-                        echo "  stats   Show learning statistics (default)"
-                        echo "  export  Export learnings for community contribution"
-                        echo "  test    Test failure analysis with sample errors"
+                        echo "  stats         Show learning statistics (default)"
+                        echo "  export        Export learnings for community contribution"
+                        echo "  test          Test failure analysis with sample errors"
+                        echo "  contribute    Create/submit PR with learnings"
+                        echo "  effectiveness Show strategy success rates per model"
+                        echo ""
+                        echo "Contribute options:"
+                        echo "  --auto-pr               Create PR automatically"
+                        echo "  --fork=user/repo        Your fork (required for auto-pr)"
                         ;;
                 esac
                 ;;
