@@ -21,7 +21,7 @@ const path = require('path');
 const https = require('https');
 const { spawn, execSync } = require('child_process');
 const readline = require('readline');
-const { getConfig, getProjectRoot, colors: c, saveConfig } = require('./flow-utils');
+const { getConfig, getProjectRoot, colors: c } = require('./flow-utils');
 
 const PROJECT_ROOT = getProjectRoot();
 const WORKFLOW_DIR = path.join(PROJECT_ROOT, '.workflow');
