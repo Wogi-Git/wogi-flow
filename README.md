@@ -20,7 +20,7 @@ A self-improving AI development workflow that learns from your feedback and accu
 | **Declarative Workflows** | YAML-based workflows with conditional routing and bounded loops                             |
 | **Figma Analyzer**        | Match Figma designs against existing components - reuse before recreating                   |
 | **Continual Learning**    | Skills automatically capture learnings from every session - knowledge persists and improves |
-| **Hybrid Mode**           | Claude plans, local LLM executes - save 85-95% tokens                                       |
+| **Hybrid Mode**           | Claude plans, local/cloud LLM executes - save 20-60% tokens                                 |
 | **Self-Completing Tasks** | `/wogi-start` runs until truly done - no manual completion needed                           |
 | **Ad-Hoc Task Handling**  | Ad-hoc requests get the same rigor as structured tasks (clarify → execute → verify)         |
 | **Component Registry**    | Tracks all components to prevent duplication                                                |
@@ -890,16 +890,30 @@ skills/nestjs/
 
 ## Hybrid Mode
 
-Save 85-95% of tokens by having Claude create execution plans that local LLMs execute.
+Save 20-60% of tokens by having Claude create execution plans that another model executes.
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Claude    │ ──▶ │    Plan     │ ──▶ │  Local LLM  │
-│  (Planner)  │     │   (JSON)    │     │ (Executor)  │
-└─────────────┘     └─────────────┘     └─────────────┘
-       │                                       │
-       └──────▶ Escalation (if needed) ◀───────┘
+┌─────────────┐     ┌─────────────┐     ┌─────────────────────┐
+│   Claude    │ ──▶ │    Plan     │ ──▶ │      Executor       │
+│  (Planner)  │     │   (JSON)    │     │  Local or Cloud LLM │
+└─────────────┘     └─────────────┘     └─────────────────────┘
+       │                                           │
+       └──────▶ Escalation (if needed) ◀───────────┘
 ```
+
+### Executor Options
+
+Choose your executor type when setting up hybrid mode:
+
+| Type | Providers | Best For |
+|------|-----------|----------|
+| **Local LLM** | Ollama, LM Studio | Privacy, unlimited tokens, no API costs |
+| **Cloud Model** | OpenAI, Anthropic, Google | No local setup, consistent quality |
+
+**Cloud Models Supported:**
+- **GPT-4o-mini** - Fast, good instruction following
+- **Claude 3 Haiku** - Excellent code quality, large context
+- **Gemini Flash** - Very large context (1M+), cost-effective
 
 ### Setup
 
@@ -909,18 +923,28 @@ Save 85-95% of tokens by having Claude create execution plans that local LLMs ex
 /wogi-hybrid-setup            # Full setup via slash command
 ```
 
-**Requirements:**
+The setup wizard will ask you to choose:
+1. **Executor type** - Local LLM or Cloud Model
+2. **Provider** - Ollama/LM Studio or OpenAI/Anthropic/Google
+3. **Model** - From available models
 
+**For Local LLM:**
 - [Ollama](https://ollama.ai/) or [LM Studio](https://lmstudio.ai/)
 - Recommended: `nemotron-3-nano`, `qwen3-coder:30b`, or `deepseek-coder:33b`
+
+**For Cloud Model:**
+- Set the appropriate environment variable: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `GOOGLE_API_KEY`
+- Or enter the API key during setup
 
 ### Token Savings
 
 | Task Size         | Normal | Hybrid | Savings |
 | ----------------- | ------ | ------ | ------- |
-| Small (3 files)   | ~8K    | ~1.2K  | 85%     |
-| Medium (8 files)  | ~20K   | ~1.8K  | 91%     |
-| Large (15+ files) | ~45K   | ~2.5K  | 94%     |
+| Small (3 files)   | ~8K    | ~5K    | 35%     |
+| Medium (8 files)  | ~20K   | ~10K   | 50%     |
+| Large (15+ files) | ~45K   | ~20K   | 55%     |
+
+*Note: Actual savings depend on task complexity and instruction detail needed for quality results.*
 
 ### Commands
 
@@ -1444,6 +1468,15 @@ After 3+ similar corrections → Claude suggests promoting to permanent instruct
 
 ## Changelog
 
+### v1.9.0 - Cloud Executor Support
+
+- **Cloud Executors**: Choose between local LLM or cloud model as hybrid mode executor
+- **Supported Providers**: OpenAI (GPT-4o-mini), Anthropic (Claude Haiku), Google (Gemini Flash)
+- **Setup Wizard**: Updated `/wogi-hybrid` to prompt for executor type (Local/Cloud)
+- **Model Adapters**: Pre-configured adapters for cloud models with known quirks and best practices
+- **Backward Compatible**: Existing local LLM configurations continue to work
+- **Token Estimation**: Adjusts automatically based on cloud vs local executor
+
 ### v1.8.0 - Pattern Enforcement & Team Sync
 
 - **Pattern Enforcement**: Active pattern injection from decisions.md/app-map.md into prompts with citation validation
@@ -1500,7 +1533,7 @@ After 3+ similar corrections → Claude suggests promoting to permanent instruct
 
 ### v1.3.0 - Hybrid Mode
 
-- **Hybrid mode**: Claude plans, local LLM executes - 85-95% token savings
+- **Hybrid mode**: Claude plans, local LLM executes - 20-60% token savings
 - **Supports**: Ollama and LM Studio
 - **Features**: Rollback, escalation, template system
 - **New commands**: `flow hybrid [enable|disable|status|rollback]`

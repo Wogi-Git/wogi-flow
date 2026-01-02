@@ -70,8 +70,10 @@ Use these commands:
 
 | Task Size | Normal | Hybrid | Savings |
 |-----------|--------|--------|---------|
-| Small | ~8K | ~1.2K | 85% |
-| Medium | ~20K | ~1.8K | 91% |
-| Large | ~45K | ~2.5K | 94% |
+| Small | ~8K | ~5K | 35% |
+| Medium | ~20K | ~10K | 50% |
+| Large | ~45K | ~20K | 55% |
+
+*Note: Actual savings vary based on instruction detail needed for quality.*
 
 Let me set up hybrid mode for your project now...

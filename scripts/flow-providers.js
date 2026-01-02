@@ -37,7 +37,8 @@ const PROVIDER_TYPES = {
   OLLAMA: 'ollama',
   LM_STUDIO: 'lm-studio',
   ANTHROPIC: 'anthropic',
-  OPENAI: 'openai'
+  OPENAI: 'openai',
+  GOOGLE: 'google'
 };
 
 /**
@@ -65,10 +66,18 @@ const MODEL_CAPABILITIES = {
   'gemma': { codeQuality: 'medium', instructionFollowing: 'high', contextWindow: 8192 },
   'gemma2': { codeQuality: 'high', instructionFollowing: 'high', contextWindow: 8192 },
 
-  // Cloud models
+  // Cloud models - Full capability
   'claude': { codeQuality: 'excellent', instructionFollowing: 'excellent', contextWindow: 200000 },
   'gpt-4': { codeQuality: 'excellent', instructionFollowing: 'excellent', contextWindow: 128000 },
   'gpt-3.5': { codeQuality: 'medium', instructionFollowing: 'high', contextWindow: 16385 },
+
+  // Cloud models - Executor tier (cheaper/faster)
+  'gpt-4o-mini': { codeQuality: 'high', instructionFollowing: 'high', contextWindow: 128000, costTier: 'cheap' },
+  'claude-3-haiku': { codeQuality: 'high', instructionFollowing: 'high', contextWindow: 200000, costTier: 'cheap' },
+  'claude-3-5-haiku': { codeQuality: 'high', instructionFollowing: 'excellent', contextWindow: 200000, costTier: 'cheap' },
+  'gemini-flash': { codeQuality: 'high', instructionFollowing: 'high', contextWindow: 1000000, costTier: 'cheap' },
+  'gemini-2.0-flash': { codeQuality: 'high', instructionFollowing: 'high', contextWindow: 1000000, costTier: 'cheap' },
+  'gemini-1.5-flash': { codeQuality: 'high', instructionFollowing: 'high', contextWindow: 1000000, costTier: 'cheap' },
 };
 
 /**
@@ -165,6 +174,13 @@ const DEFAULT_CONFIGS = {
   openai: {
     endpoint: 'https://api.openai.com/v1',
     model: 'gpt-4o',
+    temperature: 0.7,
+    maxTokens: 4096,
+    timeout: 60000
+  },
+  google: {
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta',
+    model: 'gemini-2.0-flash-exp',
     temperature: 0.7,
     maxTokens: 4096,
     timeout: 60000
@@ -583,6 +599,119 @@ class OpenAIProvider extends BaseProvider {
 }
 
 /**
+ * Google (Gemini) provider
+ */
+class GoogleProvider extends BaseProvider {
+  constructor(config) {
+    super(config);
+    this.name = 'google';
+    this.apiKey = config.apiKey || process.env.GOOGLE_API_KEY;
+  }
+
+  async complete(prompt, options = {}) {
+    if (!this.apiKey) {
+      throw new Error('Google API key not configured. Set GOOGLE_API_KEY or provide apiKey in config.');
+    }
+
+    const model = options.model || this.config.model || DEFAULT_CONFIGS.google.model;
+    const endpoint = this.config.endpoint || DEFAULT_CONFIGS.google.endpoint;
+    const url = new URL(`/models/${model}:generateContent`, endpoint);
+    url.searchParams.set('key', this.apiKey);
+
+    const body = {
+      contents: [{
+        parts: [{ text: prompt }]
+      }],
+      generationConfig: {
+        temperature: options.temperature || this.config.temperature || 0.7,
+        maxOutputTokens: options.maxTokens || this.config.maxTokens || 4096
+      }
+    };
+
+    // Add system instruction if provided
+    if (options.system || this.config.system) {
+      body.systemInstruction = {
+        parts: [{ text: options.system || this.config.system }]
+      };
+    }
+
+    const response = await this._request(url, body);
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    const content = response.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+    return {
+      content,
+      model,
+      stopReason: response.candidates?.[0]?.finishReason,
+      usage: {
+        promptTokens: response.usageMetadata?.promptTokenCount,
+        completionTokens: response.usageMetadata?.candidatesTokenCount,
+        totalTokens: response.usageMetadata?.totalTokenCount
+      }
+    };
+  }
+
+  async listModels() {
+    if (!this.apiKey) return [];
+
+    const endpoint = this.config.endpoint || DEFAULT_CONFIGS.google.endpoint;
+    const url = new URL('/models', endpoint);
+    url.searchParams.set('key', this.apiKey);
+
+    try {
+      const response = await this._request(url, null, 'GET');
+      return (response.models || [])
+        .filter(m => m.name.includes('gemini'))
+        .map(m => ({
+          id: m.name.replace('models/', ''),
+          name: m.displayName || m.name,
+          description: m.description
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  _request(url, body, method = 'POST') {
+    return new Promise((resolve, reject) => {
+      const options = {
+        method,
+        hostname: url.hostname,
+        path: url.pathname + url.search,
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: this.config.timeout || 60000
+      };
+
+      const req = https.request(options, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch {
+            reject(new Error(`Invalid response: ${data.slice(0, 100)}`));
+          }
+        });
+      });
+
+      req.on('error', reject);
+      req.on('timeout', () => reject(new Error('Request timeout')));
+
+      if (body) {
+        req.write(JSON.stringify(body));
+      }
+      req.end();
+    });
+  }
+}
+
+/**
  * Create a provider instance
  */
 function createProvider(config) {
@@ -597,9 +726,73 @@ function createProvider(config) {
       return new AnthropicProvider(config);
     case PROVIDER_TYPES.OPENAI:
       return new OpenAIProvider(config);
+    case PROVIDER_TYPES.GOOGLE:
+      return new GoogleProvider(config);
     default:
       throw new Error(`Unknown provider type: ${type}`);
   }
+}
+
+/**
+ * Create executor provider from hybrid config
+ * Supports both legacy config (provider/model) and new executor config
+ */
+function createExecutorFromConfig(hybridConfig) {
+  // New executor config structure
+  if (hybridConfig.executor && hybridConfig.executor.provider) {
+    const executor = hybridConfig.executor;
+    return createProvider({
+      type: executor.provider,
+      endpoint: executor.providerEndpoint,
+      model: executor.model,
+      apiKey: executor.apiKey,
+      ...hybridConfig.settings
+    });
+  }
+
+  // Legacy config structure (backward compatible)
+  if (hybridConfig.provider) {
+    return createProvider({
+      type: hybridConfig.provider,
+      endpoint: hybridConfig.providerEndpoint,
+      model: hybridConfig.model,
+      apiKey: hybridConfig.apiKey,
+      ...hybridConfig.settings
+    });
+  }
+
+  return null;
+}
+
+/**
+ * Get executor configuration from hybrid config
+ * Normalizes legacy and new config formats
+ */
+function getExecutorConfig(hybridConfig) {
+  // New executor config
+  if (hybridConfig.executor && hybridConfig.executor.provider) {
+    return {
+      type: hybridConfig.executor.type || 'local',
+      provider: hybridConfig.executor.provider,
+      providerEndpoint: hybridConfig.executor.providerEndpoint,
+      model: hybridConfig.executor.model,
+      apiKey: hybridConfig.executor.apiKey
+    };
+  }
+
+  // Legacy config
+  if (hybridConfig.provider) {
+    const isLocal = ['ollama', 'lm-studio'].includes(hybridConfig.provider);
+    return {
+      type: isLocal ? 'local' : 'cloud',
+      provider: hybridConfig.provider,
+      providerEndpoint: hybridConfig.providerEndpoint,
+      model: hybridConfig.model,
+      apiKey: hybridConfig.apiKey
+    };
+  }
+
+  return null;
 }
 
 /**
@@ -612,14 +805,16 @@ function listProviders() {
       name: 'Ollama',
       local: true,
       requiresKey: false,
-      defaultEndpoint: DEFAULT_CONFIGS.ollama.endpoint
+      defaultEndpoint: DEFAULT_CONFIGS.ollama.endpoint,
+      executorModels: ['qwen3-coder', 'deepseek-coder', 'codellama', 'nemotron']
     },
     {
       type: PROVIDER_TYPES.LM_STUDIO,
       name: 'LM Studio',
       local: true,
       requiresKey: false,
-      defaultEndpoint: DEFAULT_CONFIGS['lm-studio'].endpoint
+      defaultEndpoint: DEFAULT_CONFIGS['lm-studio'].endpoint,
+      executorModels: ['loaded model']
     },
     {
       type: PROVIDER_TYPES.ANTHROPIC,
@@ -627,7 +822,8 @@ function listProviders() {
       local: false,
       requiresKey: true,
       envVar: 'ANTHROPIC_API_KEY',
-      defaultEndpoint: DEFAULT_CONFIGS.anthropic.endpoint
+      defaultEndpoint: DEFAULT_CONFIGS.anthropic.endpoint,
+      executorModels: ['claude-3-5-haiku-latest', 'claude-3-haiku-20240307']
     },
     {
       type: PROVIDER_TYPES.OPENAI,
@@ -635,7 +831,17 @@ function listProviders() {
       local: false,
       requiresKey: true,
       envVar: 'OPENAI_API_KEY',
-      defaultEndpoint: DEFAULT_CONFIGS.openai.endpoint
+      defaultEndpoint: DEFAULT_CONFIGS.openai.endpoint,
+      executorModels: ['gpt-4o-mini', 'gpt-4o']
+    },
+    {
+      type: PROVIDER_TYPES.GOOGLE,
+      name: 'Google (Gemini)',
+      local: false,
+      requiresKey: true,
+      envVar: 'GOOGLE_API_KEY',
+      defaultEndpoint: DEFAULT_CONFIGS.google.endpoint,
+      executorModels: ['gemini-2.0-flash-exp', 'gemini-1.5-flash']
     }
   ];
 }
@@ -693,9 +899,23 @@ async function detectProviders() {
     available.push({
       type: PROVIDER_TYPES.OPENAI,
       name: 'OpenAI',
+      local: false,
       models: [
-        { id: 'gpt-4o', name: 'GPT-4o' },
-        { id: 'gpt-4-turbo', name: 'GPT-4 Turbo' }
+        { id: 'gpt-4o-mini', name: 'GPT-4o Mini (Recommended for executor)' },
+        { id: 'gpt-4o', name: 'GPT-4o' }
+      ]
+    });
+  }
+
+  // Check Google (if key present)
+  if (process.env.GOOGLE_API_KEY) {
+    available.push({
+      type: PROVIDER_TYPES.GOOGLE,
+      name: 'Google (Gemini)',
+      local: false,
+      models: [
+        { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash (Recommended for executor)' },
+        { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash' }
       ]
     });
   }
@@ -915,7 +1135,10 @@ module.exports = {
   LMStudioProvider,
   AnthropicProvider,
   OpenAIProvider,
+  GoogleProvider,
   createProvider,
+  createExecutorFromConfig,
+  getExecutorConfig,
   listProviders,
   detectProviders,
   loadProviderFromConfig,

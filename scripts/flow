@@ -461,8 +461,29 @@ case "${1:-}" in
             test)
                 node "$SCRIPT_DIR/flow-hybrid-test.js"
                 ;;
+            learning)
+                case "${3:-stats}" in
+                    stats)
+                        node "$SCRIPT_DIR/flow-adaptive-learning.js" stats
+                        ;;
+                    export)
+                        node "$SCRIPT_DIR/flow-adaptive-learning.js" export
+                        ;;
+                    test)
+                        node "$SCRIPT_DIR/flow-adaptive-learning.js" test
+                        ;;
+                    *)
+                        echo "Usage: flow hybrid learning [stats|export|test]"
+                        echo ""
+                        echo "Commands:"
+                        echo "  stats   Show learning statistics (default)"
+                        echo "  export  Export learnings for community contribution"
+                        echo "  test    Test failure analysis with sample errors"
+                        ;;
+                esac
+                ;;
             *)
-                echo "Usage: flow hybrid [enable|disable|status|execute|rollback|test]"
+                echo "Usage: flow hybrid [enable|disable|status|execute|rollback|test|learning]"
                 ;;
         esac
         ;;
@@ -681,7 +702,7 @@ case "${1:-}" in
                     status) echo "Show project overview: tasks, git status, recent activity" ;;
                     health) echo "Check workflow health: validate config, check files" ;;
                     story) echo "Create detailed story with acceptance criteria. Usage: flow story \"title\"" ;;
-                    hybrid) echo "Manage hybrid mode. Subcommands: enable, disable, status, execute, test" ;;
+                    hybrid) echo "Manage hybrid mode. Subcommands: enable, disable, status, execute, test, learning" ;;
                     parallel) echo "Manage parallel execution. Subcommands: config, check, enable, disable" ;;
                     worktree) echo "Manage worktree isolation. Subcommands: enable, disable, list, cleanup" ;;
                     voice-input|voice) echo "Voice-to-transcript input. Subcommands: setup, status, test, record" ;;

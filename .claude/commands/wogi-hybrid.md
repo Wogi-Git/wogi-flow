@@ -32,9 +32,10 @@ node scripts/flow-hybrid-interactive.js
 
 ## Token Savings
 
-Typical savings: **85-95%**
-- Planning: ~1,500 tokens (Claude)
-- Execution: FREE (local LLM)
+Typical savings: **20-60%** (depending on task complexity)
+- Planning: ~1,500-5,000 tokens (Claude)
+- Execution: Local LLM (free) or Cloud model (paid but cheaper)
+- Detailed instructions needed for quality results
 - Only escalations use additional Claude tokens
 
 ## Commands After Enabling

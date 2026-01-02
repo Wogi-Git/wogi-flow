@@ -52,8 +52,24 @@ const {
 const { getProjectRoot, colors, getConfig } = require('./flow-utils');
 const { getPromptAdjustments, recordModelResult } = require('./flow-model-adapter');
 
+// Import provider infrastructure for cloud executors
+const {
+  createExecutorFromConfig,
+  getExecutorConfig,
+  MODEL_CAPABILITIES,
+  getModelContextLimit
+} = require('./flow-providers');
+
 // Import response parser for error recovery
 const { parseOnRetry, cleanCodeBlock } = require('./flow-response-parser');
+
+// Import adaptive learning for smart retries and model improvement
+const {
+  analyzeFailure,
+  refinePromptForRetry,
+  recordSuccessfulRecovery,
+  ERROR_CATEGORIES
+} = require('./flow-adaptive-learning');
 
 // Import pattern enforcer for active learning enforcement
 const {
@@ -158,20 +174,35 @@ function loadHybridConfig() {
     throw new Error('Hybrid mode is not enabled. Run /wogi-hybrid first.');
   }
 
+  // Use getExecutorConfig to normalize legacy vs new config format
+  const executorConfig = getExecutorConfig(hybrid);
+
   return {
-    provider: hybrid.provider || 'ollama',
-    endpoint: hybrid.providerEndpoint || 'http://localhost:11434',
-    model: hybrid.model || '',
+    // Executor identification (new format)
+    executorType: executorConfig.type || 'local',  // 'local' or 'cloud'
+    provider: executorConfig.provider || 'ollama',
+    endpoint: executorConfig.endpoint || 'http://localhost:11434',
+    model: executorConfig.model || '',
+    apiKey: executorConfig.apiKey || null,  // For cloud providers
+
+    // Planner settings
+    adaptToExecutor: hybrid.planner?.adaptToExecutor ?? true,
+    useAdapterKnowledge: hybrid.planner?.useAdapterKnowledge ?? true,
+
+    // Execution settings
     temperature: hybrid.settings?.temperature ?? 0.7,
-    // Local LLM tokens are FREE - don't limit output artificially
-    maxTokens: hybrid.settings?.maxTokens ?? 16384,
+    // Cloud models may have different token limits
+    maxTokens: hybrid.settings?.maxTokens ?? (executorConfig.type === 'cloud' ? 4096 : 16384),
     maxRetries: hybrid.settings?.maxRetries ?? 20,
-    timeout: hybrid.settings?.timeout ?? 120000,
+    timeout: hybrid.settings?.timeout ?? (executorConfig.type === 'cloud' ? 60000 : 120000),
     autoExecute: hybrid.settings?.autoExecute ?? false,
     // Context window can be overridden in config, otherwise auto-detected from model
     contextWindow: hybrid.settings?.contextWindow || null,
     // Instruction richness settings
-    instructionRichness: hybrid.settings?.instructionRichness || {}
+    instructionRichness: hybrid.settings?.instructionRichness || {},
+
+    // Cloud provider reference (for model selection in setup wizard)
+    cloudProviders: hybrid.cloudProviders || config.hybrid?.cloudProviders || {}
   };
 }
 
@@ -465,6 +496,125 @@ class LocalLLM {
       req.end();
     });
   }
+}
+
+// ============================================================
+// Cloud Executor Client
+// ============================================================
+
+/**
+ * CloudExecutor wraps cloud providers from flow-providers.js
+ * and exposes the same interface as LocalLLM (generate, contextWindow)
+ * for seamless integration with the Orchestrator.
+ */
+class CloudExecutor {
+  constructor(config) {
+    this.config = config;
+    this.provider = createExecutorFromConfig({ executor: config });
+    this.contextWindow = null;
+    this.modelInfoFetched = false;
+
+    if (!this.provider) {
+      throw new Error(`Failed to create cloud executor for provider: ${config.provider}`);
+    }
+
+    log('cyan', `   ☁️  Cloud executor: ${config.provider} / ${config.model}`);
+  }
+
+  /**
+   * Fetches model info including context window from MODEL_CAPABILITIES.
+   * Called once on first generate() call.
+   */
+  async fetchModelInfo() {
+    if (this.modelInfoFetched) return;
+    this.modelInfoFetched = true;
+
+    // Priority 1: Config override
+    if (this.config.contextWindow) {
+      this.contextWindow = this.config.contextWindow;
+      log('dim', `   📊 Using configured context window: ${this.contextWindow.toLocaleString()} tokens`);
+      return;
+    }
+
+    // Priority 2: Look up in MODEL_CAPABILITIES
+    const modelName = this.config.model || '';
+    const lowerModel = modelName.toLowerCase();
+
+    // Try exact match first
+    if (MODEL_CAPABILITIES[modelName]) {
+      this.contextWindow = MODEL_CAPABILITIES[modelName].contextWindow;
+      log('dim', `   📊 Model context window: ${this.contextWindow.toLocaleString()} tokens`);
+      return;
+    }
+
+    // Try partial match
+    for (const [key, caps] of Object.entries(MODEL_CAPABILITIES)) {
+      if (lowerModel.includes(key.toLowerCase()) || key.toLowerCase().includes(lowerModel)) {
+        this.contextWindow = caps.contextWindow;
+        log('dim', `   📊 Model context window (matched ${key}): ${this.contextWindow.toLocaleString()} tokens`);
+        return;
+      }
+    }
+
+    // Priority 3: Provider-specific defaults
+    const providerDefaults = {
+      'openai': 128000,    // GPT-4o-mini
+      'anthropic': 200000, // Claude Haiku
+      'google': 1000000    // Gemini Flash
+    };
+
+    this.contextWindow = providerDefaults[this.config.provider] || 128000;
+    log('dim', `   📊 Using provider default context window: ${this.contextWindow.toLocaleString()} tokens`);
+  }
+
+  /**
+   * Generate a response from the cloud LLM.
+   * Matches the LocalLLM interface.
+   */
+  async generate(prompt) {
+    // Fetch model info on first call
+    await this.fetchModelInfo();
+
+    try {
+      const response = await this.provider.complete(prompt, {
+        model: this.config.model,
+        temperature: this.config.temperature,
+        maxTokens: this.config.maxTokens
+      });
+      return response;
+    } catch (error) {
+      // Enhance error message with cloud-specific context
+      const enhancedError = new Error(
+        `Cloud executor error (${this.config.provider}/${this.config.model}): ${error.message}`
+      );
+      enhancedError.originalError = error;
+      throw enhancedError;
+    }
+  }
+}
+
+/**
+ * Factory function to create the appropriate executor based on config.
+ * Returns either LocalLLM or CloudExecutor.
+ */
+function createExecutor(config) {
+  const executorType = config.executorType || 'local';
+
+  if (executorType === 'cloud') {
+    // Validate cloud config
+    const cloudProviders = ['openai', 'anthropic', 'google'];
+    if (!cloudProviders.includes(config.provider)) {
+      throw new Error(
+        `Invalid cloud provider: ${config.provider}. ` +
+        `Supported: ${cloudProviders.join(', ')}`
+      );
+    }
+
+    return new CloudExecutor(config);
+  }
+
+  // Default to local LLM (ollama, lm-studio)
+  return new LocalLLM(config);
 }
 
 // ============================================================
@@ -3124,7 +3274,8 @@ ${step.description || ''}
 class Orchestrator {
   constructor() {
     this.config = loadHybridConfig();
-    this.llm = new LocalLLM(this.config);
+    // Use factory to create appropriate executor (local or cloud)
+    this.llm = createExecutor(this.config);
     this.templates = new TemplateEngine(TEMPLATES_DIR);
     this.rollback = new RollbackManager();
     this.state = new StateManager();
@@ -3224,7 +3375,11 @@ class Orchestrator {
     log('cyan', '═'.repeat(60));
     log('white', `\nTask: ${plan.task}`);
     log('white', `Steps: ${plan.steps.length}`);
-    log('white', `Model: ${this.config.model}`);
+    // Show executor type (local or cloud)
+    const executorLabel = this.config.executorType === 'cloud'
+      ? `☁️  ${this.config.provider} / ${this.config.model}`
+      : `🖥️  ${this.config.provider} / ${this.config.model}`;
+    log('white', `Executor: ${executorLabel}`);
     log('dim', `Token Budget: ${this.planComplexity.estimatedTokens.toLocaleString()} (${this.planComplexity.level})\n`);
 
     const steps = plan.steps;
@@ -3380,6 +3535,9 @@ class Orchestrator {
     // Show initial context info
     const initialTokens = estimateTokens(prompt);
     log('dim', `   Prompt size: ~${initialTokens.toLocaleString()} tokens (includes project context - FREE)`);
+
+    // ADAPTIVE LEARNING: Save original prompt for refinement during retries
+    const originalPrompt = prompt;
 
     // Smart retry tracking - detect stuck loops and progress
     const errorHistory = [];
@@ -3565,6 +3723,22 @@ class Orchestrator {
             success: true
           });
 
+          // ADAPTIVE LEARNING: If we had failures before success, record what we learned
+          if (errorHistory.length > 0) {
+            const adaptiveFailures = errorHistory.map(e => analyzeFailure(e.message, null, {
+              taskType: step.action,
+              targetFile: step.params?.path
+            }));
+
+            recordSuccessfulRecovery(this.config.model, adaptiveFailures, {
+              taskId: step.id || step.description,
+              attemptsTaken: result.attempts,
+              taskType: step.action
+            });
+
+            log('cyan', `   📚 Recorded ${errorHistory.length} learnings to model adapter`);
+          }
+
           log('green', `   ✅ Step completed`);
           return result;
         } else {
@@ -3590,17 +3764,19 @@ class Orchestrator {
             }
           }
 
-          // Apply category-specific fix hints
-          let fixHint = '';
-          if (errorCat === 'import') {
-            fixHint = '\n\n**HINT**: Check the "Available Imports" section above. Use ONLY those exact paths.';
-          } else if (errorCat === 'type') {
-            fixHint = '\n\n**HINT**: Check the Props section for correct types. Use string literals for variants.';
-          } else if (errorCat === 'syntax') {
-            fixHint = '\n\n**HINT**: Output ONLY valid code. No markdown, no explanations, no ```code blocks.';
-          }
+          // ADAPTIVE LEARNING: Use smart prompt refinement based on failure analysis
+          const failureAnalysis = analyzeFailure(failedCheck.message, null, {
+            taskType: step.action,
+            targetFile: step.params?.path
+          });
 
-          prompt += `\n\n## PREVIOUS ERROR\n\n${failedCheck.message}${fixHint}\n\nFix this error and output the corrected code.`;
+          const previousFailures = errorHistory.slice(0, -1).map(e =>
+            analyzeFailure(e.message, null, { taskType: step.action })
+          );
+
+          const refined = refinePromptForRetry(originalPrompt, failureAnalysis, previousFailures);
+          prompt = refined.prompt;
+          log('dim', `   📝 Applying ${refined.strategy} refinement strategy`);
         }
       } catch (e) {
         result.errors.push(e.message);

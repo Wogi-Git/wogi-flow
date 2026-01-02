@@ -1,6 +1,6 @@
-# Hybrid Mode (Claude Plans, Local LLM Executes)
+# Hybrid Mode (Claude Plans, Local/Cloud LLM Executes)
 
-Hybrid mode saves 85-95% of tokens by having Claude create execution plans that are executed by a local LLM (Ollama or LM Studio).
+Hybrid mode saves 20-60% of tokens by having Claude create execution plans that are executed by a local LLM (Ollama, LM Studio) or cloud model (GPT-4o-mini, Claude Haiku, Gemini Flash).
 
 ## How It Works
 
@@ -46,9 +46,11 @@ The setup wizard:
 
 | Task Size | Normal Mode | Hybrid Mode | Savings |
 |-----------|-------------|-------------|---------|
-| Small (3 files) | ~8,000 | ~1,200 | 85% |
-| Medium (8 files) | ~20,000 | ~1,800 | 91% |
-| Large (15+ files) | ~45,000 | ~2,500 | 94% |
+| Small (3 files) | ~8,000 | ~5,000 | 35% |
+| Medium (8 files) | ~20,000 | ~10,000 | 50% |
+| Large (15+ files) | ~45,000 | ~20,000 | 55% |
+
+*Note: Detailed instructions are required for quality results that pass tests/quality gates.*
 
 ## Configuration
 
