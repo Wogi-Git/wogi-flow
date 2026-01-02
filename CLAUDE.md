@@ -323,7 +323,29 @@ When user types these commands, execute the corresponding action immediately.
 | `/wogi-search [tag]` | Search request-log.md for entries with the given tag. Show matching entries with context. |
 | `/wogi-context [id]` | Load all context for a task: the story, related request-log entries, relevant component docs from app-map, decisions.md patterns. |
 
-### Team & Export
+### Team Collaboration
+
+| Command | Action |
+|---------|--------|
+| `/wogi-team login <code>` | Join a team with invite code. Downloads team config and triggers initial sync. |
+| `/wogi-team logout` | Leave current team. Disables team features but preserves local data. |
+| `/wogi-team setup [n]` | List or select a team setup configuration. |
+| `/wogi-team sync` | Manually sync knowledge with team backend. |
+| `/wogi-team proposals` | View pending team rule proposals. Vote with `proposals vote <id> <approve\|reject>`. |
+| `/wogi-team status` | Show team connection status, sync info, and local proposals. |
+
+### PRD Management
+
+| Command | Action |
+|---------|--------|
+| `/wogi-prd load <file>` | Load PRD markdown file into memory. Chunks content for contextual retrieval. |
+| `/wogi-prd context <task>` | Get relevant PRD context for a task description. |
+| `/wogi-prd list` | List loaded PRDs with chunk counts. |
+| `/wogi-prd show <id>` | Show chunks from a specific PRD. |
+| `/wogi-prd remove <id>` | Remove a PRD from memory. |
+| `/wogi-prd clear` | Clear all PRD data. |
+
+### Export & Import
 
 | Command | Action |
 |---------|--------|

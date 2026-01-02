@@ -112,9 +112,21 @@ show_help() {
     echo "  links fetch <name>   Fetch and cache link content"
     echo "  links add <n> <url>  Add external link"
     echo ""
-    echo "Team:"
+    echo "Team & Collaboration:"
+    echo "  team login <code>    Join team with invite code"
+    echo "  team logout          Leave current team"
+    echo "  team setup           List/select team setups"
+    echo "  team sync            Sync knowledge with team"
+    echo "  team proposals       View/vote on proposals"
+    echo "  team status          Show team status"
     echo "  export-profile       Export workflow config for team"
     echo "  import-profile       Import team config"
+    echo ""
+    echo "PRD Management:"
+    echo "  prd load <file>      Load PRD into memory"
+    echo "  prd context <task>   Get PRD context for task"
+    echo "  prd list             List loaded PRDs"
+    echo "  prd clear            Clear PRD data"
     echo ""
     echo "Docs:"
     echo "  changelog            Generate changelog from request-log"
@@ -540,6 +552,12 @@ case "${1:-}" in
         ;;
     log-manager)
         node "$SCRIPT_DIR/flow-log-manager.js" "${@:2}"
+        ;;
+    team)
+        node "$SCRIPT_DIR/flow-team.js" "${@:2}"
+        ;;
+    prd)
+        node "$SCRIPT_DIR/flow-prd-manager.js" "${@:2}"
         ;;
     version|--version|-v)
         show_version

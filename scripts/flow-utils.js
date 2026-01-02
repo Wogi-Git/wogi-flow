@@ -169,6 +169,13 @@ function error(message) {
   console.log(`${color('red', '✗')} ${message}`);
 }
 
+/**
+ * Print info message
+ */
+function info(message) {
+  console.log(`${color('cyan', 'ℹ')} ${message}`);
+}
+
 // ============================================================
 // File Operations
 // ============================================================
@@ -1197,6 +1204,7 @@ module.exports = {
   success,
   warn,
   error,
+  info,
 
   // File Operations
   fileExists,
