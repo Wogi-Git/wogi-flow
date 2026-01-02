@@ -38,6 +38,9 @@ const {
 const { appendLearning: appendSkillLearning, discoverSkills } = require('./flow-skill-learn');
 const { storeSingleLearning: storeModelLearning, getCurrentModel } = require('./flow-model-adapter');
 
+// Use shared memory database for proposals
+const memoryDb = require('./flow-memory-db');
+
 // ============================================================
 // Route Detection
 // ============================================================
@@ -316,31 +319,17 @@ async function createTeamProposal(correction, route, context) {
     };
   }
 
-  // Store locally for sync
-  const proposalsDir = path.join(STATE_DIR, 'proposals');
-  if (!fs.existsSync(proposalsDir)) {
-    fs.mkdirSync(proposalsDir, { recursive: true });
-  }
-
-  const proposalId = `proposal_${Date.now()}`;
-  const proposal = {
-    id: proposalId,
+  // Store in shared database (will sync when team sync runs)
+  const result = await memoryDb.createProposal({
     rule: correction,
     category: route.category || 'pattern',
     rationale: context.originalError || 'Learned from correction',
-    sourceContext: context.taskId || null,
-    status: 'pending',
-    createdAt: new Date().toISOString()
-  };
-
-  fs.writeFileSync(
-    path.join(proposalsDir, `${proposalId}.json`),
-    JSON.stringify(proposal, null, 2)
-  );
+    sourceContext: context.taskId || null
+  });
 
   return {
     success: true,
-    proposalId,
+    proposalId: result.id,
     message: 'Team proposal created. Will sync on next `./scripts/flow team sync`.'
   };
 }
