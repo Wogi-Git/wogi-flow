@@ -6,8 +6,8 @@
  * Manages team features including:
  * - Team login/logout with invite codes
  * - Setup selection from team configurations
- * - Knowledge sync with cloud backend
- * - Proposal management for team rules
+ * - Knowledge sync with AWS backend
+ * - Proposal management with offline queue
  *
  * Part of v1.8.0 Team Collaboration
  *
@@ -17,11 +17,11 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const {
   getConfig,
   saveConfig,
   STATE_DIR,
-  PATHS,
   colors,
   color,
   success,
@@ -34,13 +34,19 @@ const {
   writeFile
 } = require('./flow-utils');
 
+// Use shared database for proposals
+const memoryDb = require('./flow-memory-db');
+
 // ============================================================
 // Constants
 // ============================================================
 
 const TEAM_STATE_FILE = path.join(STATE_DIR, 'team-state.json');
-const PROPOSALS_DIR = path.join(STATE_DIR, 'proposals');
+const OFFLINE_QUEUE_FILE = path.join(STATE_DIR, 'offline-queue.json');
 const DEFAULT_BACKEND_URL = 'https://api.wogi-flow.com';
+
+// Token refresh threshold (refresh 5 minutes before expiry)
+const TOKEN_REFRESH_THRESHOLD = 5 * 60 * 1000;
 
 // ============================================================
 // Team State Management
@@ -59,22 +65,72 @@ function getTeamState() {
       setupId: null,
       setupName: null,
       lastSync: null,
-      token: null
+      accessToken: null,
+      refreshToken: null,
+      tokenExpiresAt: null
     };
   }
 
   try {
-    return JSON.parse(readFile(TEAM_STATE_FILE));
+    const state = JSON.parse(readFile(TEAM_STATE_FILE));
+    // Decrypt tokens if encrypted
+    if (state.accessToken && state.encrypted) {
+      state.accessToken = decryptToken(state.accessToken);
+      state.refreshToken = decryptToken(state.refreshToken);
+    }
+    return state;
   } catch (e) {
     return { loggedIn: false };
   }
 }
 
 /**
- * Save team state
+ * Save team state (with encrypted tokens)
  */
 function saveTeamState(state) {
-  writeFile(TEAM_STATE_FILE, JSON.stringify(state, null, 2));
+  const stateToSave = { ...state };
+
+  // Encrypt tokens before saving
+  if (stateToSave.accessToken) {
+    stateToSave.accessToken = encryptToken(stateToSave.accessToken);
+    stateToSave.refreshToken = encryptToken(stateToSave.refreshToken);
+    stateToSave.encrypted = true;
+  }
+
+  writeFile(TEAM_STATE_FILE, JSON.stringify(stateToSave, null, 2));
+}
+
+/**
+ * Simple token encryption (better than plain text)
+ */
+function encryptToken(token) {
+  if (!token) return null;
+  const key = crypto.createHash('sha256').update(getMachineId()).digest();
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+  let encrypted = cipher.update(token, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  return iv.toString('hex') + ':' + encrypted;
+}
+
+function decryptToken(encrypted) {
+  if (!encrypted) return null;
+  try {
+    const key = crypto.createHash('sha256').update(getMachineId()).digest();
+    const parts = encrypted.split(':');
+    const iv = Buffer.from(parts[0], 'hex');
+    const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+    let decrypted = decipher.update(parts[1], 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  } catch (e) {
+    return null;
+  }
+}
+
+function getMachineId() {
+  // Use a combination of machine-specific values
+  return process.env.USER + process.env.HOME + __dirname;
 }
 
 /**
@@ -94,32 +150,147 @@ function getBackendUrl() {
 }
 
 // ============================================================
-// API Client (with graceful degradation)
+// Offline Queue
 // ============================================================
+
+function getOfflineQueue() {
+  if (!fileExists(OFFLINE_QUEUE_FILE)) return [];
+  try {
+    return JSON.parse(readFile(OFFLINE_QUEUE_FILE));
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveOfflineQueue(queue) {
+  writeFile(OFFLINE_QUEUE_FILE, JSON.stringify(queue, null, 2));
+}
+
+function addToOfflineQueue(operation) {
+  const queue = getOfflineQueue();
+  queue.push({
+    ...operation,
+    queuedAt: new Date().toISOString(),
+    retries: 0
+  });
+  saveOfflineQueue(queue);
+}
+
+async function processOfflineQueue() {
+  const queue = getOfflineQueue();
+  if (queue.length === 0) return { processed: 0, failed: 0 };
+
+  let processed = 0;
+  let failed = 0;
+  const remaining = [];
+
+  for (const item of queue) {
+    try {
+      const result = await executeQueuedOperation(item);
+      if (result.success) {
+        processed++;
+      } else if (item.retries < 3) {
+        remaining.push({ ...item, retries: item.retries + 1 });
+        failed++;
+      }
+    } catch (e) {
+      if (item.retries < 3) {
+        remaining.push({ ...item, retries: item.retries + 1 });
+      }
+      failed++;
+    }
+  }
+
+  saveOfflineQueue(remaining);
+  return { processed, failed, remaining: remaining.length };
+}
+
+async function executeQueuedOperation(item) {
+  switch (item.type) {
+    case 'proposal':
+      return await apiRequest(`/teams/${item.teamId}/proposals`, {
+        method: 'POST',
+        body: JSON.stringify(item.data)
+      });
+    case 'knowledge':
+      return await apiRequest(`/teams/${item.teamId}/knowledge`, {
+        method: 'POST',
+        body: JSON.stringify(item.data)
+      });
+    default:
+      return { success: false, error: 'Unknown operation type' };
+  }
+}
+
+// ============================================================
+// API Client (with JWT refresh and offline support)
+// ============================================================
+
+/**
+ * Ensure valid access token, refresh if needed
+ */
+async function ensureValidToken() {
+  const state = getTeamState();
+
+  if (!state.accessToken || !state.refreshToken) {
+    return null;
+  }
+
+  // Check if token is about to expire
+  const expiresAt = state.tokenExpiresAt ? new Date(state.tokenExpiresAt).getTime() : 0;
+  const now = Date.now();
+
+  if (now > expiresAt - TOKEN_REFRESH_THRESHOLD) {
+    // Token expired or about to expire, refresh it
+    const backendUrl = getBackendUrl();
+
+    try {
+      const response = await fetch(`${backendUrl}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: state.refreshToken })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        state.accessToken = data.accessToken;
+        state.tokenExpiresAt = new Date(now + (data.expiresIn || 3600) * 1000).toISOString();
+        saveTeamState(state);
+        return state.accessToken;
+      }
+    } catch (e) {
+      // Token refresh failed, return existing token and hope for the best
+      console.error('Token refresh failed:', e.message);
+    }
+  }
+
+  return state.accessToken;
+}
 
 /**
  * Make authenticated request to backend
  */
 async function apiRequest(endpoint, options = {}) {
-  const state = getTeamState();
   const backendUrl = getBackendUrl();
-
   const url = `${backendUrl}${endpoint}`;
+
+  // Get valid token (will refresh if needed)
+  const token = await ensureValidToken();
+
   const headers = {
     'Content-Type': 'application/json',
-    ...(state.token ? { 'Authorization': `Bearer ${state.token}` } : {}),
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     ...options.headers
   };
 
   try {
-    // Dynamic import for fetch (Node 18+)
     const response = await fetch(url, {
       ...options,
       headers
     });
 
     if (response.status === 401) {
-      return { error: 'unauthorized', message: 'Team subscription required or token expired' };
+      return { error: 'unauthorized', message: 'Token expired or invalid' };
     }
 
     if (response.status === 403) {
@@ -127,15 +298,34 @@ async function apiRequest(endpoint, options = {}) {
     }
 
     if (!response.ok) {
-      const text = await response.text();
-      return { error: 'api_error', message: text, status: response.status };
+      const data = await response.json().catch(() => ({}));
+      return { error: 'api_error', message: data.error || response.statusText, status: response.status };
     }
 
     return await response.json();
   } catch (e) {
-    // Network error or backend unavailable
+    // Network error - add to offline queue if it's a write operation
+    if (options.method && ['POST', 'PUT', 'DELETE'].includes(options.method)) {
+      // Extract teamId from endpoint
+      const teamIdMatch = endpoint.match(/\/teams\/([^/]+)/);
+      if (teamIdMatch && options.body) {
+        addToOfflineQueue({
+          type: inferOperationType(endpoint),
+          teamId: teamIdMatch[1],
+          endpoint,
+          data: JSON.parse(options.body)
+        });
+        return { error: 'queued', message: 'Operation queued for sync when online' };
+      }
+    }
     return { error: 'network', message: `Backend unavailable: ${e.message}` };
   }
+}
+
+function inferOperationType(endpoint) {
+  if (endpoint.includes('/proposals')) return 'proposal';
+  if (endpoint.includes('/knowledge')) return 'knowledge';
+  return 'unknown';
 }
 
 // ============================================================
@@ -143,79 +333,110 @@ async function apiRequest(endpoint, options = {}) {
 // ============================================================
 
 /**
- * Login to team with invite code
+ * Login to team with invite code or credentials
  */
-async function login(inviteCode) {
+async function login(inviteCodeOrEmail, password) {
   printHeader('Team Login');
 
-  if (!inviteCode) {
-    // Show login options
+  if (!inviteCodeOrEmail) {
     console.log('To join a team, you need an invite code from your team admin.');
     console.log('');
     console.log('Options:');
-    console.log('  1. Join existing team: ./scripts/flow team login <invite-code>');
-    console.log('  2. Create new team:    Visit https://wogi-flow.com/teams/new');
+    console.log('  1. Join with invite: ./scripts/flow team login <invite-code>');
+    console.log('  2. Login with email: ./scripts/flow team login <email> <password>');
     console.log('');
     info('Team features require a subscription at https://wogi-flow.com');
     return;
   }
 
-  info('Validating invite code...');
+  const backendUrl = getBackendUrl();
 
-  const result = await apiRequest('/api/teams/join', {
-    method: 'POST',
-    body: JSON.stringify({ inviteCode })
-  });
+  // Determine if invite code or email login
+  const isEmail = inviteCodeOrEmail.includes('@');
+  let body;
 
-  if (result.error) {
-    if (result.error === 'network') {
-      error('Could not connect to team backend.');
-      info('Team features require an active subscription.');
-      info('Visit https://wogi-flow.com to get started.');
-    } else if (result.error === 'unauthorized') {
-      error('Invalid or expired invite code.');
-    } else {
-      error(`Login failed: ${result.message}`);
+  if (isEmail) {
+    if (!password) {
+      error('Password required for email login');
+      return;
     }
-    return;
+    body = { email: inviteCodeOrEmail, password };
+    info('Logging in...');
+  } else {
+    // Prompt for email and password for invite code login
+    const readline = require('readline');
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+
+    console.log('Setting up your account for this team...');
+
+    const email = await new Promise(resolve => rl.question('Email: ', resolve));
+    const pwd = await new Promise(resolve => {
+      process.stdout.write('Password: ');
+      // Note: In production, use a proper password input
+      rl.question('', resolve);
+    });
+    rl.close();
+
+    body = { inviteCode: inviteCodeOrEmail, email, password: pwd };
+    info('Validating invite and creating account...');
   }
 
-  // Save team state
-  const teamState = {
-    loggedIn: true,
-    teamId: result.teamId,
-    userId: result.userId,
-    teamName: result.teamName,
-    token: result.token,
-    setupId: null,
-    setupName: null,
-    lastSync: null
-  };
-  saveTeamState(teamState);
-
-  // Update config
-  const config = getConfig();
-  config.team = {
-    ...config.team,
-    enabled: true,
-    teamId: result.teamId,
-    userId: result.userId
-  };
-  saveConfig(config);
-
-  success(`Logged in to team: ${result.teamName}`);
-  console.log('');
-
-  // Show available setups
-  if (result.setups && result.setups.length > 0) {
-    console.log('Available setups:');
-    result.setups.forEach((setup, i) => {
-      console.log(`  ${i + 1}. ${setup.name} - ${setup.description || 'No description'}`);
+  try {
+    const response = await fetch(`${backendUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
     });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        error(data.error || 'Invalid credentials or invite code');
+      } else {
+        error(`Login failed: ${data.error || response.statusText}`);
+      }
+      return;
+    }
+
+    const result = await response.json();
+
+    // Save team state with tokens
+    const teamState = {
+      loggedIn: true,
+      teamId: result.teamId,
+      userId: result.userId,
+      teamName: result.teamName,
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      tokenExpiresAt: new Date(Date.now() + (result.expiresIn || 3600) * 1000).toISOString(),
+      setupId: null,
+      setupName: null,
+      lastSync: null
+    };
+    saveTeamState(teamState);
+
+    // Update config
+    const config = getConfig();
+    config.team = {
+      ...config.team,
+      enabled: true,
+      teamId: result.teamId,
+      userId: result.userId,
+      backendUrl
+    };
+    saveConfig(config);
+
+    success(`Logged in to team: ${result.teamName || result.teamId}`);
+
+    // Trigger initial sync
     console.log('');
-    info('Select a setup with: ./scripts/flow team setup <number>');
-  } else {
-    info('No team setups available. Contact your team admin.');
+    info('Running initial sync...');
+    await sync({ silent: true });
+    success('Initial sync complete');
+
+  } catch (e) {
+    error(`Could not connect to team backend: ${e.message}`);
+    info('Check your internet connection or try again later.');
   }
 }
 
@@ -243,10 +464,12 @@ async function logout() {
     setupId: null,
     setupName: null,
     lastSync: null,
-    token: null
+    accessToken: null,
+    refreshToken: null,
+    tokenExpiresAt: null
   });
 
-  // Update config (keep structure, disable)
+  // Update config
   const config = getConfig();
   config.team = {
     ...config.team,
@@ -259,86 +482,10 @@ async function logout() {
 }
 
 /**
- * Select team setup
- */
-async function selectSetup(setupIndex) {
-  printHeader('Team Setup');
-
-  const state = getTeamState();
-
-  if (!state.loggedIn) {
-    error('Not logged in to a team. Run: ./scripts/flow team login <invite-code>');
-    return;
-  }
-
-  if (!setupIndex) {
-    // List available setups
-    info('Fetching available setups...');
-
-    const result = await apiRequest(`/api/teams/${state.teamId}/setups`);
-
-    if (result.error) {
-      error(`Failed to fetch setups: ${result.message}`);
-      return;
-    }
-
-    if (!result.setups || result.setups.length === 0) {
-      warn('No setups available for this team.');
-      return;
-    }
-
-    console.log('');
-    console.log('Available setups:');
-    result.setups.forEach((setup, i) => {
-      const current = setup.id === state.setupId ? color('green', ' (current)') : '';
-      console.log(`  ${i + 1}. ${setup.name}${current}`);
-      if (setup.description) {
-        console.log(color('dim', `     ${setup.description}`));
-      }
-    });
-    console.log('');
-    info('Select with: ./scripts/flow team setup <number>');
-    return;
-  }
-
-  // Fetch and apply setup
-  info('Applying setup...');
-
-  const result = await apiRequest(`/api/teams/${state.teamId}/setups/${setupIndex}/apply`, {
-    method: 'POST'
-  });
-
-  if (result.error) {
-    error(`Failed to apply setup: ${result.message}`);
-    return;
-  }
-
-  // Update team state
-  state.setupId = result.setupId;
-  state.setupName = result.setupName;
-  saveTeamState(state);
-
-  // Merge setup config into local config
-  if (result.config) {
-    const config = getConfig();
-    const merged = deepMerge(config, result.config);
-    // Preserve project-specific values
-    merged.projectName = config.projectName;
-    merged.skills.installed = config.skills?.installed || [];
-    saveConfig(merged);
-  }
-
-  success(`Setup applied: ${result.setupName}`);
-
-  // Trigger initial sync
-  await sync();
-}
-
-/**
  * Sync with team backend
  */
 async function sync(options = {}) {
-  printHeader('Team Sync');
+  if (!options.silent) printHeader('Team Sync');
 
   const state = getTeamState();
 
@@ -351,47 +498,50 @@ async function sync(options = {}) {
 
   if (!silent) info('Syncing with team...');
 
-  // 1. Push local proposals
-  const proposals = getLocalProposals();
+  // 1. Process offline queue first
+  const queueResult = await processOfflineQueue();
+  if (queueResult.processed > 0 && !silent) {
+    info(`Processed ${queueResult.processed} queued operations`);
+  }
+
+  // 2. Get unsynced proposals from local database
+  const localProposals = await memoryDb.getUnsyncedProposals();
   let pushed = 0;
 
-  for (const proposal of proposals) {
-    if (proposal.synced) continue;
-
-    const result = await apiRequest('/api/proposals', {
+  // Push local proposals
+  for (const proposal of localProposals) {
+    const result = await apiRequest(`/teams/${state.teamId}/proposals`, {
       method: 'POST',
-      body: JSON.stringify(proposal)
+      body: JSON.stringify({
+        rule: proposal.rule,
+        category: proposal.category,
+        rationale: proposal.rationale,
+        sourceContext: proposal.source_context,
+        localId: proposal.id
+      })
     });
 
-    if (!result.error) {
-      proposal.synced = true;
-      proposal.remoteId = result.id;
-      saveProposal(proposal);
+    if (!result.error || result.error === 'queued') {
+      await memoryDb.updateProposal(proposal.id, {
+        synced: true,
+        remoteId: result.id
+      });
       pushed++;
     }
   }
 
-  // 2. Pull new approved knowledge
-  const pullResult = await apiRequest(`/api/teams/${state.teamId}/knowledge`, {
-    method: 'GET',
-    headers: {
-      'X-Last-Sync': state.lastSync || '1970-01-01T00:00:00Z'
-    }
-  });
+  // 3. Pull new knowledge
+  const pullResult = await apiRequest(`/teams/${state.teamId}/knowledge?since=${state.lastSync || ''}`);
 
   let pulled = 0;
   if (!pullResult.error && pullResult.knowledge) {
-    // Import new knowledge to local memory
-    const { storeByRoute } = require('./flow-knowledge-router');
-
     for (const item of pullResult.knowledge) {
-      await storeByRoute(item.fact, {
-        type: item.type || 'project',
-        skill: item.skill,
-        model: item.model
-      }, {
-        source: 'team-sync',
-        teamId: state.teamId
+      await memoryDb.storeFact({
+        fact: item.fact,
+        category: item.category,
+        scope: 'team',
+        model: item.modelSpecific,
+        sourceContext: `team:${state.teamId}`
       });
       pulled++;
     }
@@ -403,6 +553,9 @@ async function sync(options = {}) {
 
   if (!silent) {
     success(`Sync complete: ${pulled} pulled, ${pushed} pushed`);
+    if (queueResult.remaining > 0) {
+      warn(`${queueResult.remaining} operations still queued (will retry)`);
+    }
   }
 
   return { pulled, pushed };
@@ -422,23 +575,37 @@ async function proposals(action, proposalId, vote) {
   }
 
   if (action === 'vote' && proposalId && vote) {
-    // Vote on proposal
-    const result = await apiRequest(`/api/proposals/${proposalId}/vote`, {
+    if (!['approve', 'reject'].includes(vote)) {
+      error('Vote must be "approve" or "reject"');
+      return;
+    }
+
+    const result = await apiRequest(`/teams/${state.teamId}/proposals/${proposalId}/vote`, {
       method: 'POST',
       body: JSON.stringify({ vote, comment: '' })
     });
 
     if (result.error) {
-      error(`Failed to vote: ${result.message}`);
+      if (result.error === 'queued') {
+        info('Vote queued for sync when online');
+      } else {
+        error(`Failed to vote: ${result.message}`);
+      }
       return;
     }
 
     success(`Vote recorded: ${vote} on proposal #${proposalId}`);
+
+    if (result.status === 'approved') {
+      success('Proposal approved and added to team knowledge!');
+    } else if (result.status === 'rejected') {
+      info('Proposal rejected');
+    }
     return;
   }
 
   // List pending proposals
-  const result = await apiRequest(`/api/teams/${state.teamId}/proposals?status=pending`);
+  const result = await apiRequest(`/teams/${state.teamId}/proposals?status=pending`);
 
   if (result.error) {
     error(`Failed to fetch proposals: ${result.message}`);
@@ -455,13 +622,17 @@ async function proposals(action, proposalId, vote) {
   console.log('');
 
   for (const p of result.proposals) {
-    console.log(`  #${p.id} | ${p.category} | by ${p.proposer}`);
+    const votes = p.votes || [];
+    const approvals = votes.filter(v => v.vote === 'approve').length;
+    const rejections = votes.filter(v => v.vote === 'reject').length;
+
+    console.log(`  #${p.id} | ${p.category}`);
     console.log(color('dim', '  ' + '─'.repeat(50)));
     console.log(`  Rule: "${p.rule}"`);
     if (p.rationale) {
       console.log(color('dim', `  Rationale: ${p.rationale}`));
     }
-    console.log(`  Votes: ${p.approves} approve, ${p.rejects} reject`);
+    console.log(`  Votes: ${approvals} approve, ${rejections} reject`);
     console.log('');
   }
 
@@ -471,7 +642,7 @@ async function proposals(action, proposalId, vote) {
 /**
  * Generate invite code (admin only)
  */
-async function invite() {
+async function invite(expiresInDays = 7) {
   printHeader('Generate Invite');
 
   const state = getTeamState();
@@ -481,9 +652,9 @@ async function invite() {
     return;
   }
 
-  const result = await apiRequest(`/api/teams/${state.teamId}/invites`, {
+  const result = await apiRequest(`/teams/${state.teamId}/invites`, {
     method: 'POST',
-    body: JSON.stringify({ expiresInDays: 7 })
+    body: JSON.stringify({ expiresInDays: parseInt(expiresInDays) || 7 })
   });
 
   if (result.error) {
@@ -500,7 +671,10 @@ async function invite() {
   console.log('');
   console.log(`  ${color('green', result.code)}`);
   console.log('');
-  console.log(`Valid for: ${result.expiresInDays} days`);
+  console.log(`Valid for: ${expiresInDays} days`);
+  if (result.url) {
+    console.log(`Join URL: ${result.url}`);
+  }
   console.log('');
   info('Share this code with team members to join.');
 }
@@ -508,7 +682,7 @@ async function invite() {
 /**
  * Show team status
  */
-function status() {
+async function status() {
   printHeader('Team Status');
 
   const state = getTeamState();
@@ -524,72 +698,35 @@ function status() {
 
   console.log('Status: ' + color('green', 'Logged in'));
   console.log('');
-  console.log(`Team:     ${state.teamName || state.teamId}`);
-  console.log(`Setup:    ${state.setupName || 'None selected'}`);
+  console.log(`Team:      ${state.teamName || state.teamId}`);
+  console.log(`Setup:     ${state.setupName || 'None selected'}`);
   console.log(`Last sync: ${state.lastSync || 'Never'}`);
   console.log('');
 
-  // Show local proposals
-  const localProposals = getLocalProposals();
-  const unsynced = localProposals.filter(p => !p.synced).length;
-
-  if (unsynced > 0) {
-    warn(`${unsynced} unsynced proposal(s). Run: ./scripts/flow team sync`);
-  }
-
-  // Show config status
-  console.log('Configuration:');
-  console.log(`  Auto-sync: ${config.team?.autoSync ? 'Enabled' : 'Disabled'}`);
-  console.log(`  Sync interval: ${Math.round((config.team?.syncInterval || 300000) / 60000)} minutes`);
-}
-
-// ============================================================
-// Local Proposals
-// ============================================================
-
-function getLocalProposals() {
-  if (!fs.existsSync(PROPOSALS_DIR)) {
-    return [];
-  }
-
-  const files = fs.readdirSync(PROPOSALS_DIR).filter(f => f.endsWith('.json'));
-  return files.map(f => {
-    try {
-      return JSON.parse(fs.readFileSync(path.join(PROPOSALS_DIR, f), 'utf-8'));
-    } catch (e) {
-      return null;
-    }
-  }).filter(Boolean);
-}
-
-function saveProposal(proposal) {
-  if (!fs.existsSync(PROPOSALS_DIR)) {
-    fs.mkdirSync(PROPOSALS_DIR, { recursive: true });
-  }
-
-  const filename = `${proposal.id}.json`;
-  fs.writeFileSync(
-    path.join(PROPOSALS_DIR, filename),
-    JSON.stringify(proposal, null, 2)
-  );
-}
-
-// ============================================================
-// Utilities
-// ============================================================
-
-function deepMerge(target, source) {
-  const result = { ...target };
-
-  for (const key of Object.keys(source)) {
-    if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
-      result[key] = deepMerge(target[key] || {}, source[key]);
+  // Check token status
+  const expiresAt = state.tokenExpiresAt ? new Date(state.tokenExpiresAt) : null;
+  if (expiresAt) {
+    const now = new Date();
+    if (expiresAt < now) {
+      warn('Access token expired - will refresh on next request');
     } else {
-      result[key] = source[key];
+      const hours = Math.round((expiresAt - now) / (1000 * 60 * 60));
+      console.log(`Token:     Valid for ~${hours} hours`);
     }
   }
+  console.log('');
 
-  return result;
+  // Show offline queue status
+  const queue = getOfflineQueue();
+  if (queue.length > 0) {
+    warn(`${queue.length} operation(s) queued for sync`);
+  }
+
+  // Show stats from database
+  const stats = await memoryDb.getStats();
+  console.log('Local stats:');
+  console.log(`  Facts:     ${stats.facts.total}`);
+  console.log(`  Proposals: ${stats.proposals.total} (${stats.proposals.pending} pending)`);
 }
 
 // ============================================================
@@ -603,21 +740,22 @@ Wogi Flow - Team Collaboration
 Usage: ./scripts/flow team <command> [args]
 
 Commands:
-  login <code>          Join team with invite code
-  logout                Leave current team
-  setup [number]        List or select team setup
-  sync                  Sync knowledge with team
-  proposals             List pending proposals
+  login <code>           Join team with invite code
+  login <email> <pass>   Login with email and password
+  logout                 Leave current team
+  sync                   Sync knowledge with team
+  proposals              List pending proposals
   proposals vote <id> <approve|reject>
-                        Vote on a proposal
-  invite                Generate invite code (admin)
-  status                Show team status
+                         Vote on a proposal
+  invite [days]          Generate invite code (admin only)
+  status                 Show team status
 
 Examples:
-  ./scripts/flow team login ABC123
-  ./scripts/flow team setup 1
+  ./scripts/flow team login ABC123XY
+  ./scripts/flow team login user@example.com mypassword
   ./scripts/flow team sync
-  ./scripts/flow team proposals vote 42 approve
+  ./scripts/flow team proposals vote prop_abc123 approve
+  ./scripts/flow team invite 14
 
 Team features require a subscription at https://wogi-flow.com
 `);
@@ -629,15 +767,11 @@ async function main() {
 
   switch (command) {
     case 'login':
-      await login(args[1]);
+      await login(args[1], args[2]);
       break;
 
     case 'logout':
       await logout();
-      break;
-
-    case 'setup':
-      await selectSetup(args[1]);
       break;
 
     case 'sync':
@@ -649,11 +783,11 @@ async function main() {
       break;
 
     case 'invite':
-      await invite();
+      await invite(args[1]);
       break;
 
     case 'status':
-      status();
+      await status();
       break;
 
     case '--help':
@@ -681,13 +815,11 @@ module.exports = {
   isTeamEnabled,
   login,
   logout,
-  selectSetup,
   sync,
   proposals,
   invite,
   status,
-  getLocalProposals,
-  saveProposal
+  processOfflineQueue
 };
 
 if (require.main === module) {
