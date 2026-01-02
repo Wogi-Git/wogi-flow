@@ -75,6 +75,8 @@ show_help() {
     echo "  skill-learn          Extract learnings from recent changes"
     echo "  skill-create <name>  Create a new skill"
     echo "  skill-create --list  List existing skills"
+    echo "  skill detect         Detect frameworks in project"
+    echo "  skill list           List installed skills"
     echo "  correct              Capture a correction/learning"
     echo "  correct \"desc\"       Quick mode with description"
     echo "  correct list         List recent corrections"
@@ -116,7 +118,9 @@ show_help() {
     echo "  team login <code>    Join team with invite code"
     echo "  team logout          Leave current team"
     echo "  team setup           List/select team setups"
-    echo "  team sync            Sync knowledge with team"
+    echo "  team sync            Sync knowledge with team (project-scoped)"
+    echo "  team sync-status     Show sync status for project"
+    echo "  team sync-init <id>  Initialize project-based sync"
     echo "  team proposals       View/vote on proposals"
     echo "  team status          Show team status"
     echo "  export-profile       Export workflow config for team"
@@ -134,8 +138,15 @@ show_help() {
     echo "Parallel Execution:"
     echo "  parallel config      Show parallel execution config"
     echo "  parallel check       Check tasks for parallel potential"
+    echo "  parallel analyze     Analyze tasks for parallel potential"
+    echo "  parallel suggest     Check if parallel should be suggested"
     echo "  parallel enable      Enable parallel execution"
     echo "  parallel disable     Disable parallel execution"
+    echo ""
+    echo "Loop Enforcement:"
+    echo "  loop status          Show active loop session"
+    echo "  loop stats           Show loop statistics"
+    echo "  loop can-exit        Check if current loop can exit"
     echo ""
     echo "Worktree Isolation:"
     echo "  worktree enable      Enable worktree isolation for tasks"
@@ -335,6 +346,12 @@ case "${1:-}" in
             check)
                 node "$SCRIPT_DIR/flow-parallel.js" check
                 ;;
+            analyze)
+                node "$SCRIPT_DIR/flow-parallel-detector.js" analyze
+                ;;
+            suggest)
+                node "$SCRIPT_DIR/flow-parallel-detector.js" suggest
+                ;;
             enable)
                 node "$SCRIPT_DIR/flow-config-set.js" parallel.enabled true
                 ;;
@@ -345,7 +362,50 @@ case "${1:-}" in
                 node "$SCRIPT_DIR/flow-config-set.js" parallel.autoApprove true
                 ;;
             *)
-                echo "Usage: flow parallel [config|check|enable|disable|auto-approve]"
+                echo "Usage: flow parallel [config|check|analyze|suggest|enable|disable|auto-approve]"
+                ;;
+        esac
+        ;;
+    loop)
+        case "${2:-status}" in
+            status)
+                node "$SCRIPT_DIR/flow-loop-enforcer.js" status
+                ;;
+            stats)
+                node "$SCRIPT_DIR/flow-loop-enforcer.js" stats
+                ;;
+            can-exit)
+                node "$SCRIPT_DIR/flow-loop-enforcer.js" can-exit
+                ;;
+            enable)
+                node "$SCRIPT_DIR/flow-config-set.js" loops.enforced true
+                echo "Loop enforcement enabled (Ralph Wiggum mode)"
+                ;;
+            disable)
+                node "$SCRIPT_DIR/flow-config-set.js" loops.enforced false
+                ;;
+            *)
+                echo "Usage: flow loop [status|stats|can-exit|enable|disable]"
+                ;;
+        esac
+        ;;
+    skill)
+        case "${2:-list}" in
+            detect)
+                node "$SCRIPT_DIR/flow-skill-creator.js" detect
+                ;;
+            list)
+                node "$SCRIPT_DIR/flow-skill-creator.js" list
+                ;;
+            create)
+                if [ -z "$3" ]; then
+                    echo "Usage: flow skill create <framework>"
+                else
+                    node "$SCRIPT_DIR/flow-skill-creator.js" create "$3"
+                fi
+                ;;
+            *)
+                echo "Usage: flow skill [detect|list|create <name>]"
                 ;;
         esac
         ;;
@@ -570,7 +630,28 @@ case "${1:-}" in
         node "$SCRIPT_DIR/flow-log-manager.js" "${@:2}"
         ;;
     team)
-        node "$SCRIPT_DIR/flow-team.js" "${@:2}"
+        case "${2:-status}" in
+            sync-status)
+                node "$SCRIPT_DIR/flow-team-sync.js" status
+                ;;
+            sync-init)
+                if [ -z "$3" ]; then
+                    echo "Usage: flow team sync-init <team-id>"
+                else
+                    node "$SCRIPT_DIR/flow-team-sync.js" init "$3"
+                fi
+                ;;
+            sync-payload)
+                node "$SCRIPT_DIR/flow-team-sync.js" payload
+                ;;
+            project-id)
+                node "$SCRIPT_DIR/flow-team-sync.js" project-id
+                ;;
+            *)
+                # Delegate to original team handler for other commands
+                node "$SCRIPT_DIR/flow-team.js" "${@:2}"
+                ;;
+        esac
         ;;
     prd)
         node "$SCRIPT_DIR/flow-prd-manager.js" "${@:2}"

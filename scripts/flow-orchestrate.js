@@ -55,6 +55,14 @@ const { getPromptAdjustments, recordModelResult } = require('./flow-model-adapte
 // Import response parser for error recovery
 const { parseOnRetry, cleanCodeBlock } = require('./flow-response-parser');
 
+// Import pattern enforcer for active learning enforcement
+const {
+  injectPatterns,
+  extractRelevantPatterns,
+  validateAgainstPatterns,
+  generateSessionSummary
+} = require('./flow-pattern-enforcer');
+
 // ============================================================
 // Configuration
 // ============================================================
@@ -3347,6 +3355,15 @@ class Orchestrator {
       log('red', `   ❌ Template error: ${e.message}`);
       return result;
     }
+
+    // INJECT ACTIVE PATTERNS from decisions.md, app-map.md, and skills
+    // This ensures learned patterns are prominently displayed and enforced
+    const taskContext = {
+      description: step.description || params.task || '',
+      file: step.params?.path || step.file || '',
+      action: step.action || templateName
+    };
+    prompt = injectPatterns(prompt, taskContext, PROJECT_ROOT);
 
     // PREPEND PROJECT CONTEXT - Local LLM tokens are FREE
     // This gives the LLM comprehensive knowledge about types, theme, patterns

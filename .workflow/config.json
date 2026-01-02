@@ -5,6 +5,8 @@
     "strictMode": true,
     "requireTaskForImplementation": true,
     "requireStoryForMediumTasks": true,
+    "requirePatternCitation": false,
+    "citationFormat": "// Pattern: {pattern}",
     "taskSizeThresholds": {
       "small": { "maxFiles": 3, "maxHours": 1 },
       "medium": { "maxFiles": 10, "maxHours": 4 },
@@ -29,17 +31,22 @@
   },
   "loops": {
     "enabled": true,
+    "enforced": false,
     "maxRetries": 5,
     "maxIterations": 20,
     "commitEvery": 3,
-    "pauseBetweenScenarios": false
+    "pauseBetweenScenarios": false,
+    "blockExitUntilComplete": false
   },
   "parallel": {
     "enabled": true,
     "maxConcurrent": 3,
     "autoApprove": false,
     "requireWorktree": true,
-    "showProgress": true
+    "showProgress": true,
+    "autoDetect": true,
+    "autoSuggest": true,
+    "minTasksForParallel": 2
   },
   "corrections": {
     "mode": "inline",
@@ -124,7 +131,26 @@
       "onCompact": true
     },
     "minCorrectionsToLearn": 1,
-    "autoCreateSkills": "ask"
+    "autoCreateSkills": "ask",
+    "autoDetectFrameworks": true,
+    "frameworkDetectionPatterns": {
+      "nestjs": ["*.module.ts", "*.controller.ts", "*.service.ts", "@nestjs/*"],
+      "react": ["*.tsx", "*.jsx", "use*.ts", "react", "react-dom"],
+      "vue": ["*.vue", "vue", "@vue/*"],
+      "angular": ["*.component.ts", "*.module.ts", "@angular/*"],
+      "fastapi": ["main.py", "fastapi", "pydantic"],
+      "django": ["manage.py", "django", "settings.py"],
+      "express": ["app.js", "express", "router.js"]
+    },
+    "officialDocsUrls": {
+      "nestjs": "https://docs.nestjs.com",
+      "react": "https://react.dev",
+      "vue": "https://vuejs.org/guide",
+      "angular": "https://angular.io/docs",
+      "fastapi": "https://fastapi.tiangolo.com",
+      "django": "https://docs.djangoproject.com",
+      "express": "https://expressjs.com/en/guide"
+    }
   },
   "componentIndex": {
     "autoScan": true,
@@ -357,10 +383,16 @@
     "teamId": null,
     "userId": null,
     "setupId": null,
+    "projectId": null,
     "apiKey": null,
     "backendUrl": "https://api.wogi-flow.com",
     "syncInterval": 300000,
     "autoSync": true,
+    "projectScope": true,
+    "syncDecisions": true,
+    "syncAppMap": true,
+    "syncSkillLearnings": true,
+    "conflictResolution": "newest-wins",
     "aws": {
       "apiEndpoint": "https://slbche87zj.execute-api.eu-west-1.amazonaws.com/v1",
       "cognitoUserPool": "eu-west-1_RnQtfENnx",
