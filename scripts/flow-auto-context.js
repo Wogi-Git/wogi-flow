@@ -109,6 +109,21 @@ function extractKeywords(description) {
 function inferTaskType(keywords) {
   const allKeywords = [...keywords.high, ...keywords.medium, ...keywords.actions].map(k => k.toLowerCase());
 
+  // PRIORITY 1: Check for action keywords first (fix, refactor take precedence)
+  // These override noun-based detection since "refactor auth service" should be refactor, not create-service
+
+  // Check for fix/bug keywords
+  if (allKeywords.some(k => ['fix', 'bug', 'issue', 'error', 'broken'].includes(k))) {
+    return 'fix-bug';
+  }
+
+  // Check for refactor keywords
+  if (allKeywords.some(k => ['refactor', 'cleanup', 'optimize', 'improve', 'reorganize'].includes(k))) {
+    return 'refactor';
+  }
+
+  // PRIORITY 2: Check for creation patterns (create/add/new + noun)
+
   // Check for component-related keywords
   if (allKeywords.some(k => ['component', 'button', 'form', 'modal', 'card', 'dialog', 'page', 'view', 'ui'].includes(k))) {
     if (allKeywords.includes('create') || allKeywords.includes('add') || allKeywords.includes('new')) {
@@ -118,7 +133,21 @@ function inferTaskType(keywords) {
   }
 
   // Check for hook-related keywords
-  if (allKeywords.some(k => k.startsWith('use') || k === 'hook' || k === 'state' || k === 'effect')) {
+  // Common React hooks (lowercase, as keywords are lowercased)
+  const reactHooks = ['usestate', 'useeffect', 'usecontext', 'usereducer', 'usecallback',
+    'usememo', 'useref', 'useimperativehandle', 'uselayouteffect', 'usedebugvalue',
+    'usetransition', 'usedeferredvalue', 'useid', 'usesyncexternalstore', 'useinsertioneffect'];
+  const isHookKeyword = (k) => {
+    if (k === 'hook' || k === 'state' || k === 'effect') return true;
+    // Match known React hooks
+    if (reactHooks.includes(k)) return true;
+    // Match custom hooks: useXyz where it's not a common word like "user", "used", "useful"
+    if (k.startsWith('use') && k.length > 4 && !['user', 'used', 'uses', 'useful'].includes(k)) {
+      return true;
+    }
+    return false;
+  };
+  if (allKeywords.some(isHookKeyword)) {
     if (allKeywords.includes('create') || allKeywords.includes('add') || allKeywords.includes('new')) {
       return 'create-hook';
     }
@@ -127,17 +156,10 @@ function inferTaskType(keywords) {
 
   // Check for service/API keywords
   if (allKeywords.some(k => ['api', 'service', 'fetch', 'request', 'endpoint'].includes(k))) {
-    return 'create-service';
-  }
-
-  // Check for fix/bug keywords
-  if (allKeywords.some(k => ['fix', 'bug', 'issue', 'error', 'broken'].includes(k))) {
-    return 'fix-bug';
-  }
-
-  // Check for refactor keywords
-  if (allKeywords.some(k => ['refactor', 'cleanup', 'optimize', 'improve'].includes(k))) {
-    return 'refactor';
+    if (allKeywords.includes('create') || allKeywords.includes('add') || allKeywords.includes('new')) {
+      return 'create-service';
+    }
+    return 'modify-service';
   }
 
   return 'generic';
@@ -719,6 +741,8 @@ module.exports = {
   searchComponentIndex,
   grepCodebase,
   searchRelatedTasks,
+  searchWithAstGrep,
+  inferTaskType,
   getAutoContext,
   formatAutoContext
 };
