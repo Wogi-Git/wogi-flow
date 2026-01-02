@@ -256,12 +256,12 @@ create_structure() {
 # Generate config.json
 generate_config() {
     echo -e "${CYAN}Generating configuration...${NC}"
-    
+
     cat > "$WORKFLOW_DIR/config.json" << EOF
 {
-  "version": "1.2",
+  "version": "1.8",
   "projectName": "$PROJECT_NAME",
-  
+
   "workflow": {
     "planningStyle": "$PLANNING_STYLE",
     "agentStructure": "$AGENT_STRUCTURE"
@@ -279,21 +279,21 @@ generate_config() {
     "mode": "$CORRECTION_MODE",
     "detailPath": ".workflow/corrections"
   },
-  
+
   "phases": {
     "enabled": $([ "$PLANNING_STYLE" = "phase-based" ] && echo "true" || echo "false"),
     "definitions": []
   },
-  
+
   "mandatorySteps": {
     "afterTask": [],
     "beforeCommit": [],
     "onSessionEnd": ["updateRequestLog", "updateAppMap"]
   },
-  
+
   "autoLog": true,
   "autoUpdateAppMap": true,
-  
+
   "qualityGates": {
     "feature": {
       "require": ["tests", "appMapUpdate", "requestLogEntry"],
@@ -308,15 +308,15 @@ generate_config() {
       "optional": ["review"]
     }
   },
-  
+
   "strictMode": {
     "verificationChecklist": $STRICT_VERIFICATION,
     "correctionReportsOnFail": $STRICT_CORRECTIONS,
     "featureReportsOnComplete": $STRICT_REPORTS
   },
-  
+
   "requireApproval": [],
-  
+
   "componentRules": {
     "preferVariants": true,
     "requireAppMapEntry": true,
@@ -324,18 +324,18 @@ generate_config() {
     "autoGenerateStorybook": $ENABLE_STORYBOOK,
     "storybookPath": "src/stories"
   },
-  
+
   "testing": {
     "runAfterTask": false,
     "runBeforeCommit": $ENABLE_HOOKS,
     "browserTests": false,
     "browserTestUrl": "http://localhost:3000"
   },
-  
+
   "hooks": {
     "preCommit": $ENABLE_HOOKS
   },
-  
+
   "skills": {
     "installed": []
   },
@@ -376,10 +376,165 @@ generate_config() {
   "agents": {
     "enabled": ["orchestrator", "story-writer", "developer", "reviewer", "tester"],
     "optional": ["accessibility", "security", "performance", "docs", "design-system", "onboarding"]
+  },
+
+  "parallel": {
+    "enabled": false,
+    "maxConcurrent": 3,
+    "autoApprove": false,
+    "requireWorktree": true,
+    "showProgress": true
+  },
+
+  "skillLearning": {
+    "enabled": true,
+    "triggerOn": ["preCommit", "sessionEnd", "taskComplete"],
+    "minChangesForTrigger": 1
+  },
+
+  "figmaAnalyzer": {
+    "enabled": false,
+    "thresholds": {
+      "exactMatch": 95,
+      "strongMatch": 80,
+      "variantCandidate": 60
+    },
+    "componentDirs": ["src/components", "components"],
+    "mcpServer": {
+      "port": 3847,
+      "autoStart": false
+    }
+  },
+
+  "worktree": {
+    "enabled": false,
+    "autoCleanupHours": 24,
+    "keepOnFailure": false,
+    "squashOnMerge": true
+  },
+
+  "hybrid": {
+    "enabled": false,
+    "provider": null,
+    "providerEndpoint": null,
+    "model": null,
+    "settings": {
+      "temperature": 0.7,
+      "maxTokens": 4096,
+      "maxRetries": 2,
+      "timeout": 120000,
+      "autoExecute": false
+    }
+  },
+
+  "multiApproach": {
+    "enabled": true,
+    "triggers": {
+      "patterns": ["complex", "multiple ways", "tricky", "optimization"],
+      "manualOnly": false
+    },
+    "validation": {
+      "runTests": true,
+      "checkTypes": true,
+      "requireAllPass": false
+    }
+  },
+
+  "autoContext": {
+    "enabled": true,
+    "maxFiles": 10,
+    "searchDepth": 3,
+    "includeTests": false,
+    "showLoadedFiles": true
+  },
+
+  "metrics": {
+    "enabled": true,
+    "trackCommands": true,
+    "retentionDays": 30,
+    "problemThreshold": 0.3
+  },
+
+  "security": {
+    "scanOnCommit": false,
+    "blockSecrets": true,
+    "allowedPatterns": []
+  },
+
+  "modelAdapters": {
+    "enabled": true,
+    "trackResults": true,
+    "learnFromErrors": true
+  },
+
+  "codebaseInsights": {
+    "enabled": true,
+    "regenerateOnMajorChanges": true,
+    "includeArchitecture": true,
+    "includeConventions": true,
+    "includeStatistics": true
+  },
+
+  "lsp": {
+    "enabled": false,
+    "useForNavigation": true,
+    "useForCompletion": true
+  },
+
+  "contextMonitor": {
+    "enabled": true,
+    "warnAt": 0.7,
+    "criticalAt": 0.85,
+    "checkOnSessionStart": true,
+    "checkAfterTask": true
+  },
+
+  "requestLog": {
+    "autoArchive": true,
+    "maxRecentEntries": 50,
+    "keepRecent": 30,
+    "createSummary": true
+  },
+
+  "sessionState": {
+    "enabled": true,
+    "autoRestore": true,
+    "maxGapHours": 24,
+    "trackFiles": true,
+    "trackDecisions": true
+  },
+
+  "team": {
+    "enabled": false,
+    "teamId": null,
+    "userId": null,
+    "setupId": null,
+    "backendUrl": null,
+    "syncInterval": 300000,
+    "autoSync": true
+  },
+
+  "memory": {
+    "enabled": true,
+    "localDb": ".workflow/memory/local.db",
+    "embeddingModel": "Xenova/all-MiniLM-L6-v2",
+    "maxLocalFacts": 1000
+  },
+
+  "knowledgeRouting": {
+    "autoDetect": true,
+    "confirmWithUser": true,
+    "defaultScope": "local"
+  },
+
+  "prd": {
+    "enabled": false,
+    "maxContextTokens": 2000,
+    "chunkSize": 500
   }
 }
 EOF
-    
+
     echo -e "${GREEN}✓${NC} Configuration generated"
 }
 

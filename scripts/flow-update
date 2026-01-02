@@ -278,6 +278,33 @@ print_completion() {
 
     # Show features based on new version
     case "$new_version" in
+        1.8.*)
+            echo -e "${BOLD}New in v1.8:${NC}"
+            echo "  - MCP Memory Server with semantic search"
+            echo "  - Knowledge Router for auto-detect + confirm routing"
+            echo "  - Team collaboration features (requires subscription)"
+            echo "  - PRD storage and contextual retrieval"
+            echo "  - Model-specific learnings storage"
+            echo "  - Skill and project decision routing"
+            echo ""
+            echo -e "${BOLD}New commands:${NC}"
+            echo "  - /wogi-memory search <query>"
+            echo "  - /wogi-knowledge-route <text>"
+            echo "  - flow memory / flow memory-server"
+            ;;
+        1.7.*)
+            echo -e "${BOLD}New in v1.7:${NC}"
+            echo "  - Context monitor with auto-compact warnings"
+            echo "  - Request log auto-archiving with summaries"
+            echo "  - Session state persistence and restore"
+            echo "  - Memory blocks in progress.md for fast resume"
+            echo "  - Log manager for predictable log sizes"
+            echo ""
+            echo -e "${BOLD}Config additions:${NC}"
+            echo "  - contextMonitor: warn at 70%, critical at 85%"
+            echo "  - requestLog: auto-archive when >50 entries"
+            echo "  - sessionState: auto-restore within 24h"
+            ;;
         1.6.*)
             echo -e "${BOLD}New in v1.6:${NC}"
             echo "  - Template {{#if}} conditionals now work properly"
