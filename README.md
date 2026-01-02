@@ -1,4 +1,4 @@
-# Wogi Flow v1.7
+# Wogi Flow v1.8
 
 A self-improving AI development workflow that learns from your feedback and accumulates knowledge over time.
 
@@ -6,6 +6,11 @@ A self-improving AI development workflow that learns from your feedback and accu
 
 | Feature                   | Description                                                                                 |
 | ------------------------- | ------------------------------------------------------------------------------------------- |
+| **Pattern Enforcement**   | Active pattern injection from decisions.md/app-map.md into prompts with citation validation |
+| **Loop Enforcement**      | "Ralph Wiggum mode" - blocks exit until all acceptance criteria pass                        |
+| **Parallel Auto-Detect**  | Automatically detects and suggests parallel task execution                                  |
+| **Skill Auto-Creation**   | Detects frameworks and generates skills from official documentation                         |
+| **Project-Based Sync**    | Team sync at project scope - decisions.md, app-map.md, skills shared across team            |
 | **Safety Guardrails**     | Bounded execution with file/command permissions and checkpoint intervals                    |
 | **Verification Gates**    | Structured gate results with auto-feed stderr for LLM self-healing                          |
 | **Execution Traces**      | JSONL event logging with artifact timeline for full run history                             |
@@ -80,7 +85,12 @@ Daily commands for working with Wogi Flow. Start with `/wogi-ready` to see tasks
 
 ## Table of Contents
 
-- [Safety & Verification (New in v1.6)](#safety--verification-new-in-v16)
+- [Pattern Enforcement (New in v1.8)](#pattern-enforcement-new-in-v18)
+- [Loop Enforcement (New in v1.8)](#loop-enforcement-new-in-v18)
+- [Parallel Auto-Detection (New in v1.8)](#parallel-auto-detection-new-in-v18)
+- [Skill Auto-Creation (New in v1.8)](#skill-auto-creation-new-in-v18)
+- [Project-Based Team Sync (New in v1.8)](#project-based-team-sync-new-in-v18)
+- [Safety & Verification](#safety--verification)
 - [Execution Traces & Checkpoints](#execution-traces--checkpoints)
 - [Diff-First Output](#diff-first-output)
 - [Cloud Model Providers](#cloud-model-providers)
@@ -101,7 +111,300 @@ Daily commands for working with Wogi Flow. Start with `/wogi-ready` to see tasks
 
 ---
 
-## Safety & Verification (New in v1.6)
+## Pattern Enforcement (New in v1.8)
+
+Active pattern injection ensures the AI uses your established patterns from `decisions.md` and `app-map.md`.
+
+### How It Works
+
+```
+┌─────────────┐     ┌─────────────────┐     ┌─────────────┐
+│ decisions.md│ ──▶ │ Extract Patterns│ ──▶ │  Inject to  │
+│  app-map.md │     │  & Components   │     │   Prompt    │
+└─────────────┘     └─────────────────┘     └─────────────┘
+                                                   │
+                                                   ▼
+                                            ┌─────────────┐
+                                            │   Validate  │
+                                            │  Citations  │
+                                            └─────────────┘
+```
+
+### Configuration
+
+```json
+{
+  "enforcement": {
+    "requirePatternCitation": true,
+    "citationFormat": "// Pattern: {pattern}"
+  }
+}
+```
+
+### Commands
+
+```bash
+./scripts/flow pattern status      # Show active patterns
+./scripts/flow pattern inject      # Preview injected context
+./scripts/flow pattern validate    # Check citation compliance
+```
+
+When enabled, the AI must cite patterns from `decisions.md` when applying them:
+
+```javascript
+// Pattern: Helper functions in src/utils/helpers/
+export function formatDate(date) { ... }
+```
+
+---
+
+## Loop Enforcement (New in v1.8)
+
+"Ralph Wiggum Mode" - prevents exiting tasks until all acceptance criteria pass.
+
+### How It Works
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Start     │ ──▶ │ Acceptance  │ ──▶ │  Verify     │
+│   Task      │     │   Criteria  │     │   Each      │
+└─────────────┘     └─────────────┘     └─────────────┘
+                                               │
+                          ┌────────────────────┼────────────────────┐
+                          ▼                    ▼                    ▼
+                    ┌──────────┐         ┌──────────┐         ┌──────────┐
+                    │  ✅ Pass  │         │  ❌ Fail  │         │  ⏭ Skip  │
+                    │  → Next  │         │  → Retry │         │→ Approval│
+                    └──────────┘         └──────────┘         └──────────┘
+```
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| **requireVerification** | Must verify each criterion before marking complete |
+| **blockOnSkip** | Cannot skip criteria without explicit approval |
+| **blockExitUntilComplete** | Cannot exit loop until all criteria pass or max retries |
+| **maxIterations** | Safety limit to prevent infinite loops |
+
+### Configuration
+
+```json
+{
+  "loops": {
+    "enabled": true,
+    "enforced": true,
+    "requireVerification": true,
+    "blockOnSkip": true,
+    "blockExitUntilComplete": true,
+    "maxRetries": 5,
+    "maxIterations": 20
+  }
+}
+```
+
+### Commands
+
+```bash
+./scripts/flow loop status        # Show active loop session
+./scripts/flow loop stats         # Show loop statistics
+./scripts/flow loop can-exit      # Check if exit is allowed
+./scripts/flow loop enable        # Enable enforcement
+./scripts/flow loop disable       # Disable enforcement
+```
+
+---
+
+## Parallel Auto-Detection (New in v1.8)
+
+Automatically detects when tasks can run in parallel and suggests optimal execution.
+
+### How It Works
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Tasks     │ ──▶ │  Analyze    │ ──▶ │  Suggest    │
+│   Queue     │     │Dependencies │     │  Parallel   │
+└─────────────┘     └─────────────┘     └─────────────┘
+                                               │
+                                    ┌──────────┴──────────┐
+                                    ▼                     ▼
+                              ┌──────────┐          ┌──────────┐
+                              │ Execute  │          │  User    │
+                              │Parallel  │          │ Approval │
+                              └──────────┘          └──────────┘
+```
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| **autoDetect** | Automatically analyze tasks for parallel potential |
+| **autoSuggest** | Show recommendation when parallel execution is possible |
+| **autoExecute** | Execute in parallel automatically (no approval needed) |
+| **minTasksForParallel** | Minimum task count to trigger detection |
+
+### Configuration
+
+```json
+{
+  "parallel": {
+    "enabled": true,
+    "autoDetect": true,
+    "autoSuggest": true,
+    "autoExecute": false,
+    "minTasksForParallel": 2,
+    "maxConcurrent": 3
+  }
+}
+```
+
+### Commands
+
+```bash
+./scripts/flow parallel analyze   # Analyze pending tasks
+./scripts/flow parallel suggest   # Check if suggestion is available
+./scripts/flow parallel config    # Show configuration
+./scripts/flow parallel enable    # Enable parallel execution
+./scripts/flow parallel disable   # Disable parallel execution
+```
+
+### Example Output
+
+```
+╔══════════════════════════════════════════════════════╗
+║         🔀 PARALLEL EXECUTION AVAILABLE              ║
+╠══════════════════════════════════════════════════════╣
+║  3 of 5 tasks can run in parallel                    ║
+║  Estimated time savings: ~60%                        ║
+╠══════════════════════════════════════════════════════╣
+║  Parallelizable tasks:                               ║
+║    • TASK-012: Add forgot password link              ║
+║    • TASK-015: User profile page                     ║
+║    • TASK-018: Settings modal                        ║
+╚══════════════════════════════════════════════════════╝
+```
+
+---
+
+## Skill Auto-Creation (New in v1.8)
+
+Automatically detects frameworks in your project and generates skills from official documentation.
+
+### How It Works
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│ package.json│ ──▶ │   Detect    │ ──▶ │   Fetch     │
+│  + Files    │     │ Frameworks  │     │ Official Doc│
+└─────────────┘     └─────────────┘     └─────────────┘
+                                               │
+                                               ▼
+                                         ┌──────────┐
+                                         │ Generate │
+                                         │  Skill   │
+                                         └──────────┘
+```
+
+### Detected Frameworks
+
+| Framework | Detection Patterns |
+|-----------|-------------------|
+| NestJS | `*.module.ts`, `*.controller.ts`, `@nestjs/*` |
+| React | `*.tsx`, `*.jsx`, `use*.ts`, `react` |
+| Vue | `*.vue`, `vue`, `@vue/*` |
+| Angular | `*.component.ts`, `@angular/*` |
+| FastAPI | `main.py`, `fastapi`, `pydantic` |
+| Django | `manage.py`, `django`, `settings.py` |
+| Express | `app.js`, `express`, `router.js` |
+
+### Configuration
+
+```json
+{
+  "skillLearning": {
+    "autoDetectFrameworks": true,
+    "fetchOfficialDocs": true,
+    "autoCreateSkills": "ask",
+    "frameworkDetectionPatterns": { ... },
+    "officialDocsUrls": {
+      "nestjs": "https://docs.nestjs.com",
+      "react": "https://react.dev",
+      ...
+    }
+  }
+}
+```
+
+### Commands
+
+```bash
+./scripts/flow skill detect       # Detect frameworks
+./scripts/flow skill list         # List installed skills
+./scripts/flow skill create <name># Create new skill
+./scripts/flow skill-learn        # Extract learnings
+```
+
+---
+
+## Project-Based Team Sync (New in v1.8)
+
+Sync workflow files at project scope - share decisions, patterns, and knowledge across your team.
+
+### What Gets Synced
+
+| Resource | Description | Sync Mode |
+|----------|-------------|-----------|
+| `decisions.md` | Coding rules and patterns | Full sync |
+| `app-map.md` | Component registry | Full sync |
+| `component-index.json` | Auto-generated index | Full sync |
+| `skills/*/knowledge/` | Skill learnings | Full sync |
+| Memory facts | Local database facts | Export to JSON |
+| `request-log.md` | Activity history | Recent entries only |
+| Tasks | Task queue | Optional |
+
+### Configuration
+
+```json
+{
+  "team": {
+    "enabled": true,
+    "projectScope": true,
+    "conflictResolution": "newest-wins",
+    "sync": {
+      "decisions": true,
+      "appMap": true,
+      "componentIndex": true,
+      "skills": true,
+      "memory": true,
+      "requestLog": "recent",
+      "tasks": false
+    }
+  }
+}
+```
+
+### Conflict Resolution Strategies
+
+| Strategy | Description |
+|----------|-------------|
+| `newest-wins` | Latest change wins (default) |
+| `remote-wins` | Server version always wins |
+| `local-wins` | Local version always wins |
+| `merge` | Attempt to merge changes |
+
+### Commands
+
+```bash
+./scripts/flow team sync-status   # Show sync status
+./scripts/flow team sync-init     # Initialize project sync
+./scripts/flow team project-id    # Show/set project ID
+./scripts/flow team sync          # Sync local → remote
+```
+
+---
+
+## Safety & Verification
 
 Enterprise-grade safety guardrails and verification gates for reliable AI-assisted development.
 
@@ -876,6 +1179,24 @@ flow trace list                 # List traces
 flow skill-learn                # Extract learnings
 flow skill-create <name>        # Create skill
 flow skill-create --list        # List skills
+flow skill detect               # Detect frameworks (v1.8)
+flow skill list                 # List installed skills (v1.8)
+
+# Loop Enforcement (v1.8)
+flow loop status                # Show active loop session
+flow loop stats                 # Show loop statistics
+flow loop can-exit              # Check if exit is allowed
+flow loop enable                # Enable enforcement
+flow loop disable               # Disable enforcement
+
+# Parallel Detection (v1.8)
+flow parallel analyze           # Analyze tasks for parallel potential
+flow parallel suggest           # Check if suggestion available
+
+# Team Sync (v1.8)
+flow team sync-status           # Show project sync status
+flow team sync-init             # Initialize project sync
+flow team project-id            # Show/set project ID
 
 # Hybrid Mode
 flow hybrid enable              # Enable with wizard
@@ -1043,6 +1364,17 @@ After 3+ similar corrections → Claude suggests promoting to permanent instruct
 ---
 
 ## Changelog
+
+### v1.8.0 - Pattern Enforcement & Team Sync
+
+- **Pattern Enforcement**: Active pattern injection from decisions.md/app-map.md into prompts with citation validation
+- **Loop Enforcement**: "Ralph Wiggum Mode" - blocks exit until all acceptance criteria pass, requireVerification, blockOnSkip
+- **Parallel Auto-Detection**: Automatically detects parallelizable tasks with autoSuggest and autoExecute options
+- **Skill Auto-Creation**: Detects frameworks from package.json and file patterns, fetches official documentation
+- **Project-Based Team Sync**: Sync decisions.md, app-map.md, component-index, skills, and memory facts across team
+- **Memory Export**: Schema-aware SQLite export for memory facts synchronization
+- **Conflict Resolution**: Configurable strategies (newest-wins, remote-wins, local-wins, merge)
+- **New commands**: `flow loop`, `flow parallel [analyze|suggest]`, `flow skill [detect|list]`, `flow team [sync-status|sync-init|project-id]`
 
 ### v1.7.0 - Team Backend
 
