@@ -37,6 +37,9 @@ const {
 // Use shared database for proposals
 const memoryDb = require('./flow-memory-db');
 
+// Decisions file path
+const DECISIONS_PATH = path.join(STATE_DIR, 'decisions.md');
+
 // ============================================================
 // Constants
 // ============================================================
@@ -329,6 +332,129 @@ function inferOperationType(endpoint) {
 }
 
 // ============================================================
+// Auto-Apply Approved Proposals (v1.8.0)
+// ============================================================
+
+/**
+ * Apply approved team proposals to local decisions.md
+ */
+async function applyApprovedProposals(approvedProposals) {
+  if (!approvedProposals || approvedProposals.length === 0) return { applied: 0 };
+
+  // Load current decisions.md
+  let decisionsContent = '';
+  if (fileExists(DECISIONS_PATH)) {
+    decisionsContent = readFile(DECISIONS_PATH);
+  } else {
+    decisionsContent = '# Decisions\n\nProject coding rules and patterns.\n\n';
+  }
+
+  let applied = 0;
+  let currentContent = decisionsContent;
+
+  for (const proposal of approvedProposals) {
+    // Check if already in decisions.md
+    if (isRuleInDecisions(proposal.rule, currentContent)) {
+      continue;
+    }
+
+    // Format and add to decisions.md
+    const formatted = formatProposalForDecisions(proposal);
+    currentContent = appendToDecisions(formatted, currentContent);
+    applied++;
+
+    // Mark as applied in local memory
+    try {
+      await memoryDb.markFactPromoted(`proposal:${proposal.id}`, 'decisions.md');
+    } catch (e) {
+      // Ignore if fact doesn't exist locally
+    }
+  }
+
+  if (applied > 0) {
+    writeFile(DECISIONS_PATH, currentContent);
+  }
+
+  return { applied };
+}
+
+/**
+ * Check if rule is already in decisions.md
+ */
+function isRuleInDecisions(rule, content) {
+  const keywords = rule.split(/\s+/)
+    .filter(w => w.length > 4)
+    .slice(0, 5);
+
+  let matches = 0;
+  for (const keyword of keywords) {
+    if (content.toLowerCase().includes(keyword.toLowerCase())) {
+      matches++;
+    }
+  }
+
+  return matches > keywords.length / 2;
+}
+
+/**
+ * Format proposal for decisions.md
+ */
+function formatProposalForDecisions(proposal) {
+  const sectionMap = {
+    'naming': 'Naming Conventions',
+    'pattern': 'Coding Patterns',
+    'architecture': 'Architecture Decisions',
+    'styling': 'Styling Rules',
+    'testing': 'Testing Conventions',
+    'error-handling': 'Error Handling',
+    'general': 'General Rules',
+    'api': 'API Patterns',
+    'component': 'Component Patterns'
+  };
+
+  return {
+    section: sectionMap[proposal.category] || 'Team-Approved Rules',
+    rule: `- ${proposal.rule}`,
+    source: '(Team-approved)'
+  };
+}
+
+/**
+ * Append formatted rule to decisions.md content
+ */
+function appendToDecisions(formatted, content) {
+  const lines = content.split('\n');
+  let sectionIndex = -1;
+
+  // Find the section
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes(formatted.section) && lines[i].startsWith('#')) {
+      sectionIndex = i;
+      break;
+    }
+  }
+
+  if (sectionIndex === -1) {
+    // Section doesn't exist, append at end
+    return content.trim() + `\n\n## ${formatted.section}\n\n${formatted.rule} ${formatted.source}\n`;
+  }
+
+  // Find end of section (next heading or end of file)
+  let insertIndex = lines.length;
+  for (let i = sectionIndex + 1; i < lines.length; i++) {
+    if (lines[i].startsWith('#')) {
+      insertIndex = i;
+      break;
+    }
+  }
+
+  // Insert before next section
+  lines.splice(insertIndex, 0, `${formatted.rule} ${formatted.source}`);
+
+  return lines.join('\n');
+}
+
+// ============================================================
 // Team Commands
 // ============================================================
 
@@ -547,18 +673,39 @@ async function sync(options = {}) {
     }
   }
 
+  // 4. Pull approved proposals and auto-apply to decisions.md (v1.8.0)
+  let appliedProposals = 0;
+  const config = getConfig();
+  const autoApply = config.automaticPromotion?.autoApplyTeamApproved !== false;
+
+  if (autoApply) {
+    const approvedResult = await apiRequest(`/teams/${state.teamId}/proposals?status=approved&since=${state.lastSync || ''}`);
+
+    if (!approvedResult.error && approvedResult.proposals && approvedResult.proposals.length > 0) {
+      const applyResult = await applyApprovedProposals(approvedResult.proposals);
+      appliedProposals = applyResult.applied;
+
+      if (!silent && appliedProposals > 0) {
+        success(`Applied ${appliedProposals} team-approved rule(s) to decisions.md`);
+      }
+    }
+  }
+
   // Update last sync time
   state.lastSync = new Date().toISOString();
   saveTeamState(state);
 
   if (!silent) {
     success(`Sync complete: ${pulled} pulled, ${pushed} pushed`);
+    if (appliedProposals > 0) {
+      info(`${appliedProposals} approved rule(s) added to decisions.md`);
+    }
     if (queueResult.remaining > 0) {
       warn(`${queueResult.remaining} operations still queued (will retry)`);
     }
   }
 
-  return { pulled, pushed };
+  return { pulled, pushed, appliedProposals };
 }
 
 /**

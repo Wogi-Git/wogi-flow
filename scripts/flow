@@ -189,6 +189,13 @@ show_help() {
     echo "  memory search <query>  Search stored facts"
     echo "  memory stats           Show memory statistics"
     echo "  memory-server          Start MCP memory server"
+    echo "  entropy                Show memory entropy stats"
+    echo "  entropy --auto         Auto-compact if entropy high"
+    echo "  entropy --history      Show entropy history"
+    echo "  compact-memory         Run full memory compaction"
+    echo "  compact-memory --preview Show what would be affected"
+    echo "  memory-sync            Check patterns for promotion"
+    echo "  memory-sync --auto     Auto-promote to decisions.md"
     echo "  knowledge-route <text> Detect route for a learning"
     echo "  knowledge-route store  Store a learning with route"
     echo "  log-manager status     Show request-log statistics"
@@ -517,6 +524,15 @@ case "${1:-}" in
     memory-server)
         echo "Starting MCP Memory Server..."
         node "$PROJECT_ROOT/mcp-memory-server/index.js"
+        ;;
+    entropy)
+        node "$SCRIPT_DIR/flow-entropy-monitor.js" "${@:2}"
+        ;;
+    compact-memory)
+        node "$SCRIPT_DIR/flow-memory-compactor.js" "${@:2}"
+        ;;
+    memory-sync)
+        node "$SCRIPT_DIR/flow-memory-sync.js" "${@:2}"
         ;;
     knowledge-route)
         case "${2:-}" in

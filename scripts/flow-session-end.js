@@ -31,6 +31,14 @@ const { resetSessionContext, getSessionContext, writeMemoryBlocks, readMemoryBlo
 const { saveSessionSummary, loadSessionState } = require('./flow-session-state');
 const { autoArchiveIfNeeded, getLogStats } = require('./flow-log-manager');
 
+// v1.8.0 automatic memory management
+let memoryDb = null;
+try {
+  memoryDb = require('./flow-memory-db');
+} catch (e) {
+  // Memory module not available
+}
+
 /**
  * Prompt user for input
  */
@@ -247,6 +255,102 @@ function showContextHealthSummary() {
 }
 
 /**
+ * v1.8.0: Automatic memory management
+ * Part of automatic memory management for teams
+ */
+async function automaticMemoryManagement() {
+  if (!memoryDb) return;
+
+  const config = getConfig();
+  const memConfig = config.automaticMemory || {};
+
+  if (!memConfig.enabled) return;
+
+  console.log('');
+  console.log(color('yellow', 'Automatic memory management:'));
+
+  try {
+    // 1. Apply relevance decay
+    if (memConfig.relevanceDecay?.enabled !== false) {
+      const decayResult = await memoryDb.applyRelevanceDecay({
+        decayRate: memConfig.relevanceDecay?.decayRate || 0.033,
+        neverAccessedPenalty: memConfig.relevanceDecay?.neverAccessedPenalty || 0.1
+      });
+      if (decayResult.decayed > 0) {
+        console.log(`  Relevance decay: ${decayResult.decayed} facts updated`);
+      }
+    }
+
+    // 2. Check entropy and compact if needed
+    const memoryConfig = { maxLocalFacts: config.memory?.maxLocalFacts || 1000 };
+    const entropy = await memoryDb.getEntropyStats(memoryConfig);
+
+    const threshold = memConfig.entropyThreshold || 0.7;
+    const statusColor = entropy.status === 'healthy' ? 'green'
+      : entropy.status === 'moderate' ? 'yellow' : 'red';
+
+    console.log(`  Entropy: ${color(statusColor, entropy.entropy)} (${entropy.status})`);
+    console.log(`  Facts: ${entropy.totalFacts}/${entropy.maxFacts} | Cold: ${entropy.coldFacts}`);
+
+    if (entropy.needsCompaction && memConfig.compactOnSessionEnd) {
+      console.log(color('yellow', '  Auto-compacting memory...'));
+
+      // Demote low-relevance facts
+      const demotion = await memoryDb.demoteToColdStorage({
+        relevanceThreshold: memConfig.demotion?.relevanceThreshold || 0.3
+      });
+      if (demotion.demoted > 0) {
+        console.log(`    Demoted: ${demotion.demoted} facts`);
+      }
+
+      // Merge duplicates
+      const merge = await memoryDb.mergeSimilarFacts({ mergeSimilarityThreshold: 0.95 });
+      if (merge.merged > 0) {
+        console.log(`    Merged: ${merge.merged} duplicates`);
+      }
+
+      // Purge old cold facts
+      const purge = await memoryDb.purgeColdFacts({
+        coldRetentionDays: memConfig.demotion?.coldRetentionDays || 90
+      });
+      if (purge.purged > 0) {
+        console.log(`    Purged: ${purge.purged} old facts`);
+      }
+    }
+
+    // 3. Check for promotion candidates
+    const promoConfig = config.automaticPromotion || {};
+    if (promoConfig.enabled) {
+      const candidates = await memoryDb.getPromotionCandidates({
+        minRelevance: promoConfig.minRelevance || 0.8,
+        minAccessCount: promoConfig.threshold || 3
+      });
+
+      const unpromoted = candidates.filter(c => !c.promoted_to);
+      if (unpromoted.length > 0) {
+        console.log(`  ${color('cyan', `${unpromoted.length} pattern(s) ready for promotion`)}`);
+        if (!promoConfig.requireApproval) {
+          console.log('    Run: ./scripts/flow memory-sync --auto');
+        }
+      }
+    }
+
+    // 4. Record metric
+    await memoryDb.recordMemoryMetric('session_end');
+
+    success('Memory management complete');
+
+  } catch (e) {
+    if (process.env.DEBUG) console.error(`[DEBUG] Memory management: ${e.message}`);
+    warn('Memory management skipped');
+  } finally {
+    try {
+      memoryDb.closeDatabase();
+    } catch {}
+  }
+}
+
+/**
  * Show status summary
  */
 function showSummary() {
@@ -295,6 +399,9 @@ async function main() {
 
   // v1.7.0: Show context health
   showContextHealthSummary();
+
+  // v1.8.0: Automatic memory management
+  await automaticMemoryManagement();
 
   console.log('');
 

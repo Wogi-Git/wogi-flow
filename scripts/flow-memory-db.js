@@ -80,7 +80,48 @@ async function initDatabase() {
         embedding TEXT,
         source_context TEXT,
         created_at TEXT DEFAULT (datetime('now')),
-        updated_at TEXT DEFAULT (datetime('now'))
+        updated_at TEXT DEFAULT (datetime('now')),
+        last_accessed TEXT,
+        access_count INTEGER DEFAULT 0,
+        recall_count INTEGER DEFAULT 0,
+        relevance_score REAL DEFAULT 1.0,
+        promoted_to TEXT
+      )
+    `);
+
+    // Cold storage for demoted facts
+    db.run(`
+      CREATE TABLE IF NOT EXISTS facts_cold (
+        id TEXT PRIMARY KEY,
+        fact TEXT NOT NULL,
+        category TEXT,
+        scope TEXT DEFAULT 'local',
+        model TEXT,
+        embedding TEXT,
+        source_context TEXT,
+        created_at TEXT,
+        updated_at TEXT,
+        last_accessed TEXT,
+        access_count INTEGER DEFAULT 0,
+        recall_count INTEGER DEFAULT 0,
+        relevance_score REAL,
+        promoted_to TEXT,
+        archived_at TEXT DEFAULT (datetime('now')),
+        archive_reason TEXT
+      )
+    `);
+
+    // Memory metrics for tracking entropy over time
+    db.run(`
+      CREATE TABLE IF NOT EXISTS memory_metrics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TEXT DEFAULT (datetime('now')),
+        total_facts INTEGER,
+        cold_facts INTEGER,
+        entropy_score REAL,
+        avg_relevance REAL,
+        never_accessed INTEGER,
+        action_taken TEXT
       )
     `);
 
@@ -121,10 +162,25 @@ async function initDatabase() {
       )
     `);
 
+    // Migrate existing databases - add new columns if they don't exist
+    const migrations = [
+      'ALTER TABLE facts ADD COLUMN last_accessed TEXT',
+      'ALTER TABLE facts ADD COLUMN access_count INTEGER DEFAULT 0',
+      'ALTER TABLE facts ADD COLUMN recall_count INTEGER DEFAULT 0',
+      'ALTER TABLE facts ADD COLUMN relevance_score REAL DEFAULT 1.0',
+      'ALTER TABLE facts ADD COLUMN promoted_to TEXT'
+    ];
+    for (const migration of migrations) {
+      try { db.run(migration); } catch {}
+    }
+
     // Create indexes
     try { db.run('CREATE INDEX IF NOT EXISTS idx_facts_category ON facts(category)'); } catch {}
     try { db.run('CREATE INDEX IF NOT EXISTS idx_facts_scope ON facts(scope)'); } catch {}
     try { db.run('CREATE INDEX IF NOT EXISTS idx_facts_model ON facts(model)'); } catch {}
+    try { db.run('CREATE INDEX IF NOT EXISTS idx_facts_relevance ON facts(relevance_score)'); } catch {}
+    try { db.run('CREATE INDEX IF NOT EXISTS idx_facts_accessed ON facts(last_accessed)'); } catch {}
+    try { db.run('CREATE INDEX IF NOT EXISTS idx_facts_cold_archived ON facts_cold(archived_at)'); } catch {}
     try { db.run('CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status)'); } catch {}
     try { db.run('CREATE INDEX IF NOT EXISTS idx_prd_prd_id ON prd_chunks(prd_id)'); } catch {}
 
@@ -247,9 +303,9 @@ async function storeFact({ fact, category, scope, model, sourceContext }) {
 }
 
 /**
- * Search facts by similarity
+ * Search facts by similarity (with access tracking)
  */
-async function searchFacts({ query, category, model, scope, limit = 10 }) {
+async function searchFacts({ query, category, model, scope, limit = 10, trackAccess = true }) {
   await initDatabase();
   const queryEmbedding = await getEmbedding(query);
 
@@ -279,9 +335,28 @@ async function searchFacts({ query, category, model, scope, limit = 10 }) {
     return { ...f, similarity, embedding: undefined };
   }).sort((a, b) => b.similarity - a.similarity).slice(0, limit);
 
-  return ranked.map(({ id, fact, category, scope, model, similarity, created_at }) => ({
+  // Track access for returned facts (strategic forgetting support)
+  if (trackAccess && ranked.length > 0) {
+    for (const fact of ranked) {
+      // Boost relevance when recalled (max 1.0)
+      const newRelevance = Math.min(1.0, (fact.relevance_score || 0.5) + 0.1);
+      db.run(`
+        UPDATE facts SET
+          last_accessed = datetime('now'),
+          access_count = COALESCE(access_count, 0) + 1,
+          recall_count = COALESCE(recall_count, 0) + 1,
+          relevance_score = ?
+        WHERE id = ?
+      `, [newRelevance, fact.id]);
+    }
+    saveDatabase();
+  }
+
+  return ranked.map(({ id, fact, category, scope, model, similarity, created_at, relevance_score, access_count }) => ({
     id, fact, category, scope, model,
     relevance: Math.round(similarity * 100),
+    storedRelevance: Math.round((relevance_score || 1.0) * 100),
+    accessCount: access_count || 0,
     createdAt: created_at
   }));
 }
@@ -647,6 +722,285 @@ async function getStats() {
 }
 
 // ============================================================
+// Strategic Forgetting & Entropy
+// ============================================================
+
+/**
+ * Get entropy statistics for memory health
+ */
+async function getEntropyStats(config = {}) {
+  await initDatabase();
+  const maxFacts = config.maxLocalFacts || 1000;
+
+  function count(sql, params = []) {
+    const result = db.exec(sql, params);
+    if (!result.length || !result[0].values.length) return 0;
+    return result[0].values[0][0];
+  }
+
+  function avg(sql) {
+    const result = db.exec(sql);
+    if (!result.length || !result[0].values.length || result[0].values[0][0] === null) return 0;
+    return result[0].values[0][0];
+  }
+
+  const totalFacts = count('SELECT COUNT(*) FROM facts');
+  const coldFacts = count('SELECT COUNT(*) FROM facts_cold');
+  const neverAccessed = count('SELECT COUNT(*) FROM facts WHERE last_accessed IS NULL');
+  const avgRelevance = avg('SELECT AVG(relevance_score) FROM facts');
+  const avgAgeDays = avg(`
+    SELECT AVG(julianday('now') - julianday(created_at))
+    FROM facts
+  `);
+  const lowRelevanceCount = count('SELECT COUNT(*) FROM facts WHERE relevance_score < 0.3');
+
+  // Calculate entropy score (0-1, higher = needs cleanup)
+  const capacityRatio = Math.min(1, totalFacts / maxFacts);
+  const ageRatio = Math.min(1, avgAgeDays / 30);
+  const neverAccessedRatio = totalFacts > 0 ? neverAccessed / totalFacts : 0;
+  const lowRelevanceRatio = totalFacts > 0 ? lowRelevanceCount / totalFacts : 0;
+
+  const entropy = (
+    capacityRatio * 0.3 +
+    ageRatio * 0.2 +
+    neverAccessedRatio * 0.25 +
+    lowRelevanceRatio * 0.25
+  );
+
+  return {
+    totalFacts,
+    coldFacts,
+    maxFacts,
+    neverAccessed,
+    avgRelevance: Math.round(avgRelevance * 100) / 100,
+    avgAgeDays: Math.round(avgAgeDays * 10) / 10,
+    lowRelevanceCount,
+    entropy: Math.round(entropy * 1000) / 1000,
+    needsCompaction: entropy > 0.7,
+    status: entropy < 0.4 ? 'healthy' : entropy < 0.7 ? 'moderate' : 'needs_cleanup'
+  };
+}
+
+/**
+ * Apply relevance decay to facts (run daily or on session end)
+ */
+async function applyRelevanceDecay(config = {}) {
+  await initDatabase();
+  const decayRate = config.decayRate || 0.033; // ~1/30, decay over 30 days
+  const neverAccessedPenalty = config.neverAccessedPenalty || 0.1;
+
+  // Decay facts based on time since last access
+  db.run(`
+    UPDATE facts SET
+      relevance_score = MAX(0.1, relevance_score * (1.0 - ? * (julianday('now') - julianday(COALESCE(last_accessed, created_at)))))
+    WHERE last_accessed IS NOT NULL
+  `, [decayRate]);
+
+  // Faster decay for never-accessed facts (older than 7 days)
+  db.run(`
+    UPDATE facts SET
+      relevance_score = MAX(0.1, relevance_score - ?)
+    WHERE last_accessed IS NULL
+      AND julianday('now') - julianday(created_at) > 7
+  `, [neverAccessedPenalty]);
+
+  const changes = db.getRowsModified();
+  saveDatabase();
+
+  return { decayed: changes };
+}
+
+/**
+ * Demote low-relevance facts to cold storage
+ */
+async function demoteToColdStorage(config = {}) {
+  await initDatabase();
+  const relevanceThreshold = config.relevanceThreshold || 0.3;
+
+  // Find facts to demote (low relevance, not promoted anywhere)
+  const result = db.exec(`
+    SELECT * FROM facts
+    WHERE relevance_score < ?
+      AND (promoted_to IS NULL OR promoted_to = '')
+  `, [relevanceThreshold]);
+  const toDemote = queryToRows(result);
+
+  let demoted = 0;
+  for (const fact of toDemote) {
+    // Insert into cold storage
+    db.run(`
+      INSERT INTO facts_cold (id, fact, category, scope, model, embedding, source_context,
+        created_at, updated_at, last_accessed, access_count, recall_count,
+        relevance_score, promoted_to, archived_at, archive_reason)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 'low_relevance')
+    `, [fact.id, fact.fact, fact.category, fact.scope, fact.model, fact.embedding,
+        fact.source_context, fact.created_at, fact.updated_at, fact.last_accessed,
+        fact.access_count, fact.recall_count, fact.relevance_score, fact.promoted_to]);
+
+    // Delete from active facts
+    db.run('DELETE FROM facts WHERE id = ?', [fact.id]);
+    demoted++;
+  }
+
+  saveDatabase();
+  return { demoted };
+}
+
+/**
+ * Purge old facts from cold storage
+ */
+async function purgeColdFacts(config = {}) {
+  await initDatabase();
+  const retentionDays = config.coldRetentionDays || 90;
+
+  db.run(`
+    DELETE FROM facts_cold
+    WHERE julianday('now') - julianday(archived_at) > ?
+  `, [retentionDays]);
+
+  const purged = db.getRowsModified();
+  saveDatabase();
+
+  return { purged };
+}
+
+/**
+ * Find and merge similar facts (deduplication)
+ */
+async function mergeSimilarFacts(config = {}) {
+  await initDatabase();
+  const similarityThreshold = config.mergeSimilarityThreshold || 0.95;
+
+  const result = db.exec('SELECT id, fact, embedding, relevance_score FROM facts');
+  const facts = queryToRows(result);
+
+  const merged = [];
+  const toDelete = new Set();
+
+  for (let i = 0; i < facts.length; i++) {
+    if (toDelete.has(facts[i].id)) continue;
+
+    const embeddingA = facts[i].embedding ? jsonToEmbedding(facts[i].embedding) : [];
+    if (embeddingA.length === 0) continue;
+
+    for (let j = i + 1; j < facts.length; j++) {
+      if (toDelete.has(facts[j].id)) continue;
+
+      const embeddingB = facts[j].embedding ? jsonToEmbedding(facts[j].embedding) : [];
+      if (embeddingB.length === 0) continue;
+
+      const similarity = cosineSimilarity(embeddingA, embeddingB);
+      if (similarity >= similarityThreshold) {
+        // Keep the one with higher relevance, delete the other
+        const keepId = facts[i].relevance_score >= facts[j].relevance_score ? facts[i].id : facts[j].id;
+        const deleteId = keepId === facts[i].id ? facts[j].id : facts[i].id;
+
+        toDelete.add(deleteId);
+        merged.push({ kept: keepId, deleted: deleteId, similarity });
+      }
+    }
+  }
+
+  // Delete duplicates
+  for (const id of toDelete) {
+    db.run('DELETE FROM facts WHERE id = ?', [id]);
+  }
+
+  if (toDelete.size > 0) saveDatabase();
+
+  return { merged: merged.length, details: merged };
+}
+
+/**
+ * Record entropy metric for tracking over time
+ */
+async function recordMemoryMetric(action = null) {
+  await initDatabase();
+  const stats = await getEntropyStats();
+
+  db.run(`
+    INSERT INTO memory_metrics (total_facts, cold_facts, entropy_score, avg_relevance, never_accessed, action_taken)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `, [stats.totalFacts, stats.coldFacts, stats.entropy, stats.avgRelevance, stats.neverAccessed, action]);
+
+  saveDatabase();
+  return stats;
+}
+
+/**
+ * Get memory metrics history
+ */
+async function getMemoryMetrics(limit = 30) {
+  await initDatabase();
+  const result = db.exec(`
+    SELECT * FROM memory_metrics
+    ORDER BY timestamp DESC
+    LIMIT ?
+  `, [limit]);
+  return queryToRows(result);
+}
+
+/**
+ * Mark a fact as promoted (to decisions.md, etc.)
+ */
+async function markFactPromoted(factId, destination) {
+  await initDatabase();
+  db.run(`
+    UPDATE facts SET promoted_to = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `, [destination, factId]);
+  saveDatabase();
+  return { marked: db.getRowsModified() > 0 };
+}
+
+/**
+ * Get facts that are candidates for promotion (high relevance, frequently accessed)
+ */
+async function getPromotionCandidates(config = {}) {
+  await initDatabase();
+  const minRelevance = config.minRelevance || 0.8;
+  const minAccessCount = config.minAccessCount || 3;
+
+  const result = db.exec(`
+    SELECT * FROM facts
+    WHERE relevance_score >= ?
+      AND access_count >= ?
+      AND (promoted_to IS NULL OR promoted_to = '')
+    ORDER BY relevance_score DESC, access_count DESC
+  `, [minRelevance, minAccessCount]);
+
+  return queryToRows(result);
+}
+
+/**
+ * Restore a fact from cold storage
+ */
+async function restoreFromColdStorage(factId) {
+  await initDatabase();
+
+  // Find in cold storage
+  const result = db.exec('SELECT * FROM facts_cold WHERE id = ?', [factId]);
+  const facts = queryToRows(result);
+  if (facts.length === 0) return { restored: false, error: 'Fact not found in cold storage' };
+
+  const fact = facts[0];
+
+  // Insert back into active facts with boosted relevance
+  db.run(`
+    INSERT INTO facts (id, fact, category, scope, model, embedding, source_context,
+      created_at, updated_at, last_accessed, access_count, recall_count, relevance_score, promoted_to)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?, 0.5, ?)
+  `, [fact.id, fact.fact, fact.category, fact.scope, fact.model, fact.embedding,
+      fact.source_context, fact.created_at, fact.access_count, fact.recall_count, fact.promoted_to]);
+
+  // Remove from cold storage
+  db.run('DELETE FROM facts_cold WHERE id = ?', [factId]);
+
+  saveDatabase();
+  return { restored: true };
+}
+
+// ============================================================
 // Exports
 // ============================================================
 
@@ -686,6 +1040,18 @@ module.exports = {
 
   // Stats
   getStats,
+
+  // Strategic Forgetting & Entropy
+  getEntropyStats,
+  applyRelevanceDecay,
+  demoteToColdStorage,
+  purgeColdFacts,
+  mergeSimilarFacts,
+  recordMemoryMetric,
+  getMemoryMetrics,
+  markFactPromoted,
+  getPromotionCandidates,
+  restoreFromColdStorage,
 
   // Paths
   DB_PATH,

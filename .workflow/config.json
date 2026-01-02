@@ -380,5 +380,32 @@
     "maxContextTokens": 2000,
     "chunkSize": 500,
     "autoRetrieve": false
+  },
+  "automaticMemory": {
+    "enabled": true,
+    "entropyThreshold": 0.7,
+    "compactOnSessionEnd": true,
+    "relevanceDecay": {
+      "enabled": true,
+      "decayRate": 0.033,
+      "neverAccessedPenalty": 0.1
+    },
+    "demotion": {
+      "relevanceThreshold": 0.3,
+      "coldRetentionDays": 90
+    },
+    "selfTuning": {
+      "enabled": false,
+      "adjustOnOverflow": true,
+      "adjustOnFailures": true
+    }
+  },
+  "automaticPromotion": {
+    "enabled": false,
+    "threshold": 3,
+    "minRelevance": 0.8,
+    "destinations": ["decisions.md"],
+    "requireApproval": true,
+    "autoApplyTeamApproved": true
   }
 }
