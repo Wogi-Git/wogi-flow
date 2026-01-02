@@ -41,3 +41,8 @@ Project-specific rules that agents must follow. Updated when user gives feedback
 <!-- Add structure rules here -->
 
 ---
+
+### 2026-01-02
+
+Use kebab-case for all file names in this project
+

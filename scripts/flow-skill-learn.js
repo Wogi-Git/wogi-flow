@@ -552,7 +552,22 @@ async function main() {
   console.log('');
 }
 
-main().catch(e => {
-  log('red', `Error: ${e.message}`);
-  process.exit(1);
-});
+// ============================================================
+// Exports (for use by other modules like knowledge-router)
+// ============================================================
+
+module.exports = {
+  discoverSkills,
+  matchFilesToSkills,
+  appendLearning,
+  ensureKnowledgeDir,
+  extractLearningContext,
+  isLearningEnabled
+};
+
+if (require.main === module) {
+  main().catch(e => {
+    log('red', `Error: ${e.message}`);
+    process.exit(1);
+  });
+}

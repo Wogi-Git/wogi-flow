@@ -22,6 +22,12 @@ const {
   error
 } = require('./flow-utils');
 
+// v1.7.0 context memory management
+const { warnIfContextHigh } = require('./flow-context-monitor');
+const { clearCurrentTask, addKeyFact } = require('./flow-memory-blocks');
+const { trackTaskComplete } = require('./flow-session-state');
+const { autoArchiveIfNeeded } = require('./flow-log-manager');
+
 // Path for last failure artifact
 const LAST_FAILURE_PATH = path.join(PATHS.state, 'last-failure.json');
 
@@ -257,8 +263,36 @@ function main() {
 
   console.log(color('green', `✓ Completed: ${taskId}`));
 
+  // v1.7.0: Track task completion in session state and memory blocks
+  try {
+    trackTaskComplete(taskId);
+    clearCurrentTask();
+
+    // Add completion as a key fact
+    const taskTitle = result.task?.title || taskId;
+    addKeyFact(`Completed: ${taskTitle}`);
+  } catch (e) {
+    if (process.env.DEBUG) console.error(`[DEBUG] Task tracking: ${e.message}`);
+  }
+
+  // v1.7.0: Auto-archive request log if threshold exceeded
+  try {
+    const archiveResult = autoArchiveIfNeeded();
+    if (archiveResult && archiveResult.archived > 0) {
+      success(`Archived ${archiveResult.archived} request log entries`);
+    }
+  } catch (e) {
+    if (process.env.DEBUG) console.error(`[DEBUG] Auto-archive: ${e.message}`);
+  }
+
   // Commit if there are changes
   commitChanges(commitMsg);
+
+  // v1.7.0: Check context health after task
+  const config = getConfig();
+  if (config.contextMonitor?.checkAfterTask !== false) {
+    warnIfContextHigh();
+  }
 }
 
 main();

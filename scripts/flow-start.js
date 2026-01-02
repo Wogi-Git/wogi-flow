@@ -19,12 +19,28 @@ const { getAutoContext, formatAutoContext } = require('./flow-auto-context');
 const { shouldUseMultiApproach, analyzeForMultiApproach, formatAnalysis } = require('./flow-multi-approach');
 const { assessTaskComplexity } = require('./flow-complexity');
 
+// v1.7.0 context memory management
+const { warnIfContextHigh, checkContextHealth } = require('./flow-context-monitor');
+const { setCurrentTask } = require('./flow-memory-blocks');
+const { trackTaskStart, checkAndDisplayResumeContext } = require('./flow-session-state');
+
 function main() {
   const taskId = process.argv[2];
 
   if (!taskId) {
     console.log('Usage: flow start <task-id>');
     process.exit(1);
+  }
+
+  // v1.7.0: Check for session resume context
+  const config = getConfig();
+  if (config.sessionState?.autoRestore !== false) {
+    checkAndDisplayResumeContext();
+  }
+
+  // v1.7.0: Check context health at task start
+  if (config.contextMonitor?.checkOnSessionStart !== false) {
+    warnIfContextHigh();
   }
 
   if (!fileExists(PATHS.ready)) {
@@ -60,12 +76,23 @@ function main() {
 
   console.log(color('green', `✓ Started: ${taskId}`));
 
+  const taskTitle = result.task && typeof result.task === 'object' && result.task.title
+    ? result.task.title
+    : taskId;
+
   if (result.task && typeof result.task === 'object' && result.task.title) {
     console.log(`  ${result.task.title}`);
   }
 
+  // v1.7.0: Track task in session state and memory blocks
+  try {
+    trackTaskStart(taskId, taskTitle);
+    setCurrentTask(taskId, taskTitle);
+  } catch (e) {
+    if (process.env.DEBUG) console.error(`[DEBUG] Task tracking: ${e.message}`);
+  }
+
   // Auto-context: show relevant files for this task
-  const config = getConfig();
   const taskDescription = result.task?.title || result.task?.description || taskId;
 
   if (config.autoContext?.enabled !== false) {

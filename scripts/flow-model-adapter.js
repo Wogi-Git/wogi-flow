@@ -454,6 +454,73 @@ function checkAndAutoLearn(modelName, modelStats) {
 }
 
 /**
+ * Store a single learning/correction in model adapter file
+ * Used by knowledge-router for direct learning storage
+ * @param {string} modelName - Model identifier
+ * @param {string} learning - The learning text
+ * @param {object} context - Optional context { taskId, sourceContext, trigger }
+ */
+function storeSingleLearning(modelName, learning, context = {}) {
+  const adapterPath = getAdapterPath(modelName);
+  let content = '';
+
+  if (fs.existsSync(adapterPath)) {
+    content = fs.readFileSync(adapterPath, 'utf-8');
+  } else {
+    // Ensure directory exists
+    const dir = path.dirname(adapterPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    // Create from template or minimal
+    const templatePath = path.join(ADAPTERS_DIR, '_template.md');
+    if (fs.existsSync(templatePath)) {
+      content = fs.readFileSync(templatePath, 'utf-8')
+        .replace('{{MODEL_NAME}}', modelName);
+    } else {
+      content = `# ${modelName} Adapter\n\n## Learnings\n`;
+    }
+  }
+
+  const date = new Date().toISOString().split('T')[0];
+  const source = context.taskId || context.sourceContext || 'user-correction';
+  const trigger = context.trigger || 'knowledge-router';
+
+  const learningEntry = `
+### ${date} - ${source}
+
+**Trigger**: ${trigger}
+
+${learning}
+
+---
+`;
+
+  // Find Learnings section or append at end
+  if (content.includes('## Learnings')) {
+    const learningsIdx = content.indexOf('## Learnings');
+    const nextSectionIdx = content.indexOf('\n## ', learningsIdx + 1);
+
+    if (nextSectionIdx !== -1) {
+      content = content.slice(0, nextSectionIdx) + learningEntry + content.slice(nextSectionIdx);
+    } else {
+      content += learningEntry;
+    }
+  } else {
+    content += '\n## Learnings\n' + learningEntry;
+  }
+
+  fs.writeFileSync(adapterPath, content);
+
+  return {
+    success: true,
+    file: adapterPath,
+    message: `Stored as ${modelName}-specific learning`
+  };
+}
+
+/**
  * Add learning entry to adapter file
  */
 function addLearningToAdapter(modelName, errors) {
@@ -714,7 +781,9 @@ module.exports = {
   recordModelResult,
   getAllModelStats,
   listAdapters,
-  addLearningToAdapter
+  addLearningToAdapter,
+  storeSingleLearning,
+  getAdapterPath
 };
 
 if (require.main === module) {

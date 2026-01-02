@@ -25,6 +25,12 @@ const {
   warn
 } = require('./flow-utils');
 
+// v1.7.0 context memory management
+const { showContextBreakdown, checkContextHealth } = require('./flow-context-monitor');
+const { resetSessionContext, getSessionContext, writeMemoryBlocks, readMemoryBlocks } = require('./flow-memory-blocks');
+const { saveSessionSummary, loadSessionState } = require('./flow-session-state');
+const { autoArchiveIfNeeded, getLogStats } = require('./flow-log-manager');
+
 /**
  * Prompt user for input
  */
@@ -176,6 +182,71 @@ async function offerPush() {
 }
 
 /**
+ * v1.7.0: Save session summary to state
+ */
+function saveSessionSummaryToState() {
+  console.log('');
+  console.log(color('yellow', 'Saving session state...'));
+
+  try {
+    const sessionState = loadSessionState();
+    const memoryBlocks = readMemoryBlocks();
+
+    // Build summary from session data
+    const summary = {
+      tasksCompleted: sessionState.metrics?.tasksCompleted || 0,
+      filesModified: sessionState.recentFiles?.slice(0, 5) || [],
+      decisions: sessionState.recentDecisions?.map(d => d.decision).slice(0, 3) || [],
+      summary: memoryBlocks?.keyFacts?.slice(-3).join('; ') || 'Session ended'
+    };
+
+    saveSessionSummary(summary);
+    success('Session state saved');
+  } catch (e) {
+    if (process.env.DEBUG) console.error(`[DEBUG] Session save: ${e.message}`);
+    warn('Could not save session state');
+  }
+}
+
+/**
+ * v1.7.0: Archive request log if threshold exceeded
+ */
+function archiveRequestLogIfNeeded() {
+  try {
+    const result = autoArchiveIfNeeded();
+    if (result && result.archived > 0) {
+      console.log('');
+      success(`Archived ${result.archived} request log entries`);
+      console.log(color('dim', `  Archive: ${result.archivePath}`));
+    }
+  } catch (e) {
+    if (process.env.DEBUG) console.error(`[DEBUG] Archive: ${e.message}`);
+  }
+}
+
+/**
+ * v1.7.0: Show context health summary
+ */
+function showContextHealthSummary() {
+  try {
+    const health = checkContextHealth();
+    if (health.status !== 'disabled') {
+      console.log('');
+      console.log(color('yellow', 'Context health:'));
+      const statusColor = health.status === 'healthy' ? 'green'
+        : health.status === 'warning' ? 'yellow' : 'red';
+      console.log(`  Status: ${color(statusColor, health.status.toUpperCase())} (${health.usagePercent}%)`);
+
+      if (health.recommendation) {
+        console.log(`  ${color(statusColor, health.recommendation)}`);
+      }
+    }
+  } catch (e) {
+    if (process.env.DEBUG) console.error(`[DEBUG] Context health: ${e.message}`);
+  }
+}
+
+/**
  * Show status summary
  */
 function showSummary() {
@@ -215,6 +286,15 @@ async function main() {
 
   // Extract skill learnings
   extractSkillLearnings();
+
+  // v1.7.0: Save session summary
+  saveSessionSummaryToState();
+
+  // v1.7.0: Auto-archive request log
+  archiveRequestLogIfNeeded();
+
+  // v1.7.0: Show context health
+  showContextHealthSummary();
 
   console.log('');
 

@@ -173,6 +173,15 @@ show_help() {
     echo "  safety               Run security scan on codebase"
     echo "  context-init \"task\"  Initialize context for a task"
     echo ""
+    echo "Memory & Knowledge (v1.8):"
+    echo "  memory search <query>  Search stored facts"
+    echo "  memory stats           Show memory statistics"
+    echo "  memory-server          Start MCP memory server"
+    echo "  knowledge-route <text> Detect route for a learning"
+    echo "  knowledge-route store  Store a learning with route"
+    echo "  log-manager status     Show request-log statistics"
+    echo "  log-manager archive    Archive old log entries"
+    echo ""
     echo "Options:"
     echo "  help, --help, -h     Show this help"
     echo "  version, --version   Show version"
@@ -470,6 +479,67 @@ case "${1:-}" in
         ;;
     complexity)
         node "$SCRIPT_DIR/flow-complexity.js" "${@:2}"
+        ;;
+    memory)
+        case "${2:-stats}" in
+            search)
+                # Search facts in memory - requires MCP server or direct DB access
+                echo "Memory search requires MCP server running."
+                echo "Start server with: flow memory-server"
+                echo "Or use the MCP client to call recall_facts tool."
+                ;;
+            stats)
+                # Show memory statistics
+                if [ -f "$PROJECT_ROOT/.workflow/memory/local.db" ]; then
+                    echo "Memory Statistics:"
+                    sqlite3 "$PROJECT_ROOT/.workflow/memory/local.db" "SELECT 'Facts: ' || COUNT(*) FROM facts; SELECT 'Proposals: ' || COUNT(*) FROM proposals; SELECT 'PRD Chunks: ' || COUNT(*) FROM prd_chunks;" 2>/dev/null || echo "  Database not initialized. Run memory-server first."
+                else
+                    echo "Memory database not found. Start MCP server to initialize."
+                fi
+                ;;
+            *)
+                echo "Usage: flow memory [search|stats]"
+                ;;
+        esac
+        ;;
+    memory-server)
+        echo "Starting MCP Memory Server..."
+        node "$PROJECT_ROOT/mcp-memory-server/index.js"
+        ;;
+    knowledge-route)
+        case "${2:-}" in
+            detect|"")
+                if [ -z "$3" ]; then
+                    echo "Usage: flow knowledge-route detect \"<text>\""
+                else
+                    node "$SCRIPT_DIR/flow-knowledge-router.js" detect "${@:3}"
+                fi
+                ;;
+            store)
+                if [ -z "$3" ] || [ -z "$4" ]; then
+                    echo "Usage: flow knowledge-route store \"<text>\" <route-type>"
+                    echo "Route types: model-specific, skill:<name>, project, team"
+                else
+                    node "$SCRIPT_DIR/flow-knowledge-router.js" store "${@:3}"
+                fi
+                ;;
+            show)
+                if [ -z "$3" ]; then
+                    echo "Usage: flow knowledge-route show \"<text>\""
+                else
+                    node "$SCRIPT_DIR/flow-knowledge-router.js" show "${@:3}"
+                fi
+                ;;
+            routes)
+                node "$SCRIPT_DIR/flow-knowledge-router.js" routes
+                ;;
+            *)
+                echo "Usage: flow knowledge-route [detect|store|show|routes]"
+                ;;
+        esac
+        ;;
+    log-manager)
+        node "$SCRIPT_DIR/flow-log-manager.js" "${@:2}"
         ;;
     version|--version|-v)
         show_version

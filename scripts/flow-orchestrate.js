@@ -48,8 +48,8 @@ const {
   setProjectRoot: setExportScannerRoot
 } = require('./flow-export-scanner');
 
-// Import utilities for consistent project root and colors
-const { getProjectRoot, colors } = require('./flow-utils');
+// Import utilities for consistent project root, colors, and config
+const { getProjectRoot, colors, getConfig } = require('./flow-utils');
 const { getPromptAdjustments, recordModelResult } = require('./flow-model-adapter');
 
 // ============================================================
@@ -69,19 +69,11 @@ function log(color, ...args) {
 }
 
 // ============================================================
-// Config Loader
+// Config Loader (uses centralized getConfig from flow-utils)
 // ============================================================
 
-function loadConfig() {
-  const configPath = path.join(WORKFLOW_DIR, 'config.json');
-  if (!fs.existsSync(configPath)) {
-    throw new Error('config.json not found. Run wogi-flow install first.');
-  }
-  return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-}
-
 function loadHybridConfig() {
-  const config = loadConfig();
+  const config = getConfig();
   const hybrid = config.hybrid || {};
 
   if (!hybrid.enabled) {

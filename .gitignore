@@ -23,5 +23,12 @@ node_modules/
 .workflow/state/export-map.json
 .workflow/state/hybrid-context.md
 
+# v1.7.0 session state (user-specific, transient)
+.workflow/state/session-state.json
+
+# MCP Memory Server
+mcp-memory-server/node_modules/
+.workflow/memory/
+
 # Note: When users install Wogi Flow in their projects,
 # they should use .gitignore-project instead (rename it)

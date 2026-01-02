@@ -9,6 +9,24 @@ Session handoff notes for human readability.
 
 ---
 
+## Memory Blocks
+<!-- MEMORY-BLOCKS-START -->
+```json
+{
+  "currentTask": null,
+  "sessionContext": {
+    "filesModified": [],
+    "decisionsThisSession": [],
+    "blockers": []
+  },
+  "keyFacts": [],
+  "lastUpdated": "2026-01-02T10:12:32.783Z"
+}
+```
+<!-- MEMORY-BLOCKS-END -->
+
+---
+
 ## Last Session
 - [What was accomplished]
 

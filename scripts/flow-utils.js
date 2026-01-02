@@ -289,7 +289,11 @@ const KNOWN_CONFIG_KEYS = [
   'learning',
   'hooks',
   'project',
-  'projectType'
+  'projectType',
+  // v1.7.0 context memory management
+  'contextMonitor',
+  'requestLog',
+  'sessionState'
 ];
 
 // Known nested keys for common config sections
@@ -300,7 +304,11 @@ const KNOWN_NESTED_KEYS = {
   testing: ['runAfterTask', 'runBeforeCommit', 'command'],
   learning: ['autoPromote', 'enabled', 'threshold', 'mode'],
   qualityGates: ['feature', 'bugfix'],
-  autoContext: ['enabled', 'maxFiles', 'searchDepth']
+  autoContext: ['enabled', 'maxFiles', 'searchDepth'],
+  // v1.7.0 context memory management
+  contextMonitor: ['enabled', 'warnAt', 'criticalAt', 'contextWindow', 'checkOnSessionStart', 'checkAfterTask'],
+  requestLog: ['enabled', 'autoArchive', 'maxRecentEntries', 'keepRecent', 'createSummary'],
+  sessionState: ['enabled', 'autoRestore', 'maxGapHours', 'trackFiles', 'trackDecisions', 'maxRecentFiles', 'maxRecentDecisions']
 };
 
 /**

@@ -1,5 +1,5 @@
 {
-  "version": "1.6.1",
+  "version": "1.8.0",
   "projectName": "",
   "workflow": {
     "planningStyle": "feature-based",
@@ -305,5 +305,58 @@
     "server": "typescript-language-server",
     "timeout": 5000,
     "cacheTypes": true
+  },
+  "contextMonitor": {
+    "enabled": true,
+    "warnAt": 0.7,
+    "criticalAt": 0.85,
+    "contextWindow": 200000,
+    "checkOnSessionStart": true,
+    "checkAfterTask": true
+  },
+  "requestLog": {
+    "enabled": true,
+    "autoArchive": true,
+    "maxRecentEntries": 50,
+    "keepRecent": 30,
+    "createSummary": true
+  },
+  "sessionState": {
+    "enabled": true,
+    "autoRestore": true,
+    "maxGapHours": 24,
+    "trackFiles": true,
+    "trackDecisions": true,
+    "maxRecentFiles": 20,
+    "maxRecentDecisions": 10
+  },
+  "team": {
+    "enabled": false,
+    "teamId": null,
+    "userId": null,
+    "setupId": null,
+    "apiKey": null,
+    "backendUrl": "https://api.wogi-flow.com",
+    "syncInterval": 300000,
+    "autoSync": true
+  },
+  "memory": {
+    "enabled": true,
+    "localDb": ".workflow/memory/local.db",
+    "embeddingModel": "Xenova/all-MiniLM-L6-v2",
+    "maxLocalFacts": 1000,
+    "autoRemember": false
+  },
+  "knowledgeRouting": {
+    "autoDetect": true,
+    "confirmWithUser": true,
+    "defaultScope": "local",
+    "modelSpecificLearning": true
+  },
+  "prd": {
+    "enabled": true,
+    "maxContextTokens": 2000,
+    "chunkSize": 500,
+    "autoRetrieve": false
   }
 }

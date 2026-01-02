@@ -21,31 +21,22 @@
 
 const fs = require('fs');
 const path = require('path');
-const { getProjectRoot } = require('./flow-utils');
+const { getProjectRoot, getConfig } = require('./flow-utils');
 
 // ============================================================
-// Configuration
+// Configuration (uses centralized getConfig from flow-utils)
 // ============================================================
 
 /**
- * Load parallel execution config from config.json
- * @param {string} [projectRoot] - Project root path (defaults to getProjectRoot())
+ * Get parallel execution config
+ * Merges defaults with config.json parallel section
  */
-function loadConfig(projectRoot = getProjectRoot()) {
-  const configPath = path.join(projectRoot, '.workflow', 'config.json');
-  if (!fs.existsSync(configPath)) {
-    return getDefaultConfig();
-  }
-
-  try {
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    return {
-      ...getDefaultConfig(),
-      ...config.parallel
-    };
-  } catch {
-    return getDefaultConfig();
-  }
+function getParallelConfig() {
+  const config = getConfig();
+  return {
+    ...getDefaultConfig(),
+    ...(config.parallel || {})
+  };
 }
 
 function getDefaultConfig() {
@@ -222,7 +213,7 @@ function createProgressTracker(tasks) {
  * @returns {Object} Execution results
  */
 async function executeParallel(tasks, executor, options = {}) {
-  const config = loadConfig(options.projectRoot);
+  const config = getParallelConfig();
   const {
     maxConcurrent = config.maxConcurrent,
     showProgress = config.showProgress,
@@ -304,7 +295,7 @@ async function executeParallel(tasks, executor, options = {}) {
  * Check if user approval is needed for parallel execution
  */
 function needsApproval(tasks, config = null) {
-  const cfg = config || loadConfig();
+  const cfg = config || getParallelConfig();
 
   if (!cfg.enabled) return { needed: false, reason: 'parallel-disabled' };
   if (cfg.autoApprove) return { needed: false, reason: 'auto-approved' };
@@ -351,7 +342,7 @@ if (require.main === module) {
 
   switch (command) {
     case 'config': {
-      const config = loadConfig();
+      const config = getParallelConfig();
       console.log('\n📊 Parallel Execution Configuration:\n');
       console.log(JSON.stringify(config, null, 2));
       break;
