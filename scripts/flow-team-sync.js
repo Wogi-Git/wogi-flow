@@ -181,7 +181,71 @@ function getSyncableFiles() {
     }
   }
 
+  // Sync memory database if enabled
+  // Note: We export facts as JSON rather than syncing the raw SQLite file
+  const syncMemory = teamConfig.syncMemory || teamConfig.sync?.memory;
+  if (syncMemory) {
+    const memoryDbPath = path.join(projectRoot, '.workflow', 'memory', 'local.db');
+    if (fs.existsSync(memoryDbPath)) {
+      try {
+        // Try to export facts as JSON for safer sync
+        const facts = exportMemoryFacts(memoryDbPath);
+        if (facts && facts.length > 0) {
+          const factsJson = JSON.stringify(facts, null, 2);
+          files.memory = {
+            path: memoryDbPath,
+            content: factsJson,
+            hash: hashContent(factsJson),
+            lastModified: fs.statSync(memoryDbPath).mtime.toISOString(),
+            factCount: facts.length,
+            format: 'json-export'
+          };
+        }
+      } catch (err) {
+        // If export fails, note it but don't block sync
+        console.warn('Memory export failed:', err.message);
+      }
+    }
+  }
+
   return files;
+}
+
+/**
+ * Export facts from memory database as JSON
+ */
+function exportMemoryFacts(dbPath) {
+  try {
+    // Use sqlite3 CLI to export (avoids native module dependency)
+    const { execSync } = require('child_process');
+
+    // First check what columns exist
+    const schema = execSync(
+      `sqlite3 "${dbPath}" "PRAGMA table_info(facts);"`,
+      { encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
+    );
+
+    // Parse available columns
+    const columns = schema.split('\n')
+      .filter(Boolean)
+      .map(line => line.split('|')[1])
+      .filter(Boolean);
+
+    if (columns.length === 0) {
+      return null;
+    }
+
+    // Build query with available columns
+    const selectCols = columns.map(c => `'${c}', ${c}`).join(', ');
+    const result = execSync(
+      `sqlite3 "${dbPath}" "SELECT json_group_array(json_object(${selectCols})) FROM facts LIMIT 100"`,
+      { encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
+    );
+    return JSON.parse(result.trim() || '[]');
+  } catch {
+    // sqlite3 CLI not available or query failed - fail silently
+    return null;
+  }
 }
 
 /**
@@ -432,6 +496,11 @@ function getSyncStatus() {
         hash: files.tasks.hash,
         lastModified: files.tasks.lastModified
       } : { exists: false },
+      memory: files.memory ? {
+        exists: true,
+        factCount: files.memory.factCount,
+        lastModified: files.memory.lastModified
+      } : { exists: false },
       skillLearnings: files.skillLearnings ? Object.keys(files.skillLearnings) : []
     },
     syncConfig: {
@@ -441,6 +510,7 @@ function getSyncStatus() {
       syncSkillLearnings: teamConfig.syncSkillLearnings !== false,
       syncRequestLog: teamConfig.syncRequestLog || 'recent',
       syncTasks: teamConfig.syncTasks || false,
+      syncMemory: teamConfig.syncMemory || false,
       conflictResolution: teamConfig.conflictResolution || 'newest-wins'
     }
   };
@@ -558,6 +628,11 @@ function generateStatusReport() {
   const tIcon = status.files.tasks?.exists ? '✅' : '❌';
   const tEnabled = status.syncConfig.syncTasks ? '' : ' (disabled)';
   lines.push(`║    ${tIcon} ready.json (tasks)${tEnabled}`.padEnd(55) + '║');
+
+  const mIcon = status.files.memory?.exists ? '✅' : '❌';
+  const mCount = status.files.memory?.factCount ? ` (${status.files.memory.factCount} facts)` : '';
+  const mEnabled = status.syncConfig.syncMemory ? mCount : ' (disabled)';
+  lines.push(`║    ${mIcon} memory facts${mEnabled}`.padEnd(55) + '║');
 
   const skillCount = status.files.skillLearnings?.length || 0;
   const sEnabled = status.syncConfig.syncSkillLearnings ? '' : ' (disabled)';
