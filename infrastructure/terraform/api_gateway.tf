@@ -9,7 +9,7 @@ resource "aws_apigatewayv2_api" "main" {
     allow_credentials = true
     allow_headers     = ["Content-Type", "Authorization", "X-Team-Id"]
     allow_methods     = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-    allow_origins     = ["http://localhost:3000", "https://*.wogi-flow.dev"]
+    allow_origins     = ["http://localhost:3000", "https://app.wogi-flow.dev", "https://wogi-flow.dev"]
     max_age           = 3600
   }
 

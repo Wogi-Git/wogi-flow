@@ -47,6 +47,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "artifacts" {
     id     = "cleanup-old-versions"
     status = "Enabled"
 
+    filter {}
+
     noncurrent_version_expiration {
       noncurrent_days = 90
     }
@@ -79,11 +81,11 @@ resource "aws_s3_bucket_lifecycle_configuration" "artifacts" {
     }
 
     expiration {
-      days = 30
+      days = 60
     }
 
     transition {
-      days          = 7
+      days          = 30
       storage_class = "STANDARD_IA"
     }
   }
