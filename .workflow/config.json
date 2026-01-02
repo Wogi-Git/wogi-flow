@@ -462,5 +462,15 @@
     "destinations": ["decisions.md"],
     "requireApproval": true,
     "autoApplyTeamApproved": true
+  },
+  "voice": {
+    "enabled": false,
+    "provider": null,
+    "openaiApiKey": null,
+    "groqApiKey": null,
+    "localModelPath": "base.en",
+    "defaultDuration": 30,
+    "sampleRate": 16000,
+    "channels": 1
   }
 }

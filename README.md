@@ -11,6 +11,7 @@ A self-improving AI development workflow that learns from your feedback and accu
 | **Parallel Auto-Detect**  | Automatically detects and suggests parallel task execution                                  |
 | **Skill Auto-Creation**   | Detects frameworks and generates skills from official documentation                         |
 | **Project-Based Sync**    | Team sync at project scope - decisions.md, app-map.md, skills shared across team            |
+| **Voice Input**           | Voice-to-transcript support with local Whisper or cloud APIs (OpenAI, Groq)                 |
 | **Safety Guardrails**     | Bounded execution with file/command permissions and checkpoint intervals                    |
 | **Verification Gates**    | Structured gate results with auto-feed stderr for LLM self-healing                          |
 | **Execution Traces**      | JSONL event logging with artifact timeline for full run history                             |
@@ -90,6 +91,7 @@ Daily commands for working with Wogi Flow. Start with `/wogi-ready` to see tasks
 - [Parallel Auto-Detection (New in v1.8)](#parallel-auto-detection-new-in-v18)
 - [Skill Auto-Creation (New in v1.8)](#skill-auto-creation-new-in-v18)
 - [Project-Based Team Sync (New in v1.8)](#project-based-team-sync-new-in-v18)
+- [Voice Input (New in v1.8)](#voice-input-new-in-v18)
 - [Safety & Verification](#safety--verification)
 - [Execution Traces & Checkpoints](#execution-traces--checkpoints)
 - [Diff-First Output](#diff-first-output)
@@ -401,6 +403,75 @@ Sync workflow files at project scope - share decisions, patterns, and knowledge 
 ./scripts/flow team project-id    # Show/set project ID
 ./scripts/flow team sync          # Sync local → remote
 ```
+
+---
+
+## Voice Input (New in v1.8)
+
+Voice-to-transcript support with multiple provider options. Create tasks, stories, and commands using your voice.
+
+### How It Works
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│ Microphone  │ ──▶ │   Record    │ ──▶ │ Transcribe  │
+│   Input     │     │   Audio     │     │   (Whisper) │
+└─────────────┘     └─────────────┘     └─────────────┘
+                                               │
+                                               ▼
+                                         ┌──────────┐
+                                         │   Text   │
+                                         │  Output  │
+                                         └──────────┘
+```
+
+### Providers
+
+| Provider | API Key | Description |
+|----------|---------|-------------|
+| **Local** | No | Whisper.cpp - works offline |
+| **OpenAI** | Yes | Best accuracy |
+| **Groq** | Yes (free tier) | Fast cloud transcription |
+
+### Setup
+
+```bash
+./scripts/flow voice-input setup    # Interactive setup
+```
+
+The setup wizard will:
+1. Ask if you want to enable voice input
+2. Let you choose a provider
+3. Configure API keys (if using cloud)
+
+### Configuration
+
+```json
+{
+  "voice": {
+    "enabled": true,
+    "provider": "groq",
+    "groqApiKey": "gsk_...",
+    "defaultDuration": 30
+  }
+}
+```
+
+### Commands
+
+```bash
+./scripts/flow voice-input              # Record and transcribe
+./scripts/flow voice-input -d 60        # Record for 60 seconds
+./scripts/flow voice-input -p openai    # Use specific provider
+./scripts/flow voice-input --to-story   # Create story from voice
+./scripts/flow voice-input status       # Show configuration
+./scripts/flow voice-input test         # Test with 5-second recording
+```
+
+### Requirements
+
+- **Recording**: `sox` - install with `brew install sox` (macOS) or `apt install sox` (Linux)
+- **Local Whisper**: `pip install openai-whisper` or download whisper.cpp
 
 ---
 
@@ -1198,6 +1269,14 @@ flow team sync-status           # Show project sync status
 flow team sync-init             # Initialize project sync
 flow team project-id            # Show/set project ID
 
+# Voice Input (v1.8)
+flow voice-input setup          # Configure voice input
+flow voice-input                # Record and transcribe
+flow voice-input -d 60          # Record for 60 seconds
+flow voice-input -p groq        # Use specific provider
+flow voice-input status         # Show configuration
+flow voice-input test           # Test recording
+
 # Hybrid Mode
 flow hybrid enable              # Enable with wizard
 flow hybrid disable             # Disable
@@ -1372,9 +1451,10 @@ After 3+ similar corrections → Claude suggests promoting to permanent instruct
 - **Parallel Auto-Detection**: Automatically detects parallelizable tasks with autoSuggest and autoExecute options
 - **Skill Auto-Creation**: Detects frameworks from package.json and file patterns, fetches official documentation
 - **Project-Based Team Sync**: Sync decisions.md, app-map.md, component-index, skills, and memory facts across team
+- **Voice Input**: Voice-to-transcript support with local Whisper.cpp, OpenAI, and Groq providers
 - **Memory Export**: Schema-aware SQLite export for memory facts synchronization
 - **Conflict Resolution**: Configurable strategies (newest-wins, remote-wins, local-wins, merge)
-- **New commands**: `flow loop`, `flow parallel [analyze|suggest]`, `flow skill [detect|list]`, `flow team [sync-status|sync-init|project-id]`
+- **New commands**: `flow loop`, `flow parallel [analyze|suggest]`, `flow skill [detect|list]`, `flow team [sync-status|sync-init|project-id]`, `flow voice-input`
 
 ### v1.7.0 - Team Backend
 

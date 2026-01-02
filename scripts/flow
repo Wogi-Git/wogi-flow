@@ -656,6 +656,9 @@ case "${1:-}" in
     prd)
         node "$SCRIPT_DIR/flow-prd-manager.js" "${@:2}"
         ;;
+    voice-input|voice)
+        node "$SCRIPT_DIR/flow-voice-input.js" "${@:2}"
+        ;;
     version|--version|-v)
         show_version
         ;;
@@ -681,6 +684,7 @@ case "${1:-}" in
                     hybrid) echo "Manage hybrid mode. Subcommands: enable, disable, status, execute, test" ;;
                     parallel) echo "Manage parallel execution. Subcommands: config, check, enable, disable" ;;
                     worktree) echo "Manage worktree isolation. Subcommands: enable, disable, list, cleanup" ;;
+                    voice-input|voice) echo "Voice-to-transcript input. Subcommands: setup, status, test, record" ;;
                     *) echo "No detailed help for '$2'. Run 'flow help' for all commands." ;;
                 esac
                 ;;
