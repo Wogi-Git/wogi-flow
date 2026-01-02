@@ -52,6 +52,9 @@ const {
 const { getProjectRoot, colors, getConfig } = require('./flow-utils');
 const { getPromptAdjustments, recordModelResult } = require('./flow-model-adapter');
 
+// Import response parser for error recovery
+const { parseOnRetry, cleanCodeBlock } = require('./flow-response-parser');
+
 // ============================================================
 // Configuration
 // ============================================================
@@ -3553,9 +3556,19 @@ class Orchestrator {
     return result;
   }
 
-  cleanOutput(output) {
-    // Use the comprehensive extraction function
-    const extracted = extractCodeFromResponse(output, this.config.model);
+  cleanOutput(output, error = null) {
+    // Use the comprehensive extraction function first
+    let extracted = extractCodeFromResponse(output, this.config.model);
+
+    // If there was an error and extraction didn't help much, try response parser
+    if (error && extracted && extracted.length < 20) {
+      const parsed = parseOnRetry(output, error);
+      if (parsed.shouldRetry && parsed.content) {
+        log('dim', '   Using response parser fallback');
+        extracted = cleanCodeBlock(parsed.content);
+      }
+    }
+
     return extracted;
   }
 

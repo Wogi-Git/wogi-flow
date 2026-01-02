@@ -43,6 +43,72 @@ const STEP_TYPES = {
 };
 
 /**
+ * Detect project type (language, package manager)
+ * Returns { language, packageManager } with defaults to Node.js/npm
+ */
+function detectProjectType(projectRoot = PROJECT_ROOT) {
+  // Check for Go
+  if (fs.existsSync(path.join(projectRoot, 'go.mod'))) {
+    return { language: 'go', packageManager: 'go' };
+  }
+
+  // Check for Rust
+  if (fs.existsSync(path.join(projectRoot, 'Cargo.toml'))) {
+    return { language: 'rust', packageManager: 'cargo' };
+  }
+
+  // Check for Python
+  if (fs.existsSync(path.join(projectRoot, 'pyproject.toml')) ||
+      fs.existsSync(path.join(projectRoot, 'requirements.txt'))) {
+    const pm = fs.existsSync(path.join(projectRoot, 'poetry.lock')) ? 'poetry'
+             : fs.existsSync(path.join(projectRoot, 'Pipfile.lock')) ? 'pipenv'
+             : 'pip';
+    return { language: 'python', packageManager: pm };
+  }
+
+  // Default to Node.js - detect specific package manager
+  const pm = fs.existsSync(path.join(projectRoot, 'pnpm-lock.yaml')) ? 'pnpm'
+           : fs.existsSync(path.join(projectRoot, 'yarn.lock')) ? 'yarn'
+           : fs.existsSync(path.join(projectRoot, 'bun.lockb')) ? 'bun'
+           : 'npm';
+
+  return { language: 'node', packageManager: pm };
+}
+
+/**
+ * Get quality gate command for an action (lint, test, build)
+ * Adapts to detected package manager and language
+ */
+function getQualityCommand(action, projectRoot = PROJECT_ROOT) {
+  const { language, packageManager } = detectProjectType(projectRoot);
+
+  const commands = {
+    node: {
+      npm:  { lint: 'npm run lint', test: 'npm test', build: 'npm run build', fix: 'npm run fix' },
+      yarn: { lint: 'yarn lint', test: 'yarn test', build: 'yarn build', fix: 'yarn fix' },
+      pnpm: { lint: 'pnpm lint', test: 'pnpm test', build: 'pnpm build', fix: 'pnpm fix' },
+      bun:  { lint: 'bun run lint', test: 'bun test', build: 'bun run build', fix: 'bun run fix' }
+    },
+    python: {
+      pip:    { lint: 'ruff check .', test: 'pytest', build: 'python -m build', fix: 'ruff check . --fix' },
+      poetry: { lint: 'poetry run ruff check .', test: 'poetry run pytest', build: 'poetry build', fix: 'poetry run ruff check . --fix' },
+      pipenv: { lint: 'pipenv run ruff check .', test: 'pipenv run pytest', build: 'pipenv run python -m build', fix: 'pipenv run ruff check . --fix' }
+    },
+    go: {
+      go: { lint: 'golangci-lint run', test: 'go test ./...', build: 'go build ./...', fix: 'gofmt -w .' }
+    },
+    rust: {
+      cargo: { lint: 'cargo clippy', test: 'cargo test', build: 'cargo build', fix: 'cargo fix --allow-dirty' }
+    }
+  };
+
+  const langCommands = commands[language] || commands.node;
+  const pmCommands = langCommands[packageManager] || langCommands.npm || Object.values(langCommands)[0];
+
+  return pmCommands[action] || pmCommands.lint;
+}
+
+/**
  * Simple YAML parser for workflow files
  */
 function parseYaml(content) {
@@ -480,6 +546,12 @@ function createWorkflowTemplate(name) {
     fs.mkdirSync(WORKFLOWS_DIR, { recursive: true });
   }
 
+  // Get language-appropriate commands
+  const lintCmd = getQualityCommand('lint');
+  const testCmd = getQualityCommand('test');
+  const buildCmd = getQualityCommand('build');
+  const fixCmd = getQualityCommand('fix');
+
   const template = {
     name,
     description: 'Workflow description',
@@ -492,18 +564,18 @@ function createWorkflowTemplate(name) {
       {
         id: 'lint',
         name: 'Run linting',
-        run: 'npm run lint'
+        run: lintCmd
       },
       {
         id: 'test',
         name: 'Run tests',
-        run: 'npm test',
+        run: testCmd,
         when: '$environment == "development"'
       },
       {
         id: 'build',
         name: 'Build project',
-        run: 'npm run build'
+        run: buildCmd
       },
       {
         id: 'retry-loop',
@@ -514,7 +586,7 @@ function createWorkflowTemplate(name) {
         steps: [
           {
             id: 'fix-attempt',
-            run: 'npm run fix'
+            run: fixCmd
           }
         ]
       }
@@ -576,7 +648,10 @@ module.exports = {
   createWorkflowTemplate,
   validateWorkflow,
   executeCommand,
-  evaluateCondition
+  evaluateCondition,
+  // Language-agnostic quality commands
+  detectProjectType,
+  getQualityCommand
 };
 
 // CLI Handler
@@ -705,18 +780,24 @@ ${c.bold}Workflow YAML Format:${c.reset}
 
   steps:
     - id: lint
-      run: npm run lint
+      run: <lint-command>    # Auto-detected: npm/yarn/pnpm/cargo/go/ruff
 
     - id: conditional-test
       when: \$environment == "dev"
-      run: npm test
+      run: <test-command>    # Auto-detected based on project type
 
     - id: retry-loop
       type: loop
       maxIterations: 3
       until: \$build_success == true
       steps:
-        - run: npm run build
+        - run: <build-command>
+
+${c.bold}Language Support:${c.reset}
+  Node.js   npm/yarn/pnpm/bun (auto-detected from lock file)
+  Python    pip/poetry/pipenv (pytest, ruff)
+  Go        go test, golangci-lint
+  Rust      cargo test, cargo clippy
 
 ${c.bold}Step Types:${c.reset}
   command     Run shell command (default)

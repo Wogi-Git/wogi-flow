@@ -318,7 +318,7 @@ async function automaticMemoryManagement() {
       }
     }
 
-    // 3. Check for promotion candidates
+    // 3. Check for promotion candidates and auto-promote if enabled
     const promoConfig = config.automaticPromotion || {};
     if (promoConfig.enabled) {
       const candidates = await memoryDb.getPromotionCandidates({
@@ -329,8 +329,26 @@ async function automaticMemoryManagement() {
       const unpromoted = candidates.filter(c => !c.promoted_to);
       if (unpromoted.length > 0) {
         console.log(`  ${color('cyan', `${unpromoted.length} pattern(s) ready for promotion`)}`);
+
+        // Auto-promote if approval not required
         if (!promoConfig.requireApproval) {
-          console.log('    Run: ./scripts/flow memory-sync --auto');
+          try {
+            const memorySync = require('./flow-memory-sync');
+            if (memorySync && typeof memorySync.autoPromote === 'function') {
+              const result = await memorySync.autoPromote(config);
+              if (result.promoted > 0) {
+                console.log(`  ${color('green', `Auto-promoted ${result.promoted} pattern(s) to decisions.md`)}`);
+              }
+            } else {
+              // Fallback: tell user to run manually
+              console.log('    Run: ./scripts/flow memory-sync --auto');
+            }
+          } catch (e) {
+            // Module not available or error, fall back to manual
+            console.log('    Run: ./scripts/flow memory-sync --auto');
+          }
+        } else {
+          console.log('    Run: ./scripts/flow memory-sync --auto (approval required)');
         }
       }
     }

@@ -140,7 +140,6 @@ function getInstructionRichness(complexityLevel, config = {}) {
  */
 function loadProjectContext(projectRoot) {
   const contextPath = path.join(projectRoot, '.workflow', 'state', 'hybrid-context.md');
-  const decisionsPath = path.join(projectRoot, '.workflow', 'state', 'decisions.md');
   const projectPath = path.join(projectRoot, '.workflow', 'specs', 'project.md');
 
   let context = '';
@@ -164,7 +163,8 @@ function loadProjectContext(projectRoot) {
 }
 
 /**
- * Loads coding patterns from decisions.md
+ * Loads ALL coding patterns from decisions.md
+ * Extracts all ## sections, not just Coding Standards and Component Architecture
  */
 function loadPatterns(projectRoot) {
   const decisionsPath = path.join(projectRoot, '.workflow', 'state', 'decisions.md');
@@ -175,16 +175,16 @@ function loadPatterns(projectRoot) {
 
   const content = fs.readFileSync(decisionsPath, 'utf-8');
 
-  // Extract relevant sections (Coding Standards, Component Architecture)
-  const sections = [];
+  // Extract ALL ## sections from decisions.md
+  // This includes: Naming Conventions, File Structure, Error Handling, etc.
+  const sections = content.match(/## [^\n]+[\s\S]*?(?=\n## |$)/g);
 
-  const codingMatch = content.match(/## Coding Standards[\s\S]*?(?=##|$)/);
-  if (codingMatch) sections.push(codingMatch[0].trim());
+  if (!sections || sections.length === 0) {
+    // Fallback: return full content if no sections found
+    return content.trim() || null;
+  }
 
-  const componentMatch = content.match(/## Component Architecture[\s\S]*?(?=##|$)/);
-  if (componentMatch) sections.push(componentMatch[0].trim());
-
-  return sections.length > 0 ? sections.join('\n\n') : null;
+  return sections.map(s => s.trim()).join('\n\n');
 }
 
 /**

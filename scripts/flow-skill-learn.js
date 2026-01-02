@@ -192,16 +192,313 @@ function matchPattern(file, pattern) {
 }
 
 // ============================================================
+// Semantic Diff Analysis
+// ============================================================
+
+/**
+ * Extract semantic changes from git diff
+ * Analyzes what actually changed, not just which files
+ */
+function extractSemanticChanges(files, staged = false) {
+  const changes = [];
+
+  for (const file of files) {
+    try {
+      const cmd = staged
+        ? `git diff --cached -U3 -- "${file}"`
+        : `git diff HEAD -U3 -- "${file}"`;
+      const diff = execSync(cmd, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+
+      if (!diff.trim()) continue;
+
+      const fileChanges = analyzeDiff(diff, file);
+      if (fileChanges.length > 0) {
+        changes.push({ file, changes: fileChanges });
+      }
+    } catch (e) {
+      // Skip files that can't be diffed
+    }
+  }
+
+  return changes;
+}
+
+/**
+ * Analyze a diff to extract semantic patterns
+ */
+function analyzeDiff(diff, filename) {
+  const changes = [];
+  const lines = diff.split('\n');
+  const added = lines.filter(l => l.startsWith('+') && !l.startsWith('+++'));
+  const removed = lines.filter(l => l.startsWith('-') && !l.startsWith('---'));
+
+  // Detect function signature changes
+  const funcSigChanges = detectFunctionSignatureChanges(added, removed);
+  if (funcSigChanges.length > 0) {
+    changes.push(...funcSigChanges);
+  }
+
+  // Detect import changes
+  const importChanges = detectImportChanges(added, removed);
+  if (importChanges.length > 0) {
+    changes.push(...importChanges);
+  }
+
+  // Detect type annotation changes (TypeScript)
+  const typeChanges = detectTypeChanges(added, removed);
+  if (typeChanges.length > 0) {
+    changes.push(...typeChanges);
+  }
+
+  // Detect pattern adoption (error handling, null checks, etc.)
+  const patternChanges = detectPatternChanges(added, removed);
+  if (patternChanges.length > 0) {
+    changes.push(...patternChanges);
+  }
+
+  // Detect naming convention changes
+  const namingChanges = detectNamingChanges(added, removed, filename);
+  if (namingChanges.length > 0) {
+    changes.push(...namingChanges);
+  }
+
+  return changes;
+}
+
+function detectFunctionSignatureChanges(added, removed) {
+  const changes = [];
+  const funcRegex = /(?:function|const|let|var)\s+(\w+)\s*(?:=\s*)?(?:\([^)]*\)|async\s*\([^)]*\))/;
+  const arrowRegex = /(\w+)\s*(?::\s*[^=]+)?\s*=\s*(?:async\s*)?\([^)]*\)\s*(?:=>|:)/;
+
+  const removedFuncs = new Map();
+  const addedFuncs = new Map();
+
+  for (const line of removed) {
+    const match = line.match(funcRegex) || line.match(arrowRegex);
+    if (match) {
+      removedFuncs.set(match[1], line.slice(1).trim());
+    }
+  }
+
+  for (const line of added) {
+    const match = line.match(funcRegex) || line.match(arrowRegex);
+    if (match) {
+      addedFuncs.set(match[1], line.slice(1).trim());
+    }
+  }
+
+  // Find functions that were modified (same name, different signature)
+  for (const [name, oldSig] of removedFuncs) {
+    if (addedFuncs.has(name)) {
+      const newSig = addedFuncs.get(name);
+      if (oldSig !== newSig) {
+        changes.push({
+          type: 'function_signature',
+          name,
+          before: oldSig,
+          after: newSig
+        });
+      }
+    }
+  }
+
+  return changes;
+}
+
+function detectImportChanges(added, removed) {
+  const changes = [];
+  const importRegex = /import\s+(?:{[^}]+}|\*\s+as\s+\w+|\w+)\s+from\s+['"]([^'"]+)['"]/;
+  const requireRegex = /(?:const|let|var)\s+(?:{[^}]+}|\w+)\s*=\s*require\(['"]([^'"]+)['"]\)/;
+
+  const removedImports = new Set();
+  const addedImports = new Set();
+
+  for (const line of removed) {
+    const match = line.match(importRegex) || line.match(requireRegex);
+    if (match) {
+      removedImports.add(match[1]);
+    }
+  }
+
+  for (const line of added) {
+    const match = line.match(importRegex) || line.match(requireRegex);
+    if (match) {
+      addedImports.add(match[1]);
+    }
+  }
+
+  // New imports
+  for (const imp of addedImports) {
+    if (!removedImports.has(imp)) {
+      changes.push({ type: 'import_added', module: imp });
+    }
+  }
+
+  // Removed imports
+  for (const imp of removedImports) {
+    if (!addedImports.has(imp)) {
+      changes.push({ type: 'import_removed', module: imp });
+    }
+  }
+
+  return changes;
+}
+
+function detectTypeChanges(added, removed) {
+  const changes = [];
+  const typeAnnotationRegex = /:\s*([\w<>\[\]|&\s,]+)(?:\s*[=;,)])/;
+
+  // Check for type annotation additions
+  const addedTypes = added.filter(l => typeAnnotationRegex.test(l));
+  const removedTypes = removed.filter(l => typeAnnotationRegex.test(l));
+
+  if (addedTypes.length > removedTypes.length) {
+    changes.push({
+      type: 'type_annotation',
+      pattern: 'Added type annotations',
+      count: addedTypes.length - removedTypes.length
+    });
+  }
+
+  // Check for specific type improvements (any -> specific type)
+  for (const line of removed) {
+    if (line.includes(': any') || line.includes(':any')) {
+      for (const addLine of added) {
+        if (!addLine.includes(': any') && !addLine.includes(':any')) {
+          const match = addLine.match(typeAnnotationRegex);
+          if (match && match[1] !== 'any') {
+            changes.push({
+              type: 'type_improvement',
+              pattern: 'Replaced any with specific type',
+              newType: match[1].trim()
+            });
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  return changes;
+}
+
+function detectPatternChanges(added, removed) {
+  const changes = [];
+  const patterns = [
+    { name: 'null_check', regex: /\?\.|if\s*\([^)]*(?:===?\s*null|!==?\s*null|!=\s*undefined)/ },
+    { name: 'error_handling', regex: /try\s*{|catch\s*\(|\.catch\(/ },
+    { name: 'async_await', regex: /async\s+(?:function|\()|\bawait\s/ },
+    { name: 'optional_chaining', regex: /\?\.\w+|\?\[/ },
+    { name: 'nullish_coalescing', regex: /\?\?/ },
+    { name: 'early_return', regex: /^\s*if\s*\([^)]+\)\s*return/ }
+  ];
+
+  for (const { name, regex } of patterns) {
+    const addedCount = added.filter(l => regex.test(l)).length;
+    const removedCount = removed.filter(l => regex.test(l)).length;
+
+    if (addedCount > removedCount) {
+      changes.push({
+        type: 'pattern_adoption',
+        pattern: name,
+        added: addedCount - removedCount
+      });
+    } else if (removedCount > addedCount) {
+      changes.push({
+        type: 'pattern_removal',
+        pattern: name,
+        removed: removedCount - addedCount
+      });
+    }
+  }
+
+  return changes;
+}
+
+function detectNamingChanges(added, removed, filename) {
+  const changes = [];
+
+  // Check for consistent naming pattern adoption
+  const camelCaseRegex = /\b[a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*\b/g;
+  const snakeCaseRegex = /\b[a-z][a-z0-9]*_[a-z][a-z0-9_]*\b/g;
+  const kebabCaseRegex = /['"][a-z][a-z0-9]*-[a-z][a-z0-9-]*['"]/g;
+
+  const addedCamel = added.join(' ').match(camelCaseRegex)?.length || 0;
+  const removedCamel = removed.join(' ').match(camelCaseRegex)?.length || 0;
+  const addedSnake = added.join(' ').match(snakeCaseRegex)?.length || 0;
+  const removedSnake = removed.join(' ').match(snakeCaseRegex)?.length || 0;
+
+  // Detect migration from snake_case to camelCase
+  if (addedCamel > removedCamel && removedSnake > addedSnake) {
+    changes.push({
+      type: 'naming_convention',
+      pattern: 'Migrated from snake_case to camelCase'
+    });
+  }
+
+  return changes;
+}
+
+/**
+ * Format semantic changes for human-readable output
+ */
+function formatSemanticChanges(semanticChanges) {
+  if (!semanticChanges || semanticChanges.length === 0) {
+    return '';
+  }
+
+  const lines = [];
+
+  for (const { file, changes } of semanticChanges) {
+    if (changes.length === 0) continue;
+
+    for (const change of changes) {
+      switch (change.type) {
+        case 'function_signature':
+          lines.push(`- **Function signature changed**: \`${change.name}\``);
+          lines.push(`  - Before: \`${change.before.slice(0, 60)}${change.before.length > 60 ? '...' : ''}\``);
+          lines.push(`  - After: \`${change.after.slice(0, 60)}${change.after.length > 60 ? '...' : ''}\``);
+          break;
+        case 'import_added':
+          lines.push(`- **New import**: \`${change.module}\``);
+          break;
+        case 'import_removed':
+          lines.push(`- **Removed import**: \`${change.module}\``);
+          break;
+        case 'type_annotation':
+          lines.push(`- **Added ${change.count} type annotation(s)**`);
+          break;
+        case 'type_improvement':
+          lines.push(`- **Improved typing**: Replaced \`any\` with \`${change.newType}\``);
+          break;
+        case 'pattern_adoption':
+          lines.push(`- **Adopted pattern**: ${change.pattern.replace(/_/g, ' ')} (+${change.added})`);
+          break;
+        case 'pattern_removal':
+          lines.push(`- **Removed pattern**: ${change.pattern.replace(/_/g, ' ')} (-${change.removed})`);
+          break;
+        case 'naming_convention':
+          lines.push(`- **Naming**: ${change.pattern}`);
+          break;
+      }
+    }
+  }
+
+  return lines.length > 0 ? lines.join('\n') : '';
+}
+
+// ============================================================
 // Learning Extraction
 // ============================================================
 
-function extractLearningContext(files, trigger) {
+function extractLearningContext(files, trigger, staged = false) {
   const context = {
     trigger,
     timestamp: new Date().toISOString(),
     files,
     summary: '',
-    type: 'observation' // observation | correction | pattern | anti-pattern
+    type: 'observation', // observation | correction | pattern | anti-pattern
+    semanticChanges: []
   };
 
   // Try to get commit message for context
@@ -223,6 +520,9 @@ function extractLearningContext(files, trigger) {
   } else if (lowerSummary.includes('refactor') || lowerSummary.includes('improve')) {
     context.type = 'pattern';
   }
+
+  // Extract semantic changes from the diff
+  context.semanticChanges = extractSemanticChanges(files, staged);
 
   return context;
 }
@@ -256,6 +556,10 @@ function appendLearning(skillPath, context) {
   const learningsPath = path.join(knowledgeDir, 'learnings.md');
 
   const date = context.timestamp.split('T')[0];
+
+  // Format semantic changes for output
+  const semanticOutput = formatSemanticChanges(context.semanticChanges);
+
   const entry = `
 ### ${date} - ${context.summary}
 
@@ -263,7 +567,7 @@ function appendLearning(skillPath, context) {
 **Trigger**: ${context.trigger}
 **Type**: ${context.type}
 **Files**: ${context.files.slice(0, 5).join(', ')}${context.files.length > 5 ? ` (+${context.files.length - 5} more)` : ''}
-
+${semanticOutput ? `\n**Semantic Changes**:\n${semanticOutput}\n` : ''}
 ---
 `;
 
@@ -562,7 +866,10 @@ module.exports = {
   appendLearning,
   ensureKnowledgeDir,
   extractLearningContext,
-  isLearningEnabled
+  isLearningEnabled,
+  // Semantic diff analysis
+  extractSemanticChanges,
+  formatSemanticChanges
 };
 
 if (require.main === module) {

@@ -452,4 +452,19 @@ Examples:
   }
 }
 
-main();
+// ============================================================
+// Exports (for use by session-end and other modules)
+// ============================================================
+
+module.exports = {
+  autoPromote,
+  listCandidates,
+  promoteFact,
+  showStatus,
+  loadConfig
+};
+
+// Run CLI if executed directly
+if (require.main === module) {
+  main();
+}
