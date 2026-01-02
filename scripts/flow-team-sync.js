@@ -131,6 +131,56 @@ function getSyncableFiles() {
     }
   }
 
+  // Sync component-index.json if enabled
+  if (teamConfig.syncComponentIndex !== false) {
+    const indexPath = path.join(projectRoot, '.workflow', 'state', 'component-index.json');
+    if (fs.existsSync(indexPath)) {
+      files.componentIndex = {
+        path: indexPath,
+        content: fs.readFileSync(indexPath, 'utf-8'),
+        hash: hashContent(fs.readFileSync(indexPath, 'utf-8')),
+        lastModified: fs.statSync(indexPath).mtime.toISOString()
+      };
+    }
+  }
+
+  // Sync request-log.md if enabled (recent entries only if configured)
+  const syncRequestLog = teamConfig.syncRequestLog || teamConfig.sync?.requestLog;
+  if (syncRequestLog && syncRequestLog !== false) {
+    const logPath = path.join(projectRoot, '.workflow', 'state', 'request-log.md');
+    if (fs.existsSync(logPath)) {
+      let content = fs.readFileSync(logPath, 'utf-8');
+
+      // If "recent" mode, only sync last 20 entries
+      if (syncRequestLog === 'recent') {
+        const entries = content.split(/(?=### R-\d+)/);
+        const recentEntries = entries.slice(-20);
+        content = recentEntries.join('');
+      }
+
+      files.requestLog = {
+        path: logPath,
+        content,
+        hash: hashContent(content),
+        lastModified: fs.statSync(logPath).mtime.toISOString(),
+        mode: syncRequestLog
+      };
+    }
+  }
+
+  // Sync ready.json (tasks) if enabled
+  if (teamConfig.syncTasks !== false && teamConfig.sync?.tasks !== false) {
+    const tasksPath = path.join(projectRoot, '.workflow', 'state', 'ready.json');
+    if (fs.existsSync(tasksPath)) {
+      files.tasks = {
+        path: tasksPath,
+        content: fs.readFileSync(tasksPath, 'utf-8'),
+        hash: hashContent(fs.readFileSync(tasksPath, 'utf-8')),
+        lastModified: fs.statSync(tasksPath).mtime.toISOString()
+      };
+    }
+  }
+
   return files;
 }
 
@@ -367,12 +417,30 @@ function getSyncStatus() {
         hash: files.appMap.hash,
         lastModified: files.appMap.lastModified
       } : { exists: false },
+      componentIndex: files.componentIndex ? {
+        exists: true,
+        hash: files.componentIndex.hash,
+        lastModified: files.componentIndex.lastModified
+      } : { exists: false },
+      requestLog: files.requestLog ? {
+        exists: true,
+        mode: files.requestLog.mode,
+        lastModified: files.requestLog.lastModified
+      } : { exists: false },
+      tasks: files.tasks ? {
+        exists: true,
+        hash: files.tasks.hash,
+        lastModified: files.tasks.lastModified
+      } : { exists: false },
       skillLearnings: files.skillLearnings ? Object.keys(files.skillLearnings) : []
     },
     syncConfig: {
       syncDecisions: teamConfig.syncDecisions !== false,
       syncAppMap: teamConfig.syncAppMap !== false,
+      syncComponentIndex: teamConfig.syncComponentIndex !== false,
       syncSkillLearnings: teamConfig.syncSkillLearnings !== false,
+      syncRequestLog: teamConfig.syncRequestLog || 'recent',
+      syncTasks: teamConfig.syncTasks || false,
       conflictResolution: teamConfig.conflictResolution || 'newest-wins'
     }
   };
@@ -477,6 +545,19 @@ function generateStatusReport() {
   const aIcon = status.files.appMap?.exists ? '✅' : '❌';
   const aEnabled = status.syncConfig.syncAppMap ? '' : ' (disabled)';
   lines.push(`║    ${aIcon} app-map.md${aEnabled}`.padEnd(55) + '║');
+
+  const cIcon = status.files.componentIndex?.exists ? '✅' : '❌';
+  const cEnabled = status.syncConfig.syncComponentIndex ? '' : ' (disabled)';
+  lines.push(`║    ${cIcon} component-index.json${cEnabled}`.padEnd(55) + '║');
+
+  const rIcon = status.files.requestLog?.exists ? '✅' : '❌';
+  const rMode = status.syncConfig.syncRequestLog === 'recent' ? ' (recent)' : '';
+  const rEnabled = status.syncConfig.syncRequestLog ? rMode : ' (disabled)';
+  lines.push(`║    ${rIcon} request-log.md${rEnabled}`.padEnd(55) + '║');
+
+  const tIcon = status.files.tasks?.exists ? '✅' : '❌';
+  const tEnabled = status.syncConfig.syncTasks ? '' : ' (disabled)';
+  lines.push(`║    ${tIcon} ready.json (tasks)${tEnabled}`.padEnd(55) + '║');
 
   const skillCount = status.files.skillLearnings?.length || 0;
   const sEnabled = status.syncConfig.syncSkillLearnings ? '' : ' (disabled)';

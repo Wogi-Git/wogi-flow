@@ -30,6 +30,60 @@ function isExitBlocked() {
 }
 
 /**
+ * Check if verification is required before marking criteria complete
+ */
+function isVerificationRequired() {
+  const config = getConfig();
+  return config.loops?.requireVerification !== false; // Default true
+}
+
+/**
+ * Check if skipping is blocked (must complete or explicitly skip with approval)
+ */
+function isSkipBlocked() {
+  const config = getConfig();
+  return config.loops?.blockOnSkip !== false; // Default true
+}
+
+/**
+ * Attempt to skip a criterion (requires approval if blockOnSkip is true)
+ * Returns { allowed: boolean, message: string }
+ */
+function canSkipCriterion(criterionId, approvalGiven = false) {
+  const config = getConfig();
+  const session = getActiveLoop();
+
+  if (!session) {
+    return { allowed: false, message: 'No active loop session' };
+  }
+
+  const criterion = session.acceptanceCriteria.find(c => c.id === criterionId);
+  if (!criterion) {
+    return { allowed: false, message: `Criterion ${criterionId} not found` };
+  }
+
+  // If blockOnSkip is false, always allow
+  if (!isSkipBlocked()) {
+    return { allowed: true, message: 'Skip allowed (blockOnSkip: false)' };
+  }
+
+  // If blockOnSkip is true, require explicit approval
+  if (!approvalGiven) {
+    return {
+      allowed: false,
+      message: `⚠️ Cannot skip "${criterion.description}" without approval.\n` +
+               `Options:\n` +
+               `  1. Complete the criterion\n` +
+               `  2. Get explicit approval to skip\n` +
+               `  3. Abort the task`,
+      requiresApproval: true
+    };
+  }
+
+  return { allowed: true, message: 'Skip approved by user' };
+}
+
+/**
  * Get active loop session
  */
 function getActiveLoop() {
@@ -352,6 +406,9 @@ function verifyCriterion(criterion, context = {}) {
 module.exports = {
   isEnforcementEnabled,
   isExitBlocked,
+  isVerificationRequired,
+  isSkipBlocked,
+  canSkipCriterion,
   getActiveLoop,
   startLoop,
   updateCriterion,

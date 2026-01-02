@@ -36,7 +36,9 @@
     "maxIterations": 20,
     "commitEvery": 3,
     "pauseBetweenScenarios": false,
-    "blockExitUntilComplete": false
+    "blockExitUntilComplete": false,
+    "requireVerification": true,
+    "blockOnSkip": true
   },
   "parallel": {
     "enabled": true,
@@ -46,6 +48,7 @@
     "showProgress": true,
     "autoDetect": true,
     "autoSuggest": true,
+    "autoExecute": false,
     "minTasksForParallel": 2
   },
   "corrections": {
@@ -133,6 +136,7 @@
     "minCorrectionsToLearn": 1,
     "autoCreateSkills": "ask",
     "autoDetectFrameworks": true,
+    "fetchOfficialDocs": true,
     "frameworkDetectionPatterns": {
       "nestjs": ["*.module.ts", "*.controller.ts", "*.service.ts", "@nestjs/*"],
       "react": ["*.tsx", "*.jsx", "use*.ts", "react", "react-dom"],
@@ -389,9 +393,22 @@
     "syncInterval": 300000,
     "autoSync": true,
     "projectScope": true,
+    "sync": {
+      "decisions": true,
+      "appMap": true,
+      "componentIndex": true,
+      "skills": true,
+      "memory": true,
+      "requestLog": "recent",
+      "tasks": false
+    },
     "syncDecisions": true,
     "syncAppMap": true,
+    "syncComponentIndex": true,
     "syncSkillLearnings": true,
+    "syncMemory": false,
+    "syncRequestLog": "recent",
+    "syncTasks": false,
     "conflictResolution": "newest-wins",
     "aws": {
       "apiEndpoint": "https://slbche87zj.execute-api.eu-west-1.amazonaws.com/v1",

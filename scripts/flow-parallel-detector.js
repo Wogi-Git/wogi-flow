@@ -260,13 +260,14 @@ function shouldSuggestParallel(tasks) {
 
 /**
  * Check if parallel execution should auto-execute
+ * Uses autoExecute config option (not autoApprove which is for manual triggers)
  */
 function shouldAutoExecute(tasks) {
   const config = getConfig();
   const parallelConfig = config.parallel || {};
 
   if (!parallelConfig.enabled) return false;
-  if (!parallelConfig.autoApprove) return false;
+  if (!parallelConfig.autoExecute) return false; // Use autoExecute, not autoApprove
   if (!parallelConfig.autoDetect) return false;
 
   const analysis = analyzeParallelPotential(tasks);
