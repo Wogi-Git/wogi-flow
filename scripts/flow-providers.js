@@ -411,6 +411,34 @@ class LMStudioProvider extends BaseProvider {
       req.end();
     });
   }
+
+  async listModels() {
+    const endpoint = this.config.endpoint || DEFAULT_CONFIGS['lm-studio'].endpoint;
+    return new Promise((resolve) => {
+      const url = new URL('/v1/models', endpoint);
+      const req = http.request({
+        method: 'GET',
+        hostname: url.hostname,
+        port: url.port || 1234,
+        path: url.pathname,
+        timeout: 5000
+      }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            resolve((parsed.data || []).map(m => ({ id: m.id, name: m.id })));
+          } catch {
+            resolve([]);
+          }
+        });
+      });
+      req.on('error', () => resolve([]));
+      req.on('timeout', () => resolve([]));
+      req.end();
+    });
+  }
 }
 
 /**
@@ -872,14 +900,14 @@ async function detectProviders() {
   // Check LM Studio (local)
   try {
     const lmStudio = new LMStudioProvider({});
-    const result = await lmStudio.test();
-    if (result.success) {
+    const models = await lmStudio.listModels();
+    if (models.length > 0) {
       available.push({
         type: PROVIDER_TYPES.LM_STUDIO,
         name: 'LM Studio',
         local: true,
         cost: 'free',
-        models: []
+        models: models
       });
     }
   } catch {
