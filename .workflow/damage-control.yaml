@@ -1,0 +1,144 @@
+# Wogi-Flow Damage Control Patterns
+# Prevents destructive commands from running accidentally
+#
+# Note: Normal git operations (commit, push) are handled by
+# the existing commits.requireApproval config. Only truly
+# dangerous operations are listed here.
+
+# ============================================================
+# BLOCKED - Always prevent these commands (catastrophic)
+# ============================================================
+blocked:
+  # Catastrophic file deletions
+  - "rm -rf /"
+  - "rm -rf ~"
+  - "rm -rf \\*"
+  - "rm -rf \\."
+  - "rm -rf /home"
+  - "rm -rf /usr"
+  - "rm -rf /var"
+  - "rm -rf /etc"
+
+  # Database destruction
+  - "DROP DATABASE"
+  - "DROP TABLE"
+  - "TRUNCATE TABLE"
+  - "DELETE FROM.*WHERE 1=1"
+
+  # Dangerous git operations (bypass normal workflow)
+  - "git push.*--force.*(main|master)"
+  - "git push.*-f.*(main|master)"
+  - "git reset --hard origin"
+
+  # System destruction
+  - "chmod -R 777 /"
+  - "chown -R.*:.*/"
+  - "mkfs\\."
+  - ":(){\\s*:|:&\\s*};:"
+
+  # Data exfiltration
+  - "curl.*\\|.*sh"
+  - "wget.*\\|.*sh"
+  - "curl.*\\|.*bash"
+  - "wget.*\\|.*bash"
+
+# ============================================================
+# ASK - Require confirmation for these commands (dangerous)
+# Note: Normal git push is handled by commits.requireApproval
+# ============================================================
+ask:
+  # Git operations (destructive, bypass normal workflow)
+  - pattern: "git reset --hard"
+    reason: "Hard reset loses uncommitted changes"
+  - pattern: "git clean -fd"
+    reason: "Removes untracked files permanently"
+  - pattern: "git stash drop"
+    reason: "Permanently deletes stashed changes"
+  - pattern: "git branch -D"
+    reason: "Force deletes branch (even if unmerged)"
+  - pattern: "git checkout.*--force"
+    reason: "Force checkout discards local changes"
+  - pattern: "git push.*--force"
+    reason: "Force push rewrites remote history"
+
+  # File deletions
+  - pattern: "rm -rf"
+    reason: "Recursive force deletion"
+  - pattern: "rm -r "
+    reason: "Recursive deletion"
+  - pattern: "rmdir"
+    reason: "Directory removal"
+
+  # Package operations
+  - pattern: "npm publish"
+    reason: "Publishing to npm registry"
+  - pattern: "npm unpublish"
+    reason: "Unpublishing from npm registry"
+  - pattern: "npm deprecate"
+    reason: "Deprecating npm package"
+
+  # Database modifications
+  - pattern: "DELETE FROM"
+    reason: "Database deletion"
+  - pattern: "UPDATE.*SET"
+    reason: "Database update"
+  - pattern: "ALTER TABLE"
+    reason: "Database schema change"
+  - pattern: "DROP INDEX"
+    reason: "Database index deletion"
+
+  # Infrastructure
+  - pattern: "docker rm"
+    reason: "Removing Docker container"
+  - pattern: "docker rmi"
+    reason: "Removing Docker image"
+  - pattern: "docker system prune"
+    reason: "Cleaning Docker system"
+  - pattern: "kubectl delete"
+    reason: "Kubernetes resource deletion"
+  - pattern: "terraform destroy"
+    reason: "Infrastructure destruction"
+  - pattern: "terraform apply.*-auto-approve"
+    reason: "Auto-approved infrastructure change"
+
+  # AWS operations
+  - pattern: "aws s3 rm.*--recursive"
+    reason: "Recursive S3 deletion"
+  - pattern: "aws ec2 terminate"
+    reason: "EC2 instance termination"
+  - pattern: "aws rds delete"
+    reason: "RDS database deletion"
+
+  # Environment changes
+  - pattern: "export.*=.*&&"
+    reason: "Environment variable change with command"
+  - pattern: "unset "
+    reason: "Unsetting environment variable"
+
+# ============================================================
+# PATH PROTECTION
+# ============================================================
+paths:
+  # Zero access - cannot read, write, or delete
+  zeroAccess:
+    - ".ssh/"
+    - ".aws/credentials"
+    - ".env.production"
+    - ".env.local"
+    - "secrets/"
+    - "credentials/"
+
+  # Read-only - can read but not modify
+  readOnly: []
+  # Add project-specific paths as needed, e.g.:
+  # - "config/production/"
+  # - "infrastructure/production/"
+
+  # No-delete - can read and write but not delete
+  noDelete:
+    - ".workflow/state/"
+    - ".workflow/changes/"
+    - ".workflow/traces/"
+    - ".claude/"
+    - ".git/"
+    - "node_modules/"

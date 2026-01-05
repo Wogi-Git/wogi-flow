@@ -151,6 +151,96 @@ TASK-001 → TASK-005 → TASK-006
 
 If complexity is High, consider breaking into smaller stories.
 
+## Deep Decomposition Mode
+
+When the `--deep` flag is used OR when complexity detection suggests it:
+
+### When to Auto-Suggest Decomposition
+
+Check `config.json → storyDecomposition.autoDetect`. If enabled, suggest decomposition when:
+
+1. **Acceptance criteria > 5 scenarios**
+2. **UI components > 3 distinct components**
+3. **API calls > 2 endpoints**
+4. **Complexity marked as "High"**
+5. **Story affects > 5 files**
+
+When triggers are met, ask:
+> "This looks like a complex story with [specifics]. Would you like me to decompose it into [N] granular sub-tasks?"
+
+### Decomposition Rules
+
+Break stories into atomic sub-tasks:
+
+| Story Element | Sub-Task Creation |
+|---------------|-------------------|
+| Each Given/When/Then scenario | 1 sub-task per scenario |
+| Each UI component needed | 1 sub-task per component |
+| Each distinct error state | 1 sub-task for error handling |
+| Each loading state | 1 sub-task for loading UI |
+| Each empty state | 1 sub-task for empty state |
+| Each API integration | 1 sub-task per endpoint |
+| Form validation | 1 sub-task for validation logic |
+
+### Sub-Task Naming
+
+```
+Parent: TASK-001 "User Authentication"
+Children:
+  TASK-001-01: Create login form UI layout
+  TASK-001-02: Add email input with validation
+  TASK-001-03: Add password input with visibility toggle
+  TASK-001-04: Implement form validation feedback
+  TASK-001-05: Add login button with loading state
+  TASK-001-06: Integrate login API endpoint
+  TASK-001-07: Handle successful login (redirect + token)
+  TASK-001-08: Handle login failure (error display)
+  TASK-001-09: Add "Remember me" checkbox
+  TASK-001-10: Add forgot password link
+```
+
+### Sub-Task Template
+
+```markdown
+# [TASK-XXX-NN] [Focused Title]
+
+## Objective
+[Single sentence: what this sub-task accomplishes]
+
+## Done Criteria
+- [ ] [Specific, testable criterion]
+- [ ] [Specific, testable criterion]
+
+## Dependencies
+- [TASK-XXX-NN] - [What must be done first]
+
+## Scope
+[XS / S / M] - [Brief justification]
+
+## Parent
+Part of [TASK-XXX] - [Parent title]
+```
+
+### Config-Driven Behavior
+
+From `config.json → storyDecomposition`:
+
+```json
+{
+  "storyDecomposition": {
+    "autoDetect": true,        // Suggest when beneficial
+    "autoDecompose": false,    // Auto-decompose without asking
+    "complexityThreshold": "medium",
+    "minSubTasks": 5,          // Min tasks to trigger suggestion
+    "edgeCases": true,         // Generate edge case tasks
+    "loadingStates": true,     // Generate loading state tasks
+    "errorStates": true        // Generate error handling tasks
+  }
+}
+```
+
+When `autoDecompose: true`, skip the user prompt and decompose automatically.
+
 ## Quality Checklist
 
 Before finalizing a story:
@@ -164,6 +254,7 @@ Before finalizing a story:
 - [ ] Complexity is assessed
 - [ ] Out of scope is defined
 - [ ] Test strategy is included
+- [ ] If complex: Consider decomposition (check storyDecomposition config)
 
 ## Example Complete Story
 

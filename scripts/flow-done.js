@@ -28,6 +28,10 @@ const { clearCurrentTask, addKeyFact } = require('./flow-memory-blocks');
 const { trackTaskComplete } = require('./flow-session-state');
 const { autoArchiveIfNeeded } = require('./flow-log-manager');
 
+// v1.9.0 regression testing and browser test suggestions
+const { runRegressionTests } = require('./flow-regression');
+const { suggestBrowserTests } = require('./flow-browser-suggest');
+
 // Path for last failure artifact
 const LAST_FAILURE_PATH = path.join(PATHS.state, 'last-failure.json');
 
@@ -288,8 +292,41 @@ function main() {
   // Commit if there are changes
   commitChanges(commitMsg);
 
-  // v1.7.0: Check context health after task
+  // v1.9.0: Run regression tests if configured
   const config = getConfig();
+  if (config.regressionTesting?.enabled && config.regressionTesting?.runOnTaskComplete) {
+    console.log('');
+    try {
+      runRegressionTests({ force: true }).then(regressionResult => {
+        if (!regressionResult.success && config.regressionTesting?.onFailure === 'block') {
+          warn('Regression tests failed - review before continuing');
+        }
+      }).catch(err => {
+        if (process.env.DEBUG) console.error(`[DEBUG] Regression tests: ${err.message}`);
+      });
+    } catch (e) {
+      if (process.env.DEBUG) console.error(`[DEBUG] Regression tests: ${e.message}`);
+    }
+  }
+
+  // v1.9.0: Suggest browser tests for UI tasks
+  if (config.browserTesting?.enabled && config.browserTesting?.runOnTaskComplete) {
+    try {
+      const browserSuggestion = suggestBrowserTests(taskId, result.task);
+      if (browserSuggestion.suggested && browserSuggestion.flows.length > 0) {
+        console.log('');
+        console.log(color('cyan', '🌐 Browser tests available:'));
+        browserSuggestion.flows.forEach(flow => {
+          console.log(color('dim', `   - ${flow}`));
+        });
+        console.log(color('dim', `   Run: /wogi-test-browser ${browserSuggestion.flows[0]}`));
+      }
+    } catch (e) {
+      if (process.env.DEBUG) console.error(`[DEBUG] Browser test suggestion: ${e.message}`);
+    }
+  }
+
+  // v1.7.0: Check context health after task
   if (config.contextMonitor?.checkAfterTask !== false) {
     warnIfContextHigh();
   }

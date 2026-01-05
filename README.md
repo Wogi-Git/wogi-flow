@@ -1,4 +1,4 @@
-# Wogi Flow v1.8
+# Wogi Flow v1.9
 
 A self-improving AI development workflow that learns from your feedback and accumulates knowledge over time.
 
@@ -13,6 +13,7 @@ A self-improving AI development workflow that learns from your feedback and accu
 | **Project-Based Sync**    | Team sync at project scope - decisions.md, app-map.md, skills shared across team            |
 | **Voice Input**           | Voice-to-transcript support with local Whisper or cloud APIs (OpenAI, Groq)                 |
 | **Safety Guardrails**     | Bounded execution with file/command permissions and checkpoint intervals                    |
+| **Damage Control**        | Prevents destructive commands (rm -rf, DROP DATABASE) with pattern-based blocking           |
 | **Verification Gates**    | Structured gate results with auto-feed stderr for LLM self-healing                          |
 | **Execution Traces**      | JSONL event logging with artifact timeline for full run history                             |
 | **Diff-First Output**     | Preview changes before applying - unified diff with colored terminal display                |
@@ -92,6 +93,7 @@ Daily commands for working with Wogi Flow. Start with `/wogi-ready` to see tasks
 - [Skill Auto-Creation (New in v1.8)](#skill-auto-creation-new-in-v18)
 - [Project-Based Team Sync (New in v1.8)](#project-based-team-sync-new-in-v18)
 - [Voice Input (New in v1.8)](#voice-input-new-in-v18)
+- [Damage Control](#damage-control)
 - [Safety & Verification](#safety--verification)
 - [Execution Traces & Checkpoints](#execution-traces--checkpoints)
 - [Diff-First Output](#diff-first-output)
@@ -472,6 +474,91 @@ The setup wizard will:
 
 - **Recording**: `sox` - install with `brew install sox` (macOS) or `apt install sox` (Linux)
 - **Local Whisper**: `pip install openai-whisper` or download whisper.cpp
+
+---
+
+## Damage Control
+
+Prevents destructive commands from running accidentally. Pattern-based blocking with configurable protection levels.
+
+### How It Works
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Command   │ ──▶ │   Pattern   │ ──▶ │   Action    │
+│   Input     │     │   Matching  │     │   Decision  │
+└─────────────┘     └─────────────┘     └─────────────┘
+                                               │
+                          ┌────────────────────┼────────────────────┐
+                          ▼                    ▼                    ▼
+                    ┌──────────┐         ┌──────────┐         ┌──────────┐
+                    │  ✅ Allow │         │  ⚠️ Ask   │         │  🛑 Block │
+                    │  (safe)  │         │ (confirm)│         │  (deny)  │
+                    └──────────┘         └──────────┘         └──────────┘
+```
+
+### Protection Levels
+
+| Level | Action | Examples |
+|-------|--------|----------|
+| **Blocked** | Always prevented | `rm -rf /`, `DROP DATABASE`, `git push --force main` |
+| **Ask** | Requires confirmation | `git reset --hard`, `npm publish`, `DELETE FROM` |
+| **Safe** | Always allowed | `ls`, `cat`, `grep`, `git status`, `npm test` |
+
+### Path Protection
+
+| Level | Description | Examples |
+|-------|-------------|----------|
+| **Zero Access** | Cannot read, write, or delete | `.ssh/`, `.aws/credentials` |
+| **Read-Only** | Can read but not modify | Configurable per project |
+| **No-Delete** | Can read/write but not delete | `.workflow/state/`, `.git/` |
+
+### Configuration
+
+```json
+{
+  "damageControl": {
+    "enabled": false,
+    "patternsFile": ".workflow/damage-control.yaml",
+    "promptHook": {
+      "enabled": false,
+      "model": "haiku"
+    }
+  }
+}
+```
+
+### Commands
+
+```bash
+./scripts/flow dc status              # Show configuration
+./scripts/flow dc check "rm -rf /"    # Check if command is allowed
+./scripts/flow dc path "/path" read   # Check path operation
+./scripts/flow dc patterns            # List all patterns
+```
+
+### Pattern File (damage-control.yaml)
+
+```yaml
+blocked:
+  - "rm -rf /"
+  - "DROP DATABASE"
+  - "git push.*--force.*(main|master)"
+
+ask:
+  - pattern: "git reset --hard"
+    reason: "Hard reset loses uncommitted changes"
+  - pattern: "npm publish"
+    reason: "Publishing to npm registry"
+
+paths:
+  zeroAccess:
+    - ".ssh/"
+    - ".aws/credentials"
+  noDelete:
+    - ".workflow/state/"
+    - ".git/"
+```
 
 ---
 
@@ -1317,6 +1404,12 @@ flow figma confirm <file>       # Interactive confirmation
 flow figma generate             # Generate code from decisions
 flow figma server               # Start MCP server
 
+# Damage Control
+flow dc status                  # Show configuration
+flow dc check "<cmd>"           # Check if command is allowed
+flow dc path "<path>" <op>      # Check path operation (read/write/delete)
+flow dc patterns                # List all patterns
+
 # Safety & Verification (v1.6)
 flow safety status              # Show safety limits
 flow safety check-file <path>   # Check file permission
@@ -1467,6 +1560,15 @@ After 3+ similar corrections → Claude suggests promoting to permanent instruct
 ---
 
 ## Changelog
+
+### v1.9.1 - Damage Control & Auto-Verification
+
+- **Damage Control System**: Pattern-based blocking of destructive commands (`rm -rf /`, `DROP DATABASE`, force push to main)
+- **Path Protection**: Zero-access, read-only, and no-delete path levels for sensitive files
+- **Auto-Inference Verification**: Loop enforcer automatically detects verification type from criterion text
+- **Browser Test Suggestions**: Automatically suggests browser tests for UI-related acceptance criteria
+- **New commands**: `flow dc [status|check|path|patterns]`
+- **New file**: `.workflow/damage-control.yaml` for customizable patterns
 
 ### v1.9.0 - Cloud Executor Support
 

@@ -347,55 +347,301 @@ function getLoopStats() {
 }
 
 /**
- * Verify a specific criterion
- * Returns { passed: boolean, message: string }
+ * Verify a specific criterion using auto-inference
+ * Returns { passed: boolean|null, message: string, verification: string, browserTestSuggested?: boolean }
  */
 function verifyCriterion(criterion, context = {}) {
-  // This is a placeholder - actual verification happens in orchestrate
-  // But we can check for common patterns
-
+  const { execSync } = require('child_process');
   const { changedFiles = [], testResults = null, lintResults = null } = context;
+  const config = getConfig();
+  const desc = criterion.description;
+  const descLower = desc.toLowerCase();
 
-  // Check for "file exists" criteria
-  const fileExistsMatch = criterion.description.match(/create\s+(?:a\s+)?file\s+["`']?([^"`'\s]+)["`']?/i);
-  if (fileExistsMatch) {
-    const expectedFile = fileExistsMatch[1];
-    const found = changedFiles.some(f => f.includes(expectedFile));
+  // Check if auto-inference is enabled
+  const autoInfer = config.loops?.autoInferVerification !== false; // Default true
+  if (!autoInfer) {
+    return { passed: null, message: '⚠️ Auto-inference disabled', verification: 'disabled' };
+  }
+
+  const projectRoot = getProjectRoot();
+
+  // ═══════════════════════════════════════════════════════════════
+  // FILE EXISTENCE CHECKS
+  // ═══════════════════════════════════════════════════════════════
+
+  const filePatterns = [
+    /(?:create|created|add|added|new)\s+(?:a\s+)?(?:file\s+)?["`']?([^\s"`']+\.[a-z]{1,4})["`']?/i,
+    /file\s+["`']?([^\s"`']+\.[a-z]{1,4})["`']?\s+(?:created|exists|should exist)/i,
+    /["`']([^\s"`']+\.[a-z]{1,4})["`']?\s+(?:file\s+)?(?:created|exists)/i
+  ];
+
+  for (const pattern of filePatterns) {
+    const match = desc.match(pattern);
+    if (match) {
+      const filePath = match[1];
+      const fullPath = path.join(projectRoot, filePath);
+      const exists = fs.existsSync(fullPath);
+      return {
+        passed: exists,
+        message: exists ? `✓ File exists: ${filePath}` : `✗ File not found: ${filePath}`,
+        verification: 'file-exists'
+      };
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // FUNCTION/EXPORT CHECKS
+  // ═══════════════════════════════════════════════════════════════
+
+  const funcPatterns = [
+    /(?:function|export|method)\s+["`']?(\w+)["`']?\s+(?:exists?\s+)?(?:in|from)\s+["`']?([^\s"`']+)["`']?/i,
+    /["`']?([^\s"`']+)["`']?\s+(?:should\s+)?(?:export|have|contain)\s+["`']?(\w+)["`']?/i
+  ];
+
+  for (const pattern of funcPatterns) {
+    const match = desc.match(pattern);
+    if (match) {
+      let funcName, filePath;
+      // Handle both pattern orders
+      if (pattern.source.startsWith('(?:function')) {
+        [, funcName, filePath] = match;
+      } else {
+        [, filePath, funcName] = match;
+      }
+      const fullPath = path.join(projectRoot, filePath);
+      if (fs.existsSync(fullPath)) {
+        const content = fs.readFileSync(fullPath, 'utf-8');
+        const found = content.includes(funcName);
+        return {
+          passed: found,
+          message: found ? `✓ Found "${funcName}" in ${filePath}` : `✗ "${funcName}" not found in ${filePath}`,
+          verification: 'function-exists'
+        };
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // COMPONENT CHECKS
+  // ═══════════════════════════════════════════════════════════════
+
+  const componentMatch = descLower.match(/component\s+["`']?(\w+)["`']?\s+(?:renders?|works?|exists?|displays?)/i);
+  if (componentMatch) {
+    const componentName = componentMatch[1];
+    const searchPaths = ['src/components', 'components', 'src/ui', 'app'];
+    for (const searchPath of searchPaths) {
+      const searchDir = path.join(projectRoot, searchPath);
+      if (fs.existsSync(searchDir)) {
+        try {
+          const files = execSync(
+            `find "${searchDir}" -name "${componentName}.*" -o -name "${componentName.toLowerCase()}.*" 2>/dev/null`,
+            { encoding: 'utf-8', timeout: 5000 }
+          ).trim();
+          if (files) {
+            return {
+              passed: true,
+              message: `✓ Component found: ${files.split('\n')[0]}`,
+              verification: 'component-exists'
+            };
+          }
+        } catch (e) { /* continue searching */ }
+      }
+    }
     return {
-      passed: found,
-      message: found ? `File ${expectedFile} created` : `File ${expectedFile} not found`
+      passed: false,
+      message: `✗ Component "${componentName}" not found`,
+      verification: 'component-exists'
     };
   }
 
-  // Check for "tests pass" criteria
-  if (criterion.description.toLowerCase().includes('test') &&
-      criterion.description.toLowerCase().includes('pass')) {
+  // ═══════════════════════════════════════════════════════════════
+  // CLI COMMAND CHECKS
+  // ═══════════════════════════════════════════════════════════════
+
+  const cliMatch = descLower.match(/(?:command|cli|flow)\s+["`']?(\w+)["`']?\s+(?:works?|runs?|executes?)/i);
+  if (cliMatch) {
+    const cmd = cliMatch[1];
+    try {
+      execSync(`./scripts/flow ${cmd} --help`, {
+        cwd: projectRoot,
+        encoding: 'utf-8',
+        timeout: 10000,
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+      return {
+        passed: true,
+        message: `✓ Command "flow ${cmd}" works`,
+        verification: 'cli-works'
+      };
+    } catch (e) {
+      return {
+        passed: false,
+        message: `✗ Command "flow ${cmd}" failed: ${e.message.substring(0, 100)}`,
+        verification: 'cli-works'
+      };
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // CONFIG CHECKS
+  // ═══════════════════════════════════════════════════════════════
+
+  // Use original desc (not lowercase) to preserve config key case
+  const configMatch = desc.match(/(?:config(?:uration)?|settings?)\s+(?:has|contains|includes)\s+["`']?(\w+(?:\.\w+)*)["`']?/i) ||
+                      desc.match(/["`']?(\w+(?:\.\w+)*)["`']?\s+(?:in|enabled in)\s+config/i);
+  if (configMatch) {
+    const configKey = configMatch[1];
+    try {
+      const currentConfig = getConfig();
+      const keys = configKey.split('.');
+      let value = currentConfig;
+      for (const k of keys) {
+        value = value?.[k];
+      }
+      const exists = value !== undefined;
+      return {
+        passed: exists,
+        message: exists
+          ? `✓ Config "${configKey}" exists (value: ${JSON.stringify(value).substring(0, 50)})`
+          : `✗ Config "${configKey}" not found`,
+        verification: 'config-exists'
+      };
+    } catch (e) {
+      return { passed: false, message: `✗ Config check failed: ${e.message}`, verification: 'config-exists' };
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // INTEGRATION CHECKS (Module wired up)
+  // ═══════════════════════════════════════════════════════════════
+
+  const integrationMatch = desc.match(/["`']?(\w+)["`']?\s+(?:integrated|wired|connected)\s+(?:into|to|with)\s+["`']?([^\s"`']+)["`']?/i) ||
+                           desc.match(/["`']?([^\s"`']+)["`']?\s+(?:requires?|imports?|uses?)\s+["`']?(\w+)["`']?/i);
+  if (integrationMatch) {
+    const [, moduleA, fileB] = integrationMatch;
+    const fullPath = path.join(projectRoot, fileB);
+    if (fs.existsSync(fullPath)) {
+      const content = fs.readFileSync(fullPath, 'utf-8');
+      const found = content.includes(moduleA);
+      return {
+        passed: found,
+        message: found ? `✓ "${moduleA}" found in ${fileB}` : `✗ "${moduleA}" not found in ${fileB}`,
+        verification: 'integration'
+      };
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // TEST CHECKS
+  // ═══════════════════════════════════════════════════════════════
+
+  if (descLower.includes('test') && (descLower.includes('pass') || descLower.includes('succeed'))) {
     if (testResults) {
       return {
         passed: testResults.failed === 0,
-        message: testResults.failed === 0
-          ? 'All tests pass'
-          : `${testResults.failed} tests failing`
+        message: testResults.failed === 0 ? '✓ All tests pass' : `✗ ${testResults.failed} tests failing`,
+        verification: 'tests'
       };
+    }
+    // Try running tests
+    try {
+      execSync('npm test -- --passWithNoTests 2>&1 | tail -5', {
+        cwd: projectRoot,
+        encoding: 'utf-8',
+        timeout: 60000,
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+      return { passed: true, message: '✓ Tests pass', verification: 'tests' };
+    } catch (e) {
+      return { passed: false, message: `✗ Tests failed: ${e.message.substring(0, 100)}`, verification: 'tests' };
     }
   }
 
-  // Check for "lint passes" criteria
-  if (criterion.description.toLowerCase().includes('lint')) {
+  // ═══════════════════════════════════════════════════════════════
+  // LINT CHECKS
+  // ═══════════════════════════════════════════════════════════════
+
+  if (descLower.includes('lint') && (descLower.includes('pass') || descLower.includes('clean') || descLower.includes('no error'))) {
     if (lintResults) {
       return {
         passed: lintResults.errors === 0,
-        message: lintResults.errors === 0
-          ? 'No lint errors'
-          : `${lintResults.errors} lint errors`
+        message: lintResults.errors === 0 ? '✓ No lint errors' : `✗ ${lintResults.errors} lint errors`,
+        verification: 'lint'
       };
     }
   }
 
-  // Cannot auto-verify - needs manual check
+  // ═══════════════════════════════════════════════════════════════
+  // UI/BROWSER TESTING (Claude Browser Extension)
+  // ═══════════════════════════════════════════════════════════════
+
+  const uiPatterns = [
+    /(?:ui|user interface|page|screen|view)\s+(?:renders?|displays?|shows?|works?)/i,
+    /(?:button|form|input|modal|dialog|dropdown)\s+(?:works?|functions?|responds?)/i,
+    /(?:click|submit|select|hover)\s+(?:works?|triggers?)/i,
+    /user\s+(?:can|should be able to)\s+(?:see|click|submit|enter|select)/i,
+    /(?:displays?|shows?|renders?)\s+(?:correctly|properly|as expected)/i
+  ];
+
+  const isUITest = uiPatterns.some(p => p.test(desc));
+  const suggestBrowserTests = config.loops?.suggestBrowserTests !== false; // Default true
+  const browserConfig = config.browserTesting || {};
+
+  if (isUITest && suggestBrowserTests && browserConfig.enabled) {
+    return {
+      passed: null,
+      message: '🌐 UI criterion detected - browser test recommended',
+      verification: 'browser-test',
+      browserTestSuggested: true,
+      suggestedFlow: inferBrowserTestFlow(desc)
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // FALLBACK
+  // ═══════════════════════════════════════════════════════════════
+
+  const fallbackToManual = config.loops?.fallbackToManual !== false; // Default true
+  if (fallbackToManual) {
+    return {
+      passed: null,
+      message: '⚠️ Could not auto-verify - manual check required',
+      verification: 'manual'
+    };
+  }
+
   return {
-    passed: null,
-    message: 'Requires manual verification'
+    passed: false,
+    message: '✗ Could not verify and fallbackToManual is disabled',
+    verification: 'failed'
+  };
+}
+
+/**
+ * Infer browser test flow from criterion description
+ */
+function inferBrowserTestFlow(description) {
+  const desc = description.toLowerCase();
+
+  // Try to extract page/screen name (e.g., "the login page renders" -> "login")
+  const pageMatch = desc.match(/(?:the\s+)?(\w+)\s+(?:page|screen|view)\s+(?:renders?|displays?|shows?|works?)/i);
+
+  // Try to extract component name (e.g., "the registration form works" -> "registration")
+  const componentMatch = desc.match(/(?:the\s+)?(\w+)\s+(?:button|form|modal|dialog|dropdown|input)\s+(?:works?|functions?|responds?|renders?)/i);
+
+  // Try to extract action target (e.g., "click the submit button" -> "submit")
+  const actionMatch = desc.match(/(?:click|submit|select|hover|enter)\s+(?:on\s+)?(?:the\s+)?(\w+)/i);
+
+  // Also try to find any named element in quotes
+  const quotedMatch = desc.match(/["`'](\w+)["`']/);
+
+  const target = pageMatch?.[1] || componentMatch?.[1] || actionMatch?.[1] || quotedMatch?.[1] || 'unknown';
+
+  return {
+    type: pageMatch ? 'page' : componentMatch ? 'component' : 'action',
+    target: target,
+    action: actionMatch ? actionMatch[0] : 'verify-renders',
+    description
   };
 }
 
@@ -418,6 +664,7 @@ module.exports = {
   endLoop,
   getLoopStats,
   verifyCriterion,
+  inferBrowserTestFlow,
   generateEnforcementMessage
 };
 

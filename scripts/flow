@@ -51,6 +51,7 @@ show_help() {
     echo ""
     echo "Story & Feature Creation:"
     echo "  story <title>        Create detailed story with acceptance criteria"
+    echo "  story <title> --deep Create story with automatic decomposition"
     echo "  new-feature <n>   Create new feature"
     echo "  bug <title>          Create bug report"
     echo ""
@@ -58,6 +59,9 @@ show_help() {
     echo "  health               Check workflow health"
     echo "  verify <gate>        Run verification gate (lint, typecheck, test, build)"
     echo "  verify all           Run all verification gates"
+    echo "  regression           Run regression tests on completed tasks"
+    echo "  regression --all     Test all completed tasks"
+    echo "  browser-suggest      Suggest browser tests for a task"
     echo "  standup [days]       Generate standup summary"
     echo "  session-end          End session properly"
     echo "  init                 Initialize workflow (legacy)"
@@ -228,7 +232,7 @@ case "${1:-}" in
         node "$SCRIPT_DIR/flow-done.js" "${@:2}"
         ;;
     story)
-        "$SCRIPT_DIR/flow-story" "${@:2}"
+        node "$SCRIPT_DIR/flow-story.js" "${@:2}"
         ;;
     new-feature)
         "$SCRIPT_DIR/flow-new-feature" "${@:2}"
@@ -248,8 +252,17 @@ case "${1:-}" in
     safety)
         node "$SCRIPT_DIR/flow-safety.js" "${@:2}"
         ;;
+    damage-control|dc)
+        node "$SCRIPT_DIR/flow-damage-control.js" "${@:2}"
+        ;;
     verify)
         node "$SCRIPT_DIR/flow-verify.js" "${@:2}"
+        ;;
+    regression)
+        node "$SCRIPT_DIR/flow-regression.js" "${@:2}"
+        ;;
+    browser-suggest)
+        node "$SCRIPT_DIR/flow-browser-suggest.js" "${@:2}"
         ;;
     run-trace)
         node "$SCRIPT_DIR/flow-run-trace.js" "${@:2}"

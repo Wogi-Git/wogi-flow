@@ -31,14 +31,17 @@
   },
   "loops": {
     "enabled": true,
-    "enforced": false,
+    "enforced": true,
+    "blockExitUntilComplete": true,
+    "requireVerification": true,
+    "blockOnSkip": true,
     "maxRetries": 5,
     "maxIterations": 20,
     "commitEvery": 3,
     "pauseBetweenScenarios": false,
-    "blockExitUntilComplete": false,
-    "requireVerification": true,
-    "blockOnSkip": true
+    "autoInferVerification": true,
+    "fallbackToManual": true,
+    "suggestBrowserTests": true
   },
   "parallel": {
     "enabled": true,
@@ -500,5 +503,41 @@
     "defaultDuration": 30,
     "sampleRate": 16000,
     "channels": 1
+  },
+  "regressionTesting": {
+    "enabled": true,
+    "sampleSize": 3,
+    "runOnTaskComplete": true,
+    "onFailure": "warn"
+  },
+  "storyDecomposition": {
+    "autoDetect": true,
+    "autoDecompose": false,
+    "complexityThreshold": "medium",
+    "minSubTasks": 5,
+    "edgeCases": true,
+    "loadingStates": true,
+    "errorStates": true
+  },
+  "browserTesting": {
+    "enabled": true,
+    "runOnTaskComplete": true,
+    "runForUITasks": true,
+    "autoRun": false,
+    "timeout": 30000,
+    "screenshotOnFailure": true
+  },
+  "damageControl": {
+    "enabled": false,
+    "patternsFile": ".workflow/damage-control.yaml",
+    "promptHook": {
+      "enabled": false,
+      "model": "haiku",
+      "timeout": 5000,
+      "skipSafeCommands": true
+    },
+    "onBlock": "error",
+    "onAsk": "prompt",
+    "logging": true
   }
 }

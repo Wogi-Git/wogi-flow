@@ -2,6 +2,12 @@ Create a detailed story with acceptance criteria. Provide title: `/wogi-story Ad
 
 Load `agents/story-writer.md` for the full story format.
 
+## Options
+
+- `--deep` - Enable deep decomposition mode (auto-generate granular sub-tasks)
+
+## Standard Mode
+
 Create a story with:
 1. **User Story**: As a [user], I want [action], so that [benefit]
 2. **Description**: 2-4 sentences of context
@@ -17,6 +23,53 @@ Create a story with:
 6. **Dependencies**: What must be done first
 7. **Complexity**: Low/Medium/High
 
+## Deep Decomposition Mode (`--deep`)
+
+When `--deep` flag is used, OR when Claude detects a complex story:
+
+1. Create the parent story as above
+2. Analyze complexity factors:
+   - Number of acceptance criteria (>5 triggers decomposition)
+   - Distinct UI components needed (>3 triggers)
+   - API endpoints involved (>2 triggers)
+   - Files likely to change (>10 triggers)
+3. Auto-decompose into granular sub-tasks:
+   - Each acceptance scenario → separate sub-task
+   - Each UI component → separate sub-task
+   - Each error state → separate sub-task
+   - Each loading state → separate sub-task
+   - Each API integration → separate sub-task
+
+### Sub-Task Format
+
+Parent: `TASK-XXX` (the main story)
+Children: `TASK-XXX-01`, `TASK-XXX-02`, etc.
+
+Each sub-task includes:
+- Single focused objective
+- Clear done criteria
+- Dependencies on other sub-tasks
+- Estimated scope (XS/S/M)
+
+### Auto-Suggest Behavior
+
+Check `config.json → storyDecomposition`:
+- `autoDetect: true` - Claude suggests when beneficial (default)
+- `autoDecompose: true` - Auto-decompose without asking
+- `autoDecompose: false` - Only decompose with `--deep` flag
+
+When `autoDetect` is enabled and complexity is detected, Claude will ask:
+> "This looks like a complex story with [X scenarios]. Would you like me to decompose it into granular sub-tasks?"
+
+## Output
+
 Save the story to `.workflow/changes/[feature]/TASK-XXX.md`
+
+If decomposed, also create:
+- `.workflow/changes/[feature]/TASK-XXX-01.md` (sub-task 1)
+- `.workflow/changes/[feature]/TASK-XXX-02.md` (sub-task 2)
+- etc.
+
+Update `ready.json` with parent task and all sub-tasks.
 
 Ask clarifying questions if needed to write good acceptance criteria.

@@ -127,7 +127,33 @@ cat .workflow/state/decisions.md # Project rules
 1. Update `request-log.md` with tags
 2. Update `app-map.md` if new components
 3. Run quality gates (lint, typecheck, test)
-4. Provide completion report
+4. **Run regression tests** (if enabled in config)
+5. **Suggest browser tests** (if UI task and tests exist)
+6. Provide completion report
+
+### Regression Testing (v1.9+)
+After task completion, optionally test 3 random previously-completed tasks:
+```bash
+./scripts/flow regression        # Test random completed tasks
+./scripts/flow regression --all  # Test all completed
+```
+Configure in `config.json → regressionTesting`:
+- `enabled`: true/false
+- `sampleSize`: Number of tasks to test (default: 3)
+- `runOnTaskComplete`: Auto-run after each task
+- `onFailure`: "warn" | "block" | "fix"
+
+### Browser Testing (v1.9+)
+For UI tasks, suggest browser tests if available:
+- Check `.workflow/tests/flows/` for test flows
+- If task modified `.tsx`/`.jsx` files, suggest: `/wogi-test-browser [flow]`
+- Configure in `config.json → browserTesting`
+
+### Story Decomposition (v1.9+)
+For complex stories, auto-decompose into granular sub-tasks:
+- Use `/wogi-story "title" --deep` for explicit decomposition
+- With `storyDecomposition.autoDetect: true`, Claude suggests when beneficial
+- With `storyDecomposition.autoDecompose: true`, fully automatic
 
 ## Auto-Validation (CRITICAL)
 
