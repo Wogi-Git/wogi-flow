@@ -7,7 +7,7 @@ Run an autonomous loop until completion criteria are met. For ad-hoc work that i
 
 ## What This Does
 
-Inspired by [Ralph Wiggum](https://github.com/anthropics/claude-code/tree/main/plugins/ralph-wiggum), this command creates a self-reinforcing loop that continues until the work is actually done.
+Creates a self-reinforcing loop that continues until the work is actually done - no premature exits.
 
 ```
 ┌─────────────────────────────────────────────────────┐

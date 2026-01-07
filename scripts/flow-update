@@ -40,7 +40,6 @@ PRESERVE_PATHS=(
     ".workflow/specs"
     ".workflow/tests"
     ".claude/rules"
-    ".claude/skills"
 )
 
 # Config keys to preserve when merging config.json
@@ -100,10 +99,27 @@ backup_config() {
         echo -e "${GREEN}✓${NC} Custom rules backed up"
     fi
 
-    # Backup installed skills customizations
-    if [ -d "$PROJECT_ROOT/.claude/skills" ] && [ "$(ls -A "$PROJECT_ROOT/.claude/skills" 2>/dev/null)" ]; then
-        cp -r "$PROJECT_ROOT/.claude/skills" "$TEMP_DIR/skills.backup"
-        echo -e "${GREEN}✓${NC} Installed skills backed up"
+    # Backup installed skills customizations (learnings)
+    if [ -d "$PROJECT_ROOT/skills" ] && [ "$(ls -A "$PROJECT_ROOT/skills" 2>/dev/null)" ]; then
+        # Only backup learnings.md files (user-specific knowledge)
+        mkdir -p "$TEMP_DIR/skills.backup"
+        local backup_dir="$TEMP_DIR/skills.backup"
+        while IFS= read -r -d '' learnings_file; do
+            # learnings_file = skills/my-skill/knowledge/learnings.md
+            # Go up 2 levels: knowledge/ -> my-skill/ to get skill name
+            knowledge_dir=$(dirname "$learnings_file")
+            skill_dir=$(dirname "$knowledge_dir")
+            skill_name=$(basename "$skill_dir")
+            mkdir -p "$backup_dir/$skill_name/knowledge"
+            cp "$learnings_file" "$backup_dir/$skill_name/knowledge/"
+        done < <(find "$PROJECT_ROOT/skills" -name "learnings.md" -print0 2>/dev/null)
+        echo -e "${GREEN}✓${NC} Skill learnings backed up"
+    fi
+
+    # Migrate old .claude/skills if exists (v1.x compatibility)
+    if [ -d "$PROJECT_ROOT/.claude/skills" ]; then
+        echo -e "${YELLOW}!${NC} Found old .claude/skills directory - will migrate"
+        cp -r "$PROJECT_ROOT/.claude/skills" "$TEMP_DIR/old_skills.backup"
     fi
 }
 
@@ -227,25 +243,64 @@ EOF
 
 restore_customizations() {
     echo -e "${CYAN}Restoring customizations...${NC}"
-    
+
     # Restore custom rules (merge with new defaults)
     if [ -d "$TEMP_DIR/rules.backup" ]; then
         mkdir -p "$PROJECT_ROOT/.claude/rules"
         cp -r "$TEMP_DIR/rules.backup/"* "$PROJECT_ROOT/.claude/rules/" 2>/dev/null || true
         echo -e "${GREEN}✓${NC} Custom rules restored"
     fi
-    
-    # Restore installed skills (don't overwrite with placeholders)
+
+    # Restore skill learnings (preserve user knowledge)
     if [ -d "$TEMP_DIR/skills.backup" ]; then
         for skill_dir in "$TEMP_DIR/skills.backup/"*/; do
             skill_name=$(basename "$skill_dir")
-            # Only restore if it's not a placeholder (has actual content)
-            if [ -d "$skill_dir/commands" ] || [ -d "$skill_dir/templates" ]; then
-                mkdir -p "$PROJECT_ROOT/.claude/skills"
-                cp -r "$skill_dir" "$PROJECT_ROOT/.claude/skills/"
-                echo -e "${GREEN}✓${NC} Restored skill: $skill_name"
+            learnings_file="$skill_dir/knowledge/learnings.md"
+            if [ -f "$learnings_file" ]; then
+                skill_root="$PROJECT_ROOT/skills/$skill_name"
+                # Only restore if skill exists (don't create orphan learnings)
+                if [ -d "$skill_root" ]; then
+                    dest_dir="$skill_root/knowledge"
+                    mkdir -p "$dest_dir"
+                    cp "$learnings_file" "$dest_dir/"
+                    echo -e "${GREEN}✓${NC} Restored learnings: $skill_name"
+                fi
             fi
         done
+    fi
+
+    # Migrate old .claude/skills to skills/ if present
+    if [ -d "$TEMP_DIR/old_skills.backup" ]; then
+        echo -e "${CYAN}Migrating old skills...${NC}"
+        for old_skill_dir in "$TEMP_DIR/old_skills.backup/"*/; do
+            skill_name=$(basename "$old_skill_dir")
+            new_skill_dir="$PROJECT_ROOT/skills/$skill_name"
+
+            # Only migrate learnings if skill exists in new location
+            if [ -d "$new_skill_dir" ]; then
+                old_learnings="$old_skill_dir/knowledge/learnings.md"
+                if [ -f "$old_learnings" ]; then
+                    mkdir -p "$new_skill_dir/knowledge"
+                    # Merge learnings if both exist
+                    new_learnings="$new_skill_dir/knowledge/learnings.md"
+                    if [ -f "$new_learnings" ]; then
+                        # Append old learnings to new
+                        echo "" >> "$new_learnings"
+                        echo "## Migrated from .claude/skills" >> "$new_learnings"
+                        cat "$old_learnings" >> "$new_learnings"
+                    else
+                        cp "$old_learnings" "$new_learnings"
+                    fi
+                    echo -e "${GREEN}✓${NC} Migrated learnings: $skill_name"
+                fi
+            fi
+        done
+
+        # Remove old .claude/skills directory
+        if [ -d "$PROJECT_ROOT/.claude/skills" ]; then
+            rm -rf "$PROJECT_ROOT/.claude/skills"
+            echo -e "${GREEN}✓${NC} Removed old .claude/skills directory"
+        fi
     fi
 }
 

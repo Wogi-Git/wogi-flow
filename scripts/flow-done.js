@@ -32,6 +32,9 @@ const { autoArchiveIfNeeded } = require('./flow-log-manager');
 const { runRegressionTests } = require('./flow-regression');
 const { suggestBrowserTests } = require('./flow-browser-suggest');
 
+// v2.0 durable session support
+const { loadDurableSession, archiveDurableSession } = require('./flow-durable-session');
+
 // Path for last failure artifact
 const LAST_FAILURE_PATH = path.join(PATHS.state, 'last-failure.json');
 
@@ -204,7 +207,7 @@ function commitChanges(commitMsg) {
   }
 }
 
-function main() {
+async function main() {
   const taskId = process.argv[2];
   const commitMsg = process.argv[3] || `Complete ${taskId}`;
 
@@ -267,6 +270,19 @@ function main() {
 
   console.log(color('green', `✓ Completed: ${taskId}`));
 
+  // v2.0: Archive durable session if one exists for this task
+  try {
+    const durableSession = loadDurableSession();
+    if (durableSession && durableSession.taskId === taskId) {
+      const archived = archiveDurableSession('completed');
+      if (archived && process.env.DEBUG) {
+        console.log(color('dim', `Archived durable session: ${archived.metrics.stepsCompleted} steps completed`));
+      }
+    }
+  } catch (e) {
+    if (process.env.DEBUG) console.error(`[DEBUG] Durable session archive: ${e.message}`);
+  }
+
   // v1.7.0: Track task completion in session state and memory blocks
   try {
     trackTaskComplete(taskId);
@@ -297,13 +313,13 @@ function main() {
   if (config.regressionTesting?.enabled && config.regressionTesting?.runOnTaskComplete) {
     console.log('');
     try {
-      runRegressionTests({ force: true }).then(regressionResult => {
-        if (!regressionResult.success && config.regressionTesting?.onFailure === 'block') {
-          warn('Regression tests failed - review before continuing');
-        }
-      }).catch(err => {
-        if (process.env.DEBUG) console.error(`[DEBUG] Regression tests: ${err.message}`);
-      });
+      const regressionResult = await runRegressionTests({ force: true });
+      if (!regressionResult.success && config.regressionTesting?.onFailure === 'block') {
+        warn('Regression tests failed - review before continuing');
+        process.exit(1);
+      } else if (!regressionResult.success) {
+        warn('Regression tests failed - consider reviewing');
+      }
     } catch (e) {
       if (process.env.DEBUG) console.error(`[DEBUG] Regression tests: ${e.message}`);
     }
@@ -332,4 +348,7 @@ function main() {
   }
 }
 
-main();
+main().catch(err => {
+  console.error(`Error: ${err.message}`);
+  process.exit(1);
+});

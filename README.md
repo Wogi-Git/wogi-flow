@@ -7,7 +7,7 @@ A self-improving AI development workflow that learns from your feedback and accu
 | Feature                   | Description                                                                                 |
 | ------------------------- | ------------------------------------------------------------------------------------------- |
 | **Pattern Enforcement**   | Active pattern injection from decisions.md/app-map.md into prompts with citation validation |
-| **Loop Enforcement**      | "Ralph Wiggum mode" - blocks exit until all acceptance criteria pass                        |
+| **Loop Enforcement**      | Blocks task exit until all acceptance criteria pass - no incomplete work                    |
 | **Parallel Auto-Detect**  | Automatically detects and suggests parallel task execution                                  |
 | **Skill Auto-Creation**   | Detects frameworks and generates skills from official documentation                         |
 | **Project-Based Sync**    | Team sync at project scope - decisions.md, app-map.md, skills shared across team            |
@@ -164,7 +164,7 @@ export function formatDate(date) { ... }
 
 ## Loop Enforcement (New in v1.8)
 
-"Ralph Wiggum Mode" - prevents exiting tasks until all acceptance criteria pass.
+Prevents exiting tasks until all acceptance criteria pass - ensures no incomplete work.
 
 ### How It Works
 
@@ -1582,7 +1582,7 @@ After 3+ similar corrections → Claude suggests promoting to permanent instruct
 ### v1.8.0 - Pattern Enforcement & Team Sync
 
 - **Pattern Enforcement**: Active pattern injection from decisions.md/app-map.md into prompts with citation validation
-- **Loop Enforcement**: "Ralph Wiggum Mode" - blocks exit until all acceptance criteria pass, requireVerification, blockOnSkip
+- **Loop Enforcement**: Blocks exit until all acceptance criteria pass, requireVerification, blockOnSkip
 - **Parallel Auto-Detection**: Automatically detects parallelizable tasks with autoSuggest and autoExecute options
 - **Skill Auto-Creation**: Detects frameworks from package.json and file patterns, fetches official documentation
 - **Project-Based Team Sync**: Sync decisions.md, app-map.md, component-index, skills, and memory facts across team

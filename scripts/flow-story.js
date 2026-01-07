@@ -14,7 +14,16 @@
 
 const fs = require('fs');
 const path = require('path');
-const { getProjectRoot, colors, getConfig } = require('./flow-utils');
+const {
+  getProjectRoot,
+  colors,
+  getConfig,
+  getConfigValue,
+  generateTaskId,
+  parseFlags,
+  outputJson,
+  withLock
+} = require('./flow-utils');
 
 const PROJECT_ROOT = getProjectRoot();
 const WORKFLOW_DIR = path.join(PROJECT_ROOT, '.workflow');
@@ -27,43 +36,19 @@ function log(color, ...args) {
 }
 
 /**
- * Get next task number from a feature directory
+ * Generate a task ID for a story
+ * Uses hash-based IDs (wf-XXXXXXXX format)
  */
-function getNextTaskNumber(featureDir) {
-  const tasksFile = path.join(featureDir, 'tasks.json');
+function getTaskId(title) {
+  return generateTaskId(title);
+}
 
-  if (fs.existsSync(tasksFile)) {
-    try {
-      const content = fs.readFileSync(tasksFile, 'utf8');
-      const matches = content.match(/"id":\s*"TASK-(\d+)"/g) || [];
-      const numbers = matches.map(m => parseInt(m.match(/\d+/)[0], 10));
-      return numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
-    } catch (e) {
-      return 1;
-    }
-  }
-
-  // Also check ready.json for existing task numbers
-  if (fs.existsSync(READY_PATH)) {
-    try {
-      const ready = JSON.parse(fs.readFileSync(READY_PATH, 'utf8'));
-      const allTasks = [
-        ...(ready.ready || []),
-        ...(ready.inProgress || []),
-        ...(ready.recentlyCompleted || []),
-        ...(ready.blocked || [])
-      ];
-      const numbers = allTasks
-        .map(t => t.id?.match(/TASK-(\d+)/))
-        .filter(Boolean)
-        .map(m => parseInt(m[1], 10));
-      return numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
-    } catch (e) {
-      return 1;
-    }
-  }
-
-  return 1;
+/**
+ * Generate a sub-task ID
+ * Sub-tasks use parent ID with numeric suffix: wf-a1b2c3d4-01, wf-a1b2c3d4-02, etc.
+ */
+function getSubTaskId(parentId, subNum) {
+  return `${parentId}-${String(subNum).padStart(2, '0')}`;
 }
 
 /**
@@ -126,7 +111,7 @@ function generateStoryTemplate(taskId, title) {
  * Generate sub-task template
  */
 function generateSubTaskTemplate(parentId, subNum, objective, doneCriteria, deps = []) {
-  const subTaskId = `${parentId}-${String(subNum).padStart(2, '0')}`;
+  const subTaskId = getSubTaskId(parentId, subNum);
   const depStr = deps.length > 0
     ? deps.map(d => `- ${d}`).join('\n')
     : '- None (can start immediately)';
@@ -221,17 +206,20 @@ function analyzeForDecomposition(title) {
 /**
  * Create story with optional deep decomposition
  */
-function createStory(title, feature, options = {}) {
+async function createStory(title, feature, options = {}) {
   const config = getConfig();
   const decompositionConfig = config.storyDecomposition || {};
+
+  // Get priority from options or config
+  const defaultPriority = getConfigValue('priorities.defaultPriority', 'P2');
+  const priority = options.priority || defaultPriority;
 
   // Ensure directories exist
   const featureDir = path.join(CHANGES_DIR, feature);
   fs.mkdirSync(featureDir, { recursive: true });
 
-  // Get next task ID
-  const nextNum = getNextTaskNumber(featureDir);
-  const taskId = `TASK-${String(nextNum).padStart(3, '0')}`;
+  // Generate hash-based task ID
+  const taskId = getTaskId(title);
 
   // Create main story file
   const storyContent = generateStoryTemplate(taskId, title);
@@ -242,6 +230,7 @@ function createStory(title, feature, options = {}) {
     taskId,
     title,
     feature,
+    priority,
     storyFile,
     subTasks: []
   };
@@ -283,39 +272,42 @@ function createStory(title, feature, options = {}) {
       subNum++;
     }
 
-    // Update ready.json with parent and sub-tasks
+    // Update ready.json with parent and sub-tasks (with file locking)
     if (fs.existsSync(READY_PATH)) {
       try {
-        const ready = JSON.parse(fs.readFileSync(READY_PATH, 'utf8'));
-        ready.ready = ready.ready || [];
+        await withLock(READY_PATH, async () => {
+          const ready = JSON.parse(fs.readFileSync(READY_PATH, 'utf8'));
+          ready.ready = ready.ready || [];
 
-        // Add parent task
-        ready.ready.push({
-          id: taskId,
-          title,
-          type: 'parent',
-          subTasks: subTaskIds,
-          status: 'ready',
-          priority: 'medium',
-          createdAt: new Date().toISOString()
-        });
-
-        // Add sub-tasks
-        for (let i = 0; i < result.subTasks.length; i++) {
-          const sub = result.subTasks[i];
+          // Add parent task with new format
           ready.ready.push({
-            id: sub.id,
-            title: sub.objective,
-            type: 'sub-task',
-            parent: taskId,
+            id: taskId,
+            title,
+            type: 'parent',
+            subTasks: subTaskIds,
             status: 'ready',
-            priority: 'medium',
-            dependencies: i > 0 ? [result.subTasks[i - 1].id] : [],
+            priority,
             createdAt: new Date().toISOString()
           });
-        }
 
-        fs.writeFileSync(READY_PATH, JSON.stringify(ready, null, 2));
+          // Add sub-tasks with new format
+          for (let i = 0; i < result.subTasks.length; i++) {
+            const sub = result.subTasks[i];
+            ready.ready.push({
+              id: sub.id,
+              title: sub.objective,
+              type: 'sub-task',
+              parent: taskId,
+              status: 'ready',
+              priority,
+              dependencies: i > 0 ? [result.subTasks[i - 1].id] : [],
+              createdAt: new Date().toISOString()
+            });
+          }
+
+          ready.lastUpdated = new Date().toISOString();
+          fs.writeFileSync(READY_PATH, JSON.stringify(ready, null, 2));
+        });
         result.addedToReady = true;
       } catch (e) {
         result.addedToReady = false;
@@ -331,63 +323,82 @@ function createStory(title, feature, options = {}) {
 
 // CLI handling
 if (require.main === module) {
-  const args = process.argv.slice(2);
+  (async () => {
+  const { flags, positional } = parseFlags(process.argv.slice(2));
 
-  if (args.includes('--help') || args.includes('-h') || args.length === 0) {
+  if (flags.help || positional.length === 0) {
     console.log(`
 Wogi Flow - Story Creation
 
 Usage:
-  flow story "<title>"                    Create standard story
-  flow story "<title>" --deep             Create with decomposition
-  flow story "<title>" <feature>          Specify feature folder
-  flow story "<title>" <feature> --deep   Both options
+  flow story "<title>"                          Create standard story
+  flow story "<title>" --deep                   Create with decomposition
+  flow story "<title>" <feature>                Specify feature folder
+  flow story "<title>" --priority P1            Set priority (P0-P4)
+  flow story "<title>" <feature> --deep --json  All options
 
 Options:
-  --deep     Automatically decompose into sub-tasks
+  --deep           Automatically decompose into sub-tasks
+  --priority <P>   Priority P0-P4 (default: from config, usually P2)
+  --json           Output JSON instead of human-readable
 
 Configuration (config.json):
   "storyDecomposition": {
     "autoDetect": true,        // Suggest decomposition when beneficial
     "autoDecompose": false,    // Auto-decompose without asking
-    "complexityThreshold": "medium",
-    "minSubTasks": 5,
-    "edgeCases": true,
-    "loadingStates": true,
-    "errorStates": true
+  }
+  "priorities": {
+    "defaultPriority": "P2",   // Default priority for new stories
   }
 
 Examples:
   flow story "Add user login"
   flow story "Add user login" --deep
+  flow story "Add user login" --priority P1
   flow story "Add user login" authentication
-  flow story "Add user login" authentication --deep
+  flow story "Add user login" authentication --deep --json
 `);
     process.exit(0);
   }
 
-  // Parse arguments
-  const isDeep = args.includes('--deep');
-  const filteredArgs = args.filter(a => a !== '--deep');
-
-  if (filteredArgs.length === 0) {
+  if (positional.length === 0) {
     log('red', 'Error: Title is required');
     process.exit(1);
   }
 
-  const title = filteredArgs[0];
-  const feature = filteredArgs[1] || 'general';
+  const title = positional[0];
+  const feature = positional[1] || 'general';
+
+  // Validate priority if provided
+  let priority = flags.priority;
+  if (priority && !/^P[0-4]$/.test(priority)) {
+    log('yellow', `Warning: Invalid priority "${priority}", using default`);
+    priority = undefined;
+  }
 
   // Create story
-  const result = createStory(title, feature, { deep: isDeep });
+  const result = await createStory(title, feature, {
+    deep: flags.deep,
+    priority
+  });
 
-  // Output results
+  // JSON output
+  if (flags.json) {
+    outputJson({
+      success: true,
+      ...result
+    });
+    // outputJson exits, so this won't run
+  }
+
+  // Human-readable output
   console.log('');
   log('green', `✓ Created story: ${result.taskId}`);
   log('cyan', `  ${result.storyFile}`);
   console.log('');
   log('white', `Title: ${result.title}`);
   log('white', `Feature: ${result.feature}`);
+  log('white', `Priority: ${result.priority}`);
 
   if (result.decomposed) {
     console.log('');
@@ -415,6 +426,10 @@ Examples:
   } else {
     log('dim', '  3. Start with: /wogi-start ' + result.subTasks[0].id);
   }
+  })().catch(e => {
+    log('red', `Error: ${e.message}`);
+    process.exit(1);
+  });
 }
 
 // Export for use by other modules
@@ -423,5 +438,6 @@ module.exports = {
   analyzeForDecomposition,
   generateStoryTemplate,
   generateSubTaskTemplate,
-  getNextTaskNumber
+  getTaskId,
+  getSubTaskId
 };

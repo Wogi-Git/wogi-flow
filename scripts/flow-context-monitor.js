@@ -30,13 +30,27 @@ const {
 // ============================================================
 
 /**
- * Estimate tokens from text (rough: 4 chars = 1 token)
- * This is a reasonable approximation for English text.
- * Code tends to be slightly more token-dense.
+ * Estimate tokens from text
+ * Uses different ratios for prose vs code content:
+ * - Prose: ~4 chars = 1 token
+ * - Code: ~3 chars = 1 token (more token-dense)
  */
-function estimateTokens(text) {
+function estimateTokens(text, isCode = false) {
   if (!text) return 0;
-  return Math.ceil(text.length / 4);
+  // Code is more token-dense due to keywords, punctuation, short variable names
+  const charsPerToken = isCode ? 3 : 4;
+  return Math.ceil(text.length / charsPerToken);
+}
+
+/**
+ * Detect if content is primarily code (for token estimation)
+ */
+function isCodeContent(content) {
+  if (!content || content.length < 100) return false;
+  // Simple heuristics: code has more brackets, semicolons, imports
+  const codeIndicators = (content.match(/[{}\[\]();=]/g) || []).length;
+  const ratio = codeIndicators / content.length;
+  return ratio > 0.03; // More than 3% is likely code
 }
 
 /**
@@ -46,7 +60,9 @@ function estimateFileTokens(filePath) {
   try {
     if (!fileExists(filePath)) return 0;
     const content = fs.readFileSync(filePath, 'utf-8');
-    return estimateTokens(content);
+    // Use code estimation for code files
+    const isCode = /\.(js|ts|jsx|tsx|json|css|scss)$/.test(filePath) || isCodeContent(content);
+    return estimateTokens(content, isCode);
   } catch {
     return 0;
   }

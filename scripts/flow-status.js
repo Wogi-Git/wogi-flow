@@ -4,6 +4,10 @@
  * Wogi Flow - Project Status Overview
  *
  * Shows task counts, features, bugs, components, and config summary.
+ *
+ * Usage:
+ *   flow status           Human-readable status
+ *   flow status --json    JSON output for programmatic access
  */
 
 const {
@@ -18,77 +22,144 @@ const {
   getGitStatus,
   listDirs,
   listFiles,
+  parseFlags,
+  outputJson,
   printHeader,
   printSection,
   color
 } = require('./flow-utils');
 
-function main() {
-  printHeader('PROJECT STATUS');
+/**
+ * Collect all status data
+ */
+function collectStatus() {
+  const status = {
+    tasks: { ready: 0, inProgress: 0, blocked: 0, recentlyCompleted: 0 },
+    features: [],
+    bugs: [],
+    components: 0,
+    requestLog: 0,
+    git: { isRepo: false, branch: null, uncommitted: 0 },
+    config: {},
+    recommendation: {}
+  };
 
   // Task counts
   if (fileExists(PATHS.ready)) {
-    printSection('Tasks');
-    const counts = getTaskCounts();
-    console.log(`  Ready: ${counts.ready}`);
-    console.log(`  In Progress: ${counts.inProgress}`);
-    console.log(`  Blocked: ${counts.blocked}`);
-    console.log(`  Recently Done: ${counts.recentlyCompleted}`);
-    console.log('');
+    status.tasks = getTaskCounts();
   }
 
   // Features
   if (dirExists(PATHS.changes)) {
-    const features = listDirs(PATHS.changes);
+    status.features = listDirs(PATHS.changes);
+  }
+
+  // Bugs
+  if (dirExists(PATHS.bugs)) {
+    status.bugs = listFiles(PATHS.bugs, '.md').filter(f => !f.startsWith('.'));
+  }
+
+  // Components
+  if (fileExists(PATHS.appMap)) {
+    status.components = countAppMapComponents();
+  }
+
+  // Request log
+  if (fileExists(PATHS.requestLog)) {
+    status.requestLog = countRequestLogEntries();
+  }
+
+  // Git
+  status.git = getGitStatus();
+
+  // Config
+  if (fileExists(PATHS.config)) {
+    const config = getConfig();
+    status.config = {
+      mandatoryAfterTask: config.mandatorySteps?.afterTask || [],
+      strictMode: config.enforcement?.strictMode || false,
+      priorities: config.priorities || {}
+    };
+  }
+
+  // Recommendation
+  status.recommendation = getRecommendation();
+
+  return status;
+}
+
+function main() {
+  const { flags } = parseFlags(process.argv.slice(2));
+
+  const status = collectStatus();
+
+  // JSON output - exit early to avoid human-readable output
+  if (flags.json) {
+    outputJson({
+      success: true,
+      ...status
+    });
+    return;
+  }
+
+  // Human-readable output - use already collected status data
+  printHeader('PROJECT STATUS');
+
+  // Task counts (use status.tasks from collectStatus)
+  if (status.tasks.ready > 0 || status.tasks.inProgress > 0 || status.tasks.blocked > 0 || status.tasks.recentlyCompleted > 0) {
+    printSection('Tasks');
+    console.log(`  Ready: ${status.tasks.ready}`);
+    console.log(`  In Progress: ${status.tasks.inProgress}`);
+    console.log(`  Blocked: ${status.tasks.blocked}`);
+    console.log(`  Recently Done: ${status.tasks.recentlyCompleted}`);
+    console.log('');
+  }
+
+  // Features (use status.features from collectStatus)
+  if (status.features.length > 0 || dirExists(PATHS.changes)) {
     printSection('Features');
-    console.log(`  Active: ${features.length}`);
-    if (features.length > 0) {
-      for (const feature of features) {
+    console.log(`  Active: ${status.features.length}`);
+    if (status.features.length > 0) {
+      for (const feature of status.features) {
         console.log(`    • ${feature}`);
       }
     }
     console.log('');
   }
 
-  // Bugs
-  if (dirExists(PATHS.bugs)) {
-    const bugs = listFiles(PATHS.bugs, '.md');
+  // Bugs (use status.bugs from collectStatus)
+  if (status.bugs.length > 0 || dirExists(PATHS.bugs)) {
     printSection('Bugs');
-    console.log(`  Open: ${bugs.length}`);
+    console.log(`  Open: ${status.bugs.length}`);
     console.log('');
   }
 
-  // Components
-  if (fileExists(PATHS.appMap)) {
-    const componentCount = countAppMapComponents();
+  // Components (use status.components from collectStatus)
+  if (status.components > 0) {
     printSection('Components');
-    console.log(`  Mapped: ${componentCount}`);
+    console.log(`  Mapped: ${status.components}`);
     console.log('');
   }
 
-  // Request log
-  if (fileExists(PATHS.requestLog)) {
-    const entryCount = countRequestLogEntries();
+  // Request log (use status.requestLog from collectStatus)
+  if (status.requestLog > 0) {
     printSection('Request Log');
-    console.log(`  Entries: ${entryCount}`);
+    console.log(`  Entries: ${status.requestLog}`);
     console.log('');
   }
 
-  // Git status
-  const git = getGitStatus();
-  if (git.isRepo) {
+  // Git status (use status.git from collectStatus)
+  if (status.git.isRepo) {
     printSection('Git');
-    console.log(`  Branch: ${git.branch || 'unknown'}`);
-    console.log(`  Uncommitted: ${git.uncommitted || 0} files`);
+    console.log(`  Branch: ${status.git.branch || 'unknown'}`);
+    console.log(`  Uncommitted: ${status.git.uncommitted || 0} files`);
     console.log('');
   }
 
-  // Config summary
-  if (fileExists(PATHS.config)) {
+  // Config summary (use status.config from collectStatus)
+  if (status.config.mandatoryAfterTask) {
     printSection('Config');
-    const config = getConfig();
-    const steps = config.mandatorySteps || {};
-    const afterTask = steps.afterTask || [];
+    const afterTask = status.config.mandatoryAfterTask;
 
     if (afterTask.length > 0) {
       console.log(`  After task: ${afterTask.join(', ')}`);
@@ -97,12 +168,11 @@ function main() {
     }
   }
 
-  // Action-oriented recommendation
+  // Action-oriented recommendation (use status.recommendation from collectStatus)
   printSection('📌 Recommended Next Action');
-  const recommendation = getRecommendation();
-  console.log(`  ${recommendation.action}`);
-  if (recommendation.command) {
-    console.log(color('dim', `  Run: ${recommendation.command}`));
+  console.log(`  ${status.recommendation.action}`);
+  if (status.recommendation.command) {
+    console.log(color('dim', `  Run: ${status.recommendation.command}`));
   }
 
   console.log('');
@@ -149,8 +219,8 @@ function getRecommendation() {
   // Check ready tasks
   const ready = data.ready || [];
   if (ready.length > 0) {
-    // Find highest priority task
-    const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+    // Find highest priority task (P0=critical, P1=high, P2=medium, P3=low, P4=lowest)
+    const priorityOrder = { P0: 0, P1: 1, P2: 2, P3: 3, P4: 4 };
     const sorted = [...ready].sort((a, b) => {
       const aPriority = priorityOrder[a.priority] ?? 2;
       const bPriority = priorityOrder[b.priority] ?? 2;

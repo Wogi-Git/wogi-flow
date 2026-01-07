@@ -1,10 +1,22 @@
 Create a detailed story with acceptance criteria. Provide title: `/wogi-story Add login form`
 
+Run `./scripts/flow story "<title>"` to create a story.
+
 Load `agents/story-writer.md` for the full story format.
 
 ## Options
 
 - `--deep` - Enable deep decomposition mode (auto-generate granular sub-tasks)
+- `--priority <P>` - Set priority P0-P4 (default: P2 from config)
+- `--json` - Output JSON for programmatic access
+
+Examples:
+```bash
+flow story "Add user login"
+flow story "Add user login" --deep
+flow story "Add user login" --priority P1
+flow story "Add user login" authentication --deep --json
+```
 
 ## Standard Mode
 
@@ -42,13 +54,14 @@ When `--deep` flag is used, OR when Claude detects a complex story:
 
 ### Sub-Task Format
 
-Parent: `TASK-XXX` (the main story)
-Children: `TASK-XXX-01`, `TASK-XXX-02`, etc.
+Parent: `wf-a1b2c3d4` (the main story, hash-based ID)
+Children: `wf-a1b2c3d4-01`, `wf-a1b2c3d4-02`, etc.
 
 Each sub-task includes:
 - Single focused objective
 - Clear done criteria
 - Dependencies on other sub-tasks
+- Priority (inherits from parent)
 - Estimated scope (XS/S/M)
 
 ### Auto-Suggest Behavior
@@ -63,13 +76,23 @@ When `autoDetect` is enabled and complexity is detected, Claude will ask:
 
 ## Output
 
-Save the story to `.workflow/changes/[feature]/TASK-XXX.md`
+Save the story to `.workflow/changes/[feature]/wf-XXXXXXXX.md`
+
+Example output:
+```
+Created story: wf-a1b2c3d4
+
+File: .workflow/changes/general/wf-a1b2c3d4.md
+Title: Add user login
+Feature: general
+Priority: P1
+```
 
 If decomposed, also create:
-- `.workflow/changes/[feature]/TASK-XXX-01.md` (sub-task 1)
-- `.workflow/changes/[feature]/TASK-XXX-02.md` (sub-task 2)
+- `.workflow/changes/[feature]/wf-a1b2c3d4-01.md` (sub-task 1)
+- `.workflow/changes/[feature]/wf-a1b2c3d4-02.md` (sub-task 2)
 - etc.
 
-Update `ready.json` with parent task and all sub-tasks.
+Update `ready.json` with parent task (with priority) and all sub-tasks.
 
 Ask clarifying questions if needed to write good acceptance criteria.

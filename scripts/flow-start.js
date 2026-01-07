@@ -4,6 +4,7 @@
  * Wogi Flow - Start Task
  *
  * Moves a task from ready to inProgress queue.
+ * v2.0: Integrates with durable session for crash recovery and suspension support.
  */
 
 const {
@@ -24,11 +25,25 @@ const { warnIfContextHigh, checkContextHealth } = require('./flow-context-monito
 const { setCurrentTask } = require('./flow-memory-blocks');
 const { trackTaskStart, checkAndDisplayResumeContext } = require('./flow-session-state');
 
+// v2.0 durable session support
+const {
+  loadDurableSession,
+  createDurableSession,
+  canResumeFromStep,
+  getResumeContext,
+  getSuspensionStatus,
+  resumeSession,
+  isSuspended,
+  STEP_STATUS
+} = require('./flow-durable-session');
+
 function main() {
   const taskId = process.argv[2];
+  const forceResume = process.argv.includes('--force-resume');
+  const skipSuspensionCheck = process.argv.includes('--skip-suspension');
 
   if (!taskId) {
-    console.log('Usage: flow start <task-id>');
+    console.log('Usage: flow start <task-id> [--force-resume] [--skip-suspension]');
     process.exit(1);
   }
 
@@ -41,6 +56,68 @@ function main() {
   // v1.7.0: Check context health at task start
   if (config.contextMonitor?.checkOnSessionStart !== false) {
     warnIfContextHigh();
+  }
+
+  // v2.0: Check for existing durable session for this task
+  if (config.durableSteps?.enabled !== false) {
+    const existingSession = loadDurableSession();
+
+    if (existingSession && existingSession.taskId === taskId) {
+      // Found existing session for this task - handle resume
+      const resumeInfo = canResumeFromStep(existingSession);
+      const suspension = getSuspensionStatus();
+
+      if (suspension && !skipSuspensionCheck) {
+        // Task is suspended
+        console.log('');
+        console.log(color('yellow', '⏸️  Task is SUSPENDED'));
+        console.log(color('yellow', '─'.repeat(50)));
+        console.log(`Task: ${taskId}`);
+        console.log(`Type: ${suspension.type}`);
+        console.log(`Reason: ${suspension.reason}`);
+        console.log(`Suspended at: ${suspension.suspendedAt}`);
+        console.log('');
+
+        if (suspension.canResume) {
+          console.log(color('green', '✓ Resume condition is met!'));
+          if (forceResume) {
+            console.log('Resuming session...');
+            resumeSession({ force: true });
+          } else {
+            console.log(`Run: ${color('cyan', `flow start ${taskId} --force-resume`)} to continue`);
+            process.exit(0);
+          }
+        } else {
+          console.log(color('red', '✗ Resume condition not yet met'));
+          console.log(`Reason: ${suspension.resumeReason}`);
+          console.log('');
+          console.log(`To override: ${color('cyan', `flow start ${taskId} --skip-suspension`)}`);
+          process.exit(0);
+        }
+      }
+
+      if (resumeInfo.canResume && resumeInfo.completedCount > 0) {
+        // Show resume context
+        console.log('');
+        console.log(color('cyan', '🔄 Resuming from durable session'));
+        console.log(color('cyan', '─'.repeat(50)));
+        console.log(`Task: ${taskId}`);
+        console.log(`Progress: ${resumeInfo.completedCount}/${resumeInfo.totalSteps} steps completed`);
+        console.log(`Resuming from: ${resumeInfo.fromStep?.description?.substring(0, 60) || resumeInfo.fromStep?.id}...`);
+        console.log(color('cyan', '─'.repeat(50)));
+        console.log('');
+      }
+    } else if (existingSession && existingSession.taskId !== taskId) {
+      // Different task in session - block starting new task
+      console.log('');
+      console.log(color('yellow', '⚠️  Another task is in a durable session'));
+      console.log(`Current session: ${existingSession.taskId}`);
+      console.log(`Attempting to start: ${taskId}`);
+      console.log('');
+      console.log(`Finish current task first, or run: ${color('cyan', 'flow session clear')}`);
+      console.log('');
+      process.exit(1);
+    }
   }
 
   if (!fileExists(PATHS.ready)) {
@@ -90,6 +167,33 @@ function main() {
     setCurrentTask(taskId, taskTitle);
   } catch (e) {
     if (process.env.DEBUG) console.error(`[DEBUG] Task tracking: ${e.message}`);
+  }
+
+  // v2.0: Initialize durable session for crash recovery
+  if (config.durableSteps?.enabled !== false) {
+    try {
+      const existingSession = loadDurableSession();
+
+      // Only create new session if none exists or it's for a different task
+      if (!existingSession || existingSession.taskId !== taskId) {
+        // Extract acceptance criteria if available
+        const acceptanceCriteria = result.task?.acceptanceCriteria || result.task?.scenarios || [];
+        const steps = Array.isArray(acceptanceCriteria) ? acceptanceCriteria : [];
+
+        if (steps.length > 0) {
+          createDurableSession(taskId, 'task', steps);
+          console.log(color('cyan', `📋 Durable session initialized with ${steps.length} steps`));
+        } else {
+          // Create minimal session for tracking
+          createDurableSession(taskId, 'task', [taskTitle || taskId]);
+          if (process.env.DEBUG) {
+            console.log(color('cyan', '📋 Durable session initialized (no acceptance criteria)'));
+          }
+        }
+      }
+    } catch (e) {
+      if (process.env.DEBUG) console.error(`[DEBUG] Durable session init: ${e.message}`);
+    }
   }
 
   // Auto-context: show relevant files for this task

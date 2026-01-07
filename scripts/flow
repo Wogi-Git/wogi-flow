@@ -56,6 +56,7 @@ show_help() {
     echo "  bug <title>          Create bug report"
     echo ""
     echo "Workflow:"
+    echo "  morning              Morning briefing - where you left off"
     echo "  health               Check workflow health"
     echo "  verify <gate>        Run verification gate (lint, typecheck, test, build)"
     echo "  verify all           Run all verification gates"
@@ -152,6 +153,18 @@ show_help() {
     echo "  loop stats           Show loop statistics"
     echo "  loop can-exit        Check if current loop can exit"
     echo ""
+    echo "Durable Sessions (v2.0):"
+    echo "  suspend              Suspend current task"
+    echo "  suspend --wait-ci    Wait for CI/CD pipeline"
+    echo "  suspend --review     Wait for human review"
+    echo "  suspend --rate-limit Wait N seconds"
+    echo "  resume               Resume suspended task"
+    echo "  resume --status      Show suspension status"
+    echo "  resume --approve     Approve human review"
+    echo "  session status       Show durable session status"
+    echo "  session stats        Show session statistics"
+    echo "  session clear        Clear active session"
+    echo ""
     echo "Worktree Isolation:"
     echo "  worktree enable      Enable worktree isolation for tasks"
     echo "  worktree disable     Disable worktree isolation"
@@ -238,7 +251,7 @@ case "${1:-}" in
         "$SCRIPT_DIR/flow-new-feature" "${@:2}"
         ;;
     bug)
-        "$SCRIPT_DIR/flow-bug" "${@:2}"
+        node "$SCRIPT_DIR/flow-bug.js" "${@:2}"
         ;;
     status)
         node "$SCRIPT_DIR/flow-status.js" "${@:2}"
@@ -281,6 +294,9 @@ case "${1:-}" in
         ;;
     standup)
         "$SCRIPT_DIR/flow-standup" "${@:2}"
+        ;;
+    morning)
+        node "$SCRIPT_DIR/flow-morning.js" "${@:2}"
         ;;
     session-end)
         node "$SCRIPT_DIR/flow-session-end.js" "${@:2}"
@@ -392,13 +408,35 @@ case "${1:-}" in
                 ;;
             enable)
                 node "$SCRIPT_DIR/flow-config-set.js" loops.enforced true
-                echo "Loop enforcement enabled (Ralph Wiggum mode)"
+                echo "Loop enforcement enabled"
                 ;;
             disable)
                 node "$SCRIPT_DIR/flow-config-set.js" loops.enforced false
                 ;;
             *)
                 echo "Usage: flow loop [status|stats|can-exit|enable|disable]"
+                ;;
+        esac
+        ;;
+    suspend)
+        node "$SCRIPT_DIR/flow-suspend.js" "${@:2}"
+        ;;
+    resume)
+        node "$SCRIPT_DIR/flow-resume.js" "${@:2}"
+        ;;
+    session)
+        case "${2:-status}" in
+            status)
+                node "$SCRIPT_DIR/flow-durable-session.js" status
+                ;;
+            stats)
+                node "$SCRIPT_DIR/flow-durable-session.js" stats
+                ;;
+            clear)
+                node "$SCRIPT_DIR/flow-durable-session.js" clear
+                ;;
+            *)
+                echo "Usage: flow session [status|stats|clear]"
                 ;;
         esac
         ;;

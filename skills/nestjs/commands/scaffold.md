@@ -20,8 +20,8 @@ src/[module-name]/
 
 ## Steps
 
-1. **Read skill rules**: `.claude/skills/nestjs/rules/conventions.md`
-2. **Read templates**: `.claude/skills/nestjs/templates/`
+1. **Read skill rules**: `skills/nestjs/rules/conventions.md`
+2. **Read templates**: `skills/nestjs/templates/`
 3. **Create entity** with TypeORM decorators
 4. **Create DTOs** with class-validator
 5. **Create service** with CRUD operations (data access only)
@@ -46,6 +46,6 @@ Then show:
 
 ## Follow
 
-- Rules from `.claude/skills/nestjs/rules/`
-- Templates from `.claude/skills/nestjs/templates/`
+- Rules from `skills/nestjs/rules/`
+- Templates from `skills/nestjs/templates/`
 - Existing module patterns in project

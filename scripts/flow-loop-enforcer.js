@@ -1,17 +1,21 @@
 #!/usr/bin/env node
 
 /**
- * Wogi Flow - Loop Enforcer ("Ralph Wiggum Mode")
+ * Wogi Flow - Loop Enforcer
  *
  * Ensures self-completing loops actually complete. When enforced:true,
  * the loop cannot be exited until all acceptance criteria pass.
  *
- * "I'm helping!"
+ * v2.0: Now delegates to flow-durable-session.js for unified step tracking.
+ * Legacy loop-session.json is still supported for backward compatibility.
  */
 
 const fs = require('fs');
 const path = require('path');
 const { getConfig, getProjectRoot } = require('./flow-utils');
+
+// v2.0: Import durable session for unified tracking
+const durableSession = require('./flow-durable-session');
 
 /**
  * Check if loop enforcement is enabled
@@ -85,8 +89,17 @@ function canSkipCriterion(criterionId, approvalGiven = false) {
 
 /**
  * Get active loop session
+ * v2.0: Delegates to durable session with backward-compatible format
  */
 function getActiveLoop() {
+  const config = getConfig();
+
+  // v2.0: Use durable session if enabled
+  if (config.durableSteps?.enabled !== false) {
+    return durableSession.getActiveLoop();
+  }
+
+  // Legacy fallback: read loop-session.json directly
   const projectRoot = getProjectRoot();
   const sessionPath = path.join(projectRoot, '.workflow', 'state', 'loop-session.json');
 
@@ -96,15 +109,30 @@ function getActiveLoop() {
 
   try {
     return JSON.parse(fs.readFileSync(sessionPath, 'utf-8'));
-  } catch {
+  } catch (parseError) {
+    // Log in debug mode to help diagnose corrupted session files
+    if (process.env.DEBUG) {
+      console.warn(`[DEBUG] Could not parse loop session: ${parseError.message}`);
+    }
     return null;
   }
 }
 
 /**
  * Start a new enforcement loop session
+ * v2.0: Delegates to durable session for unified tracking
  */
 function startLoop(taskId, acceptanceCriteria) {
+  const config = getConfig();
+
+  // v2.0: Use durable session if enabled
+  if (config.durableSteps?.enabled !== false) {
+    const session = durableSession.createDurableSession(taskId, 'task', acceptanceCriteria);
+    // Return backward-compatible format
+    return durableSession.getActiveLoop();
+  }
+
+  // Legacy fallback: write to loop-session.json directly
   const projectRoot = getProjectRoot();
   const sessionPath = path.join(projectRoot, '.workflow', 'state', 'loop-session.json');
 
@@ -130,8 +158,23 @@ function startLoop(taskId, acceptanceCriteria) {
 
 /**
  * Update criterion status in loop session
+ * v2.0: Delegates to durable session
  */
 function updateCriterion(criterionId, status, verificationResult = null) {
+  const config = getConfig();
+
+  // v2.0: Use durable session if enabled
+  if (config.durableSteps?.enabled !== false) {
+    // Map old AC-N format to new step-NNN format if needed
+    const stepId = criterionId.startsWith('AC-')
+      ? `step-${criterionId.replace('AC-', '').padStart(3, '0')}`
+      : criterionId;
+
+    durableSession.updateCriterion(stepId, status, verificationResult);
+    return durableSession.getActiveLoop();
+  }
+
+  // Legacy fallback: update loop-session.json directly
   const projectRoot = getProjectRoot();
   const sessionPath = path.join(projectRoot, '.workflow', 'state', 'loop-session.json');
 
@@ -152,9 +195,35 @@ function updateCriterion(criterionId, status, verificationResult = null) {
 
 /**
  * Check if loop can exit (all criteria met or max retries reached)
+ * v2.0: Uses durable session completion check
  */
 function canExitLoop() {
   const config = getConfig();
+
+  // v2.0: Use durable session if enabled
+  if (config.durableSteps?.enabled !== false) {
+    const result = durableSession.canExitLoop();
+
+    // Add enforcement check
+    if (!isEnforcementEnabled() && !result.canExit) {
+      return { canExit: true, reason: 'enforcement-disabled' };
+    }
+
+    // Generate enforcement message if needed
+    if (!result.canExit) {
+      const session = getActiveLoop();
+      if (session) {
+        const pending = session.acceptanceCriteria.filter(c => c.status === 'pending');
+        const failed = session.acceptanceCriteria.filter(c => c.status === 'failed');
+        const skipped = session.acceptanceCriteria.filter(c => c.status === 'skipped');
+        result.message = generateEnforcementMessage(session, pending, failed, skipped);
+      }
+    }
+
+    return result;
+  }
+
+  // Legacy fallback
   const session = getActiveLoop();
 
   if (!session) return { canExit: true, reason: 'no-active-loop' };
@@ -167,13 +236,16 @@ function canExitLoop() {
   const pending = session.acceptanceCriteria.filter(c => c.status === 'pending');
   const failed = session.acceptanceCriteria.filter(c => c.status === 'failed');
   const completed = session.acceptanceCriteria.filter(c => c.status === 'completed');
+  const skipped = session.acceptanceCriteria.filter(c => c.status === 'skipped');
 
-  // All criteria completed?
+  // All criteria completed or skipped (with approval)?
   if (pending.length === 0 && failed.length === 0) {
+    const skipNote = skipped.length > 0 ? ` (${skipped.length} skipped with approval)` : '';
     return {
       canExit: true,
       reason: 'all-complete',
-      summary: `All ${completed.length} acceptance criteria passed`
+      summary: `All ${completed.length} acceptance criteria passed${skipNote}`,
+      skippedCriteria: skipped.map(s => s.description)
     };
   }
 
@@ -206,14 +278,15 @@ function canExitLoop() {
     pending: pending.length,
     failed: failed.length,
     completed: completed.length,
-    message: generateEnforcementMessage(session, pending, failed)
+    skipped: skipped.length,
+    message: generateEnforcementMessage(session, pending, failed, skipped)
   };
 }
 
 /**
- * Generate the Ralph Wiggum enforcement message
+ * Generate the enforcement message
  */
-function generateEnforcementMessage(session, pending, failed) {
+function generateEnforcementMessage(session, pending, failed, skipped = []) {
   const lines = [
     '🚫 LOOP ENFORCEMENT ACTIVE',
     '─'.repeat(40),
@@ -241,17 +314,32 @@ function generateEnforcementMessage(session, pending, failed) {
     lines.push('');
   }
 
+  if (skipped.length > 0) {
+    lines.push(`⏭️ Skipped (${skipped.length}):`);
+    skipped.forEach(s => lines.push(`   • ${s.description}`));
+    lines.push('');
+  }
+
   lines.push('─'.repeat(40));
   lines.push('🔄 You must complete all criteria before exiting.');
-  lines.push('   (Ralph Wiggum says: "I\'m helping!")');
 
   return lines.join('\n');
 }
 
 /**
  * Increment loop iteration
+ * v2.0: Delegates to durable session
  */
 function incrementIteration() {
+  const config = getConfig();
+
+  // v2.0: Use durable session if enabled
+  if (config.durableSteps?.enabled !== false) {
+    durableSession.incrementIteration();
+    return getActiveLoop();
+  }
+
+  // Legacy fallback
   const projectRoot = getProjectRoot();
   const sessionPath = path.join(projectRoot, '.workflow', 'state', 'loop-session.json');
 
@@ -265,8 +353,23 @@ function incrementIteration() {
 
 /**
  * Increment retry count
+ * v2.0: Handled via durable session's totalRetries
  */
 function incrementRetry() {
+  const config = getConfig();
+
+  // v2.0: Use durable session - retries are tracked automatically in markStepFailed
+  if (config.durableSteps?.enabled !== false) {
+    // Durable session tracks retries per-step, but we can load the session to get total
+    const session = durableSession.loadDurableSession();
+    if (session) {
+      session.execution.totalRetries++;
+      durableSession.saveDurableSession(session);
+    }
+    return getActiveLoop();
+  }
+
+  // Legacy fallback
   const projectRoot = getProjectRoot();
   const sessionPath = path.join(projectRoot, '.workflow', 'state', 'loop-session.json');
 
@@ -280,8 +383,17 @@ function incrementRetry() {
 
 /**
  * End the loop session
+ * v2.0: Delegates to durable session archival
  */
 function endLoop(status = 'completed') {
+  const config = getConfig();
+
+  // v2.0: Use durable session if enabled
+  if (config.durableSteps?.enabled !== false) {
+    return durableSession.endLoop(status);
+  }
+
+  // Legacy fallback
   const projectRoot = getProjectRoot();
   const sessionPath = path.join(projectRoot, '.workflow', 'state', 'loop-session.json');
 
@@ -318,8 +430,23 @@ function endLoop(status = 'completed') {
 
 /**
  * Get loop statistics
+ * v2.0: Delegates to durable session stats
  */
 function getLoopStats() {
+  const config = getConfig();
+
+  // v2.0: Use durable session stats if enabled
+  if (config.durableSteps?.enabled !== false) {
+    const stats = durableSession.getSessionStats();
+    return {
+      totalLoops: stats.totalSessions,
+      completed: stats.completed,
+      failed: stats.failed,
+      avgIterations: stats.avgSteps
+    };
+  }
+
+  // Legacy fallback
   const projectRoot = getProjectRoot();
   const historyPath = path.join(projectRoot, '.workflow', 'state', 'loop-history.json');
 
@@ -691,7 +818,7 @@ if (require.main === module) {
       console.log(`Retries: ${session.retries}`);
       console.log('\nAcceptance Criteria:');
       session.acceptanceCriteria.forEach(c => {
-        const icon = c.status === 'completed' ? '✅' : c.status === 'failed' ? '❌' : '⏳';
+        const icon = c.status === 'completed' ? '✅' : c.status === 'failed' ? '❌' : c.status === 'skipped' ? '⏭️' : '⏳';
         console.log(`  ${icon} ${c.id}: ${c.description}`);
         if (c.verificationResult) {
           console.log(`     └─ ${c.verificationResult}`);
@@ -733,7 +860,7 @@ Commands:
   can-exit    Check if loop can be exited (exit code 0=yes, 1=no)
 
 Configuration (config.json):
-  loops.enforced: true              Enable Ralph Wiggum mode
+  loops.enforced: true              Enable loop enforcement
   loops.blockExitUntilComplete: true  Block session end until complete
   loops.maxRetries: 5               Max retries before forced exit
   loops.maxIterations: 20           Max iterations before forced exit

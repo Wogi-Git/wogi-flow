@@ -119,8 +119,10 @@ function parseSimpleYaml(content) {
 
       // Check if this is a key-value pair in the array item: - pattern: "..."
       if (value.includes(':') && !value.startsWith('"') && !value.startsWith("'")) {
-        // Start of an object in array
-        const [key, val] = value.split(':').map(s => s.trim());
+        // Start of an object in array - split only on first colon to preserve colons in values
+        const colonIndex = value.indexOf(':');
+        const key = value.slice(0, colonIndex).trim();
+        const val = value.slice(colonIndex + 1).trim();
         const rawVal = val.replace(/^["']|["']$/g, '');
         currentObject = { [key]: val.startsWith('"') ? processYamlEscapes(rawVal) : rawVal };
       } else {
@@ -263,6 +265,29 @@ function checkCommand(cmd) {
 }
 
 /**
+ * Check if a path matches a pattern using proper path segment matching
+ * Prevents false positives like "node_modules" matching "node_modules_backup"
+ */
+function pathMatchesPattern(normalizedPath, pattern) {
+  // Normalize pattern too
+  const normalizedPattern = pattern.replace(/\\/g, '/');
+
+  // If pattern is an absolute path or contains path separators, do exact segment matching
+  if (normalizedPattern.includes('/')) {
+    // Check if the path contains the pattern as a segment sequence
+    return normalizedPath.includes(normalizedPattern) &&
+           (normalizedPath === normalizedPattern ||
+            normalizedPath.startsWith(normalizedPattern + '/') ||
+            normalizedPath.endsWith('/' + normalizedPattern) ||
+            normalizedPath.includes('/' + normalizedPattern + '/'));
+  }
+
+  // For simple names (no path separator), match as directory/file name segment
+  const segments = normalizedPath.split('/');
+  return segments.some(segment => segment === normalizedPattern);
+}
+
+/**
  * Check if path operation is allowed
  * Returns: { allowed: boolean, reason?: string, level?: string }
  */
@@ -282,7 +307,7 @@ function checkPath(filePath, operation) {
 
   // Zero access - block all operations (read, write, delete)
   for (const p of paths.zeroAccess || []) {
-    if (normalizedPath.includes(p)) {
+    if (pathMatchesPattern(normalizedPath, p)) {
       return {
         allowed: false,
         reason: `Zero access path: ${p}`,
@@ -294,7 +319,7 @@ function checkPath(filePath, operation) {
   // Read-only - block write/delete
   if (operation === 'write' || operation === 'delete') {
     for (const p of paths.readOnly || []) {
-      if (normalizedPath.includes(p)) {
+      if (pathMatchesPattern(normalizedPath, p)) {
         return {
           allowed: false,
           reason: `Read-only path: ${p}`,
@@ -307,7 +332,7 @@ function checkPath(filePath, operation) {
   // No-delete - block delete only
   if (operation === 'delete') {
     for (const p of paths.noDelete || []) {
-      if (normalizedPath.includes(p)) {
+      if (pathMatchesPattern(normalizedPath, p)) {
         return {
           allowed: false,
           reason: `No-delete path: ${p}`,

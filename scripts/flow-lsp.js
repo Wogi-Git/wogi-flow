@@ -16,6 +16,25 @@ const path = require('path');
 const fs = require('fs');
 const { getConfig, PROJECT_ROOT, colors, success, warn, error } = require('./flow-utils');
 
+/**
+ * Convert a file path to a proper file:// URI
+ * Handles Windows paths correctly (file:///C:/path vs file:///home/user)
+ */
+function pathToFileUri(filePath) {
+  // Normalize to forward slashes
+  let normalized = filePath.replace(/\\/g, '/');
+
+  // On Windows, paths like C:/foo need an extra slash: file:///C:/foo
+  // On Unix, paths like /home/foo just need file:///home/foo
+  if (/^[a-zA-Z]:/.test(normalized)) {
+    // Windows path with drive letter
+    return `file:///${normalized}`;
+  }
+
+  // Unix path - already starts with /
+  return `file://${normalized}`;
+}
+
 // ─────────────────────────────────────────────────────────────
 // LSP Client Class
 // ─────────────────────────────────────────────────────────────
@@ -244,7 +263,7 @@ class LSPClient {
   async _initialize() {
     const result = await this._send('initialize', {
       processId: process.pid,
-      rootUri: `file://${this.projectRoot}`,
+      rootUri: pathToFileUri(this.projectRoot),
       rootPath: this.projectRoot,
       capabilities: {
         textDocument: {
@@ -271,7 +290,7 @@ class LSPClient {
         }
       },
       workspaceFolders: [
-        { uri: `file://${this.projectRoot}`, name: path.basename(this.projectRoot) }
+        { uri: pathToFileUri(this.projectRoot), name: path.basename(this.projectRoot) }
       ]
     });
 
@@ -289,7 +308,7 @@ class LSPClient {
    */
   async openDocument(filePath) {
     const absPath = path.isAbsolute(filePath) ? filePath : path.join(this.projectRoot, filePath);
-    const uri = `file://${absPath}`;
+    const uri = pathToFileUri(absPath);
 
     if (!fs.existsSync(absPath)) {
       throw new Error(`File not found: ${absPath}`);

@@ -231,8 +231,8 @@ create_structure() {
     mkdir -p "$WORKFLOW_DIR/specs/capabilities"
     mkdir -p ".claude/commands"
     mkdir -p ".claude/rules"
-    mkdir -p ".claude/skills"
     mkdir -p ".claude/docs"
+    mkdir -p "skills"
     
     if [ "$AGENT_STRUCTURE" = "split" ]; then
         mkdir -p ".claude/agents/developer"
@@ -260,7 +260,7 @@ generate_config() {
 
     cat > "$WORKFLOW_DIR/config.json" << EOF
 {
-  "version": "1.8",
+  "version": "1.9",
   "projectName": "$PROJECT_NAME",
 
   "enforcement": {
@@ -501,7 +501,7 @@ generate_config() {
   },
 
   "lsp": {
-    "enabled": false,
+    "enabled": true,
     "useForNavigation": true,
     "useForCompletion": true
   },
@@ -773,7 +773,7 @@ install_skills() {
             skill=$(echo "$skill" | xargs)  # trim whitespace
             
             if [ -d "$SCRIPT_DIR/../skills/$skill" ]; then
-                cp -r "$SCRIPT_DIR/../skills/$skill" ".claude/skills/"
+                cp -r "$SCRIPT_DIR/../skills/$skill" "skills/"
                 echo -e "${GREEN}✓${NC} Installed skill: $skill"
                 
                 # Update config with installed skill
@@ -842,6 +842,84 @@ setup_hooks() {
     if [ "$ENABLE_HOOKS" = true ]; then
         echo -e "${CYAN}Setting up git hooks...${NC}"
         "$SCRIPT_DIR/flow-setup-hooks" install 2>/dev/null || echo -e "${YELLOW}⚠${NC} Could not install hooks (not a git repo?)"
+    fi
+}
+
+# Migrate old .claude/skills to skills/
+migrate_old_skills() {
+    local old_skills_dir=".claude/skills"
+    local new_skills_dir="skills"
+
+    if [ -d "$old_skills_dir" ]; then
+        echo -e "${CYAN}Migrating skills from .claude/skills/ to skills/...${NC}"
+
+        # Create skills directory if needed
+        mkdir -p "$new_skills_dir"
+
+        # Move each skill directory
+        for skill_dir in "$old_skills_dir"/*/; do
+            if [ -d "$skill_dir" ]; then
+                skill_name=$(basename "$skill_dir")
+                if [ -d "$new_skills_dir/$skill_name" ]; then
+                    # Already exists in new location, remove old
+                    rm -rf "$skill_dir"
+                    echo -e "  ${YELLOW}-${NC} $skill_name (already exists)"
+                else
+                    # Move to new location
+                    mv "$skill_dir" "$new_skills_dir/"
+                    echo -e "  ${GREEN}✓${NC} Migrated: $skill_name"
+                fi
+            fi
+        done
+
+        # Handle skills-index.json
+        if [ -f "$old_skills_dir/skills-index.json" ]; then
+            if [ ! -f "$new_skills_dir/skills-index.json" ]; then
+                mv "$old_skills_dir/skills-index.json" "$new_skills_dir/"
+                echo -e "  ${GREEN}✓${NC} Migrated: skills-index.json"
+            else
+                rm "$old_skills_dir/skills-index.json"
+            fi
+        fi
+
+        # Remove empty .claude/skills directory
+        rmdir "$old_skills_dir" 2>/dev/null && echo -e "  ${GREEN}✓${NC} Cleaned up .claude/skills/"
+    fi
+}
+
+# Ask about tech stack wizard
+ask_tech_stack_wizard() {
+    echo ""
+    echo -e "${BOLD}7. Tech Stack Wizard (Optional)${NC}"
+    echo "   Configure your tech stack and generate coding patterns?"
+    echo ""
+    echo "   The wizard will ask about your:"
+    echo "   • Frontend framework (React, Vue, Svelte, etc.)"
+    echo "   • Backend framework (NestJS, FastAPI, Express, etc.)"
+    echo "   • Database, styling, state management"
+    echo "   • Testing framework and additional tools"
+    echo ""
+    echo "   It will then fetch documentation and generate skill files"
+    echo "   with best practices, patterns, and anti-patterns."
+    echo ""
+    echo "   You can also run this later with: /wogi-setup-stack"
+    echo ""
+
+    read -p "   Run tech stack wizard now? [Y/n]: " run_wizard
+    if [[ "$run_wizard" =~ ^[Nn]$ ]]; then
+        echo -e "   ${YELLOW}Skipped.${NC} Run /wogi-setup-stack later to configure."
+        return
+    fi
+
+    echo ""
+    echo -e "${CYAN}Starting Tech Stack Wizard...${NC}"
+    echo ""
+
+    # Run the wizard
+    if [ -f "$SCRIPT_DIR/flow-stack-wizard.js" ]; then
+        node "$SCRIPT_DIR/flow-stack-wizard.js"
+    else
+        echo -e "${YELLOW}⚠${NC} Tech stack wizard not found. Run /wogi-setup-stack in Claude Code."
     fi
 }
 
@@ -914,7 +992,9 @@ main() {
     copy_core_files
     install_skills
     setup_hooks
-    
+    migrate_old_skills
+    ask_tech_stack_wizard
+
     print_completion
 }
 
@@ -925,11 +1005,15 @@ if [ "${1:-}" = "--quick" ]; then
     generate_config
     generate_state_files
     copy_core_files
+    migrate_old_skills
     echo -e "${GREEN}✓ Quick install complete${NC}"
     echo ""
     echo -e "${YELLOW}⚠️  STRICT MODE ENABLED (default)${NC}"
     echo -e "   Claude will STOP before implementation to create tasks/stories."
     echo -e "   To disable: edit .workflow/config.json → enforcement.strictMode"
+    echo ""
+    echo -e "${CYAN}💡 Tip:${NC} Run /wogi-setup-stack to configure your tech stack."
+    echo -e "   This will generate coding patterns for your frameworks."
     echo ""
     exit 0
 fi

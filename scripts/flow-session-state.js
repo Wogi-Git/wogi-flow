@@ -29,7 +29,8 @@ const {
   readJson,
   writeJson,
   fileExists,
-  printHeader
+  printHeader,
+  withLock
 } = require('./flow-utils');
 
 // ============================================================
@@ -114,13 +115,34 @@ function loadSessionState() {
       ...getDefaultState(),
       ...state
     };
-  } catch {
+  } catch (parseError) {
+    // Log in debug mode to help diagnose issues
+    if (process.env.DEBUG) {
+      console.warn(`[DEBUG] Could not parse session state: ${parseError.message}`);
+    }
     return getDefaultState();
   }
 }
 
 /**
- * Save session state to file
+ * Save session state to file (with locking for concurrent access safety)
+ */
+async function saveSessionStateAsync(updates = {}) {
+  return withLock(SESSION_PATH, async () => {
+    const current = loadSessionState();
+    const newState = {
+      ...current,
+      ...updates,
+      lastActive: new Date().toISOString()
+    };
+    writeJson(SESSION_PATH, newState);
+    return newState;
+  });
+}
+
+/**
+ * Save session state to file (sync version for backward compatibility)
+ * Note: Use saveSessionStateAsync when possible for concurrent safety
  */
 function saveSessionState(updates = {}) {
   const current = loadSessionState();
@@ -608,6 +630,7 @@ module.exports = {
   // Core operations
   loadSessionState,
   saveSessionState,
+  saveSessionStateAsync,  // Concurrent-safe version
   clearSession,
   getDefaultState,
 

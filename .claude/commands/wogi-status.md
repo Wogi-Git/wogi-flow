@@ -1,5 +1,12 @@
 Show full project overview.
 
+Run `./scripts/flow status` to see the overview.
+
+Options:
+- `--json` - Output JSON for programmatic access
+
+Related: `/wogi-morning` for session-focused briefing with suggested next action.
+
 Gather information from:
 1. `.workflow/state/ready.json` - Task counts by status
 2. `.workflow/changes/` - Active features

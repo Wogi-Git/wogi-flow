@@ -231,14 +231,17 @@ function calculateComplexityScore(factors) {
   breakdown.push('Base: 1000');
 
   // File-based scoring
+  // Note: These are conservative estimates. TypeScript files with types,
+  // imports, and boilerplate can easily be 1000+ tokens each.
+  // Prefer overestimating since local LLM tokens are free.
   if (factors.fileCount.create > 0) {
-    const createTokens = factors.fileCount.create * 800;
+    const createTokens = factors.fileCount.create * 1200;  // Increased from 800
     score += createTokens;
     breakdown.push(`Create ${factors.fileCount.create} files: +${createTokens}`);
   }
 
   if (factors.fileCount.modify > 0) {
-    const modifyTokens = factors.fileCount.modify * 400;
+    const modifyTokens = factors.fileCount.modify * 600;  // Increased from 400
     score += modifyTokens;
     breakdown.push(`Modify ${factors.fileCount.modify} files: +${modifyTokens}`);
   }

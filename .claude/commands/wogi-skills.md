@@ -69,7 +69,7 @@ Templates included:
 ## Installation
 
 When adding a skill:
-1. Copy skill folder to `.claude/skills/[name]/`
+1. Copy skill folder to `skills/[name]/`
 2. Update `config.json` with skill in `skills.installed`
 3. Skill commands become available immediately
 
@@ -80,7 +80,7 @@ See: `skills/README.md` for skill creation guide
 Structure:
 ```
 skills/[name]/
-  SKILL.md           # Description and usage
+  skill.md           # Description and usage
   rules/             # Coding conventions
   commands/          # Slash commands
   templates/         # Code templates

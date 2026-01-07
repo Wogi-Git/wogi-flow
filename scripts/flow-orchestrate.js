@@ -79,6 +79,9 @@ const {
   generateSessionSummary
 } = require('./flow-pattern-enforcer');
 
+// v2.0: Import durable session for unified step tracking
+const durableSession = require('./flow-durable-session');
+
 // ============================================================
 // Configuration
 // ============================================================
@@ -1021,7 +1024,7 @@ function validateImports(code, exportMap = null) {
   // Load doNotImport from config
   let doNotImport = ['React']; // Default
   try {
-    const config = loadConfig();
+    const config = getConfig();
     doNotImport = config.hybrid?.projectContext?.doNotImport || ['React'];
   } catch {}
 
@@ -1133,7 +1136,7 @@ function validateImports(code, exportMap = null) {
  */
 function getProjectContext() {
   try {
-    const config = loadConfig();
+    const config = getConfig();
     return config.hybrid?.projectContext || {};
   } catch (e) {
     return {};
@@ -1460,7 +1463,7 @@ class ProjectContextGenerator {
    */
   loadProjectConfig() {
     try {
-      const config = loadConfig();
+      const config = getConfig();
       return config.hybrid?.projectContext || {};
     } catch {
       return {};
@@ -2192,7 +2195,7 @@ class ProjectContextGenerator {
  * @param {Object} complexity - Complexity assessment
  */
 function logTokenMetrics(plan, executionResult, complexity) {
-  const config = loadConfig();
+  const config = getConfig();
   const logMetrics = config.hybrid?.settings?.tokenEstimation?.logMetrics;
 
   if (!logMetrics) return;
@@ -2309,7 +2312,7 @@ function displayInstructionRichness(richness) {
  */
 function getTokenEstimationSettings() {
   try {
-    const config = loadConfig();
+    const config = getConfig();
     return {
       enabled: config.hybrid?.settings?.tokenEstimation?.enabled ?? true,
       minTokens: config.hybrid?.settings?.tokenEstimation?.minTokens ?? 1000,
@@ -2569,7 +2572,7 @@ class TemplateEngine {
    */
   loadProjectContext() {
     try {
-      const config = loadConfig();
+      const config = getConfig();
       const ctx = config.hybrid?.projectContext || {};
 
       // Format availableComponents for template display
@@ -3069,7 +3072,48 @@ ${step.description || ''}
     }
   }
 
+  /**
+   * Update hybrid session state
+   * v2.0: Delegates to durable session when enabled
+   */
   updateHybridSession(data) {
+    const config = getConfig();
+
+    // v2.0: Use durable session if enabled
+    if (config.durableSteps?.enabled !== false) {
+      // Update durable session with hybrid-specific data
+      const dsSession = durableSession.loadDurableSession();
+      if (dsSession) {
+        // Track tokens saved
+        if (data.totalTokensSaved) {
+          durableSession.addTokensSaved(data.totalTokensSaved - (dsSession.metrics.tokensSaved || 0));
+        }
+
+        // If executedSteps changed, mark corresponding steps as completed
+        if (data.executedSteps) {
+          for (const stepId of data.executedSteps) {
+            const step = dsSession.steps.find(s => s.id === stepId || s.description?.includes(stepId));
+            if (step && step.status !== durableSession.STEP_STATUS.COMPLETED) {
+              durableSession.markStepCompleted(step.id, 'Executed by orchestrator');
+            }
+          }
+        }
+
+        // If failedSteps changed, mark corresponding steps as failed
+        if (data.failedSteps) {
+          for (const stepId of data.failedSteps) {
+            const step = dsSession.steps.find(s => s.id === stepId || s.description?.includes(stepId));
+            if (step && step.status !== durableSession.STEP_STATUS.FAILED) {
+              durableSession.markStepFailed(step.id, 'Failed in orchestrator');
+            }
+          }
+        }
+
+        return durableSession.getHybridSession();
+      }
+    }
+
+    // Legacy fallback: write to hybrid-session.json directly
     const sessionPath = path.join(STATE_DIR, 'hybrid-session.json');
 
     let session = {
@@ -3094,7 +3138,19 @@ ${step.description || ''}
     return session;
   }
 
+  /**
+   * Get hybrid session state
+   * v2.0: Returns durable session in hybrid format when enabled
+   */
   getHybridSession() {
+    const config = getConfig();
+
+    // v2.0: Use durable session if enabled
+    if (config.durableSteps?.enabled !== false) {
+      return durableSession.getHybridSession();
+    }
+
+    // Legacy fallback
     const sessionPath = path.join(STATE_DIR, 'hybrid-session.json');
     if (fs.existsSync(sessionPath)) {
       return JSON.parse(fs.readFileSync(sessionPath, 'utf-8'));

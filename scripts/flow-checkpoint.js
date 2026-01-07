@@ -164,6 +164,7 @@ class Checkpoint {
       'state/app-map.md',
       'state/decisions.md',
       'state/progress.md',
+      'state/durable-session.json',
       'config.json'
     ];
 

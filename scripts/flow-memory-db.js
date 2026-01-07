@@ -217,22 +217,42 @@ function closeDatabase() {
 // Embeddings
 // ============================================================
 
+// Track if embeddings are available
+let embeddingsAvailable = null; // null = unknown, true/false after first check
+
 /**
  * Get embedder (lazy load)
+ * Returns null if @xenova/transformers is not installed
  */
 async function getEmbedder() {
+  if (embeddingsAvailable === false) return null;
+
   if (!embedder) {
-    const { pipeline } = await import('@xenova/transformers');
-    embedder = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+    try {
+      const { pipeline } = await import('@xenova/transformers');
+      embedder = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+      embeddingsAvailable = true;
+    } catch (e) {
+      if (e.code === 'ERR_MODULE_NOT_FOUND' || e.code === 'MODULE_NOT_FOUND') {
+        embeddingsAvailable = false;
+        if (process.env.DEBUG) {
+          console.warn('[DEBUG] @xenova/transformers not installed - semantic search disabled');
+        }
+        return null;
+      }
+      throw e; // Re-throw other errors
+    }
   }
   return embedder;
 }
 
 /**
  * Get embedding for text
+ * Returns null if embeddings are not available
  */
 async function getEmbedding(text) {
   const embed = await getEmbedder();
+  if (!embed) return null;
   const result = await embed(text, { pooling: 'mean', normalize: true });
   return Array.from(result.data);
 }
@@ -304,6 +324,7 @@ async function storeFact({ fact, category, scope, model, sourceContext }) {
 
 /**
  * Search facts by similarity (with access tracking)
+ * Falls back to text search if embeddings are not available
  */
 async function searchFacts({ query, category, model, scope, limit = 10, trackAccess = true }) {
   await initDatabase();
@@ -329,11 +350,26 @@ async function searchFacts({ query, category, model, scope, limit = 10, trackAcc
   const facts = queryToRows(result);
 
   // Calculate similarity and rank
-  const ranked = facts.map(f => {
-    const embedding = f.embedding ? jsonToEmbedding(f.embedding) : [];
-    const similarity = cosineSimilarity(queryEmbedding, embedding);
-    return { ...f, similarity, embedding: undefined };
-  }).sort((a, b) => b.similarity - a.similarity).slice(0, limit);
+  let ranked;
+  if (queryEmbedding) {
+    // Semantic search with embeddings
+    ranked = facts.map(f => {
+      const embedding = f.embedding ? jsonToEmbedding(f.embedding) : [];
+      const similarity = cosineSimilarity(queryEmbedding, embedding);
+      return { ...f, similarity, embedding: undefined };
+    }).sort((a, b) => b.similarity - a.similarity).slice(0, limit);
+  } else {
+    // Fallback: simple text matching when embeddings unavailable
+    const queryLower = query.toLowerCase();
+    const queryWords = queryLower.split(/\s+/).filter(w => w.length > 2);
+    ranked = facts.map(f => {
+      const factLower = f.fact.toLowerCase();
+      // Score based on word matches
+      const matches = queryWords.filter(w => factLower.includes(w)).length;
+      const similarity = queryWords.length > 0 ? matches / queryWords.length : 0;
+      return { ...f, similarity, embedding: undefined };
+    }).sort((a, b) => b.similarity - a.similarity).slice(0, limit);
+  }
 
   // Track access for returned facts (strategic forgetting support)
   if (trackAccess && ranked.length > 0) {
@@ -575,6 +611,7 @@ async function storePRD({ content, prdId, fileName }) {
 
 /**
  * Get PRD context for a task
+ * Falls back to text search if embeddings are not available
  */
 async function getPRDContext({ query, maxTokens = 2000, prdId }) {
   await initDatabase();
@@ -593,11 +630,25 @@ async function getPRDContext({ query, maxTokens = 2000, prdId }) {
   if (chunks.length === 0) return null;
 
   // Calculate similarity and rank
-  const ranked = chunks.map(c => {
-    const embedding = c.embedding ? jsonToEmbedding(c.embedding) : [];
-    const similarity = cosineSimilarity(queryEmbedding, embedding);
-    return { ...c, similarity };
-  });
+  let ranked;
+  if (queryEmbedding) {
+    // Semantic search with embeddings
+    ranked = chunks.map(c => {
+      const embedding = c.embedding ? jsonToEmbedding(c.embedding) : [];
+      const similarity = cosineSimilarity(queryEmbedding, embedding);
+      return { ...c, similarity };
+    });
+  } else {
+    // Fallback: simple text matching when embeddings unavailable
+    const queryLower = query.toLowerCase();
+    const queryWords = queryLower.split(/\s+/).filter(w => w.length > 2);
+    ranked = chunks.map(c => {
+      const contentLower = c.content.toLowerCase();
+      const matches = queryWords.filter(w => contentLower.includes(w)).length;
+      const similarity = queryWords.length > 0 ? matches / queryWords.length : 0;
+      return { ...c, similarity };
+    });
+  }
 
   // Sort by similarity, then by type priority
   const typePriority = { constraint: 0, criteria: 1, goal: 2, technical: 3, description: 4, list: 5 };

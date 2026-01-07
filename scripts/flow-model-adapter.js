@@ -61,8 +61,15 @@ function getCurrentModel() {
   const config = getConfig();
 
   // Check hybrid mode config first
-  if (config.hybrid?.enabled && config.hybrid?.model) {
-    return normalizeModelName(config.hybrid.model);
+  if (config.hybrid?.enabled) {
+    // New config structure: hybrid.executor.model
+    if (config.hybrid.executor?.model) {
+      return normalizeModelName(config.hybrid.executor.model);
+    }
+    // Legacy config structure: hybrid.model directly
+    if (config.hybrid.model) {
+      return normalizeModelName(config.hybrid.model);
+    }
   }
 
   // Check environment variable
@@ -365,7 +372,11 @@ function saveModelStats(stats) {
  */
 function recordModelResult(modelName, result) {
   const config = getConfig();
-  if (!config.modelAdapters?.enabled) return;
+  // Enable tracking if modelAdapters.enabled is true OR if hybrid mode is enabled
+  // This allows stats to be collected without explicit modelAdapters config
+  const trackingEnabled = config.modelAdapters?.enabled !== false &&
+    (config.modelAdapters?.enabled || config.hybrid?.enabled);
+  if (!trackingEnabled) return;
 
   const stats = loadModelStats();
   const model = normalizeModelName(modelName);

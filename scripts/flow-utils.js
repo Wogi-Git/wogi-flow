@@ -9,6 +9,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { execSync } = require('child_process');
 
 // ============================================================
@@ -121,6 +122,9 @@ const colors = {
  * Colorize text for terminal output
  */
 function color(colorName, text) {
+  if (process.env.DEBUG && !colors[colorName]) {
+    console.warn(`[DEBUG] Unknown color: "${colorName}"`);
+  }
   return `${colors[colorName] || ''}${text}${colors.reset}`;
 }
 
@@ -174,6 +178,168 @@ function error(message) {
  */
 function info(message) {
   console.log(`${color('cyan', 'ℹ')} ${message}`);
+}
+
+// ============================================================
+// Task ID Generation (hash-based IDs)
+// ============================================================
+
+/**
+ * Generate a hash-based task ID
+ * Format: wf-XXXXXXXX (8-char hex hash)
+ *
+ * Uses SHA256 hash of title + timestamp for collision resistance.
+ * This prevents merge conflicts in multi-agent/multi-branch workflows.
+ *
+ * @param {string} title - Task title
+ * @returns {string} Task ID in format wf-XXXXXXXX
+ *
+ * @example
+ * generateTaskId('Fix login bug') // => 'wf-a1b2c3d4'
+ */
+function generateTaskId(title) {
+  const input = `${title}${Date.now()}${Math.random()}`;
+  const hash = crypto.createHash('sha256').update(input).digest('hex').slice(0, 8);
+  return `wf-${hash}`;
+}
+
+/**
+ * Check if a string is a valid task ID (old or new format)
+ * @param {string} id - ID to validate
+ * @returns {{ valid: boolean, format: 'hash' | 'legacy' | null }}
+ */
+function validateTaskId(id) {
+  if (!id || typeof id !== 'string') {
+    return { valid: false, format: null };
+  }
+
+  // New hash-based format: wf-XXXXXXXX
+  if (/^wf-[a-f0-9]{8}$/i.test(id)) {
+    return { valid: true, format: 'hash' };
+  }
+
+  // Legacy formats: TASK-XXX, BUG-XXX
+  if (/^(TASK|BUG)-\d{3,}$/i.test(id)) {
+    return { valid: true, format: 'legacy' };
+  }
+
+  return { valid: false, format: null };
+}
+
+/**
+ * Check if ID is in legacy format (for migration warnings)
+ * @param {string} id - ID to check
+ * @returns {boolean}
+ */
+function isLegacyTaskId(id) {
+  return /^(TASK|BUG)-\d{3,}$/i.test(id);
+}
+
+// ============================================================
+// JSON Output Helpers (for --json flag support)
+// ============================================================
+
+/**
+ * Output data as JSON and exit
+ * Use this in scripts that support --json flag
+ *
+ * @param {Object} data - Data to output
+ * @param {Object} [options] - Options
+ * @param {boolean} [options.exitOnOutput=true] - Exit after output
+ * @param {number} [options.exitCode=0] - Exit code
+ *
+ * @example
+ * if (flags.json) {
+ *   outputJson({ success: true, tasks: [...] });
+ * }
+ */
+function outputJson(data, options = {}) {
+  const { exitOnOutput = true, exitCode = 0 } = options;
+
+  const output = {
+    success: data.success !== false,
+    timestamp: new Date().toISOString(),
+    ...data
+  };
+
+  console.log(JSON.stringify(output, null, 2));
+
+  if (exitOnOutput) {
+    process.exit(exitCode);
+  }
+}
+
+/**
+ * Parse common CLI flags from arguments
+ * Standardizes flag handling across all flow commands
+ *
+ * @param {string[]} args - Command line arguments (process.argv.slice(2))
+ * @returns {{ flags: Object, positional: string[] }}
+ *
+ * @example
+ * const { flags, positional } = parseFlags(process.argv.slice(2));
+ * if (flags.json) outputJson(result);
+ * if (flags.help) showHelp();
+ */
+function parseFlags(args) {
+  const flags = {
+    json: false,
+    quiet: false,
+    verbose: false,
+    help: false,
+    dryRun: false,
+    deep: false
+  };
+
+  const positional = [];
+  const namedFlags = {};
+
+  // Known flags that take values (--flag value style)
+  const valuedFlags = ['priority', 'from', 'severity', 'limit', 'format', 'output'];
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+
+    if (arg === '--json') {
+      flags.json = true;
+    } else if (arg === '--quiet' || arg === '-q') {
+      flags.quiet = true;
+    } else if (arg === '--verbose' || arg === '-v') {
+      flags.verbose = true;
+    } else if (arg === '--help' || arg === '-h') {
+      flags.help = true;
+    } else if (arg === '--dry-run') {
+      flags.dryRun = true;
+    } else if (arg === '--deep') {
+      flags.deep = true;
+    } else if (arg.startsWith('--')) {
+      // Handle --key=value style flags
+      const match = arg.match(/^--([^=]+)(?:=(.*))?$/);
+      if (match) {
+        const [, key, value] = match;
+        if (value !== undefined) {
+          // Has explicit value: --key=value
+          namedFlags[key] = value;
+        } else if (valuedFlags.includes(key) && i + 1 < args.length && !args[i + 1].startsWith('-')) {
+          // Known valued flag: --key value (consume next arg)
+          namedFlags[key] = args[++i];
+        } else if (valuedFlags.includes(key)) {
+          // Valued flag without value - warn in debug mode, treat as boolean
+          if (process.env.DEBUG) {
+            console.warn(`[DEBUG] Flag --${key} expects a value but none provided`);
+          }
+          namedFlags[key] = true;
+        } else {
+          // Boolean flag: --flag
+          namedFlags[key] = true;
+        }
+      }
+    } else if (!arg.startsWith('-')) {
+      positional.push(arg);
+    }
+  }
+
+  return { flags: { ...flags, ...namedFlags }, positional };
 }
 
 // ============================================================
@@ -300,7 +466,10 @@ const KNOWN_CONFIG_KEYS = [
   // v1.7.0 context memory management
   'contextMonitor',
   'requestLog',
-  'sessionState'
+  'sessionState',
+  // v1.9.0 features
+  'priorities',
+  'morningBriefing'
 ];
 
 // Known nested keys for common config sections
@@ -315,8 +484,14 @@ const KNOWN_NESTED_KEYS = {
   // v1.7.0 context memory management
   contextMonitor: ['enabled', 'warnAt', 'criticalAt', 'contextWindow', 'checkOnSessionStart', 'checkAfterTask'],
   requestLog: ['enabled', 'autoArchive', 'maxRecentEntries', 'keepRecent', 'createSummary'],
-  sessionState: ['enabled', 'autoRestore', 'maxGapHours', 'trackFiles', 'trackDecisions', 'maxRecentFiles', 'maxRecentDecisions']
+  sessionState: ['enabled', 'autoRestore', 'maxGapHours', 'trackFiles', 'trackDecisions', 'maxRecentFiles', 'maxRecentDecisions'],
+  // v1.9.0 features
+  priorities: ['defaultPriority', 'autoBoostDays', 'autoBoostAmount'],
+  morningBriefing: ['enabled', 'showLastSession', 'showChanges', 'showRecommendedTasks', 'generatePrompt']
 };
+
+// Track if we've already warned about config issues this session
+let _configValidationDone = false;
 
 /**
  * Validate config object for unknown keys
@@ -355,9 +530,6 @@ function validateConfig(config, warnOnUnknown = true) {
     console.warn('   Check for typos in .workflow/config.json');
   }
 }
-
-// Track if we've already warned about config issues this session
-let _configValidationDone = false;
 
 /**
  * Read workflow config (cached, invalidates on file change)
@@ -455,10 +627,11 @@ function getReadyData() {
 
 /**
  * Write ready.json task queue
+ * Note: Does not mutate the input data object
  */
 function saveReadyData(data) {
-  data.lastUpdated = new Date().toISOString();
-  return writeJson(PATHS.ready, data);
+  const toSave = { ...data, lastUpdated: new Date().toISOString() };
+  return writeJson(PATHS.ready, toSave);
 }
 
 /**
@@ -617,13 +790,16 @@ function addRequestLogEntry(entry) {
 
 /**
  * Count components in app-map.md
+ * Counts actual data rows (excludes headers and separator rows)
  */
 function countAppMapComponents() {
   try {
     const content = readFile(PATHS.appMap, '');
-    const matches = content.match(/^\|/gm);
-    // Subtract header rows (approximately 6)
-    const count = matches ? Math.max(0, matches.length - 6) : 0;
+    // Match data rows: start with | followed by non-dash content (excludes |---|---|)
+    const dataRows = content.match(/^\|[^-|][^|]*\|/gm);
+    // Each table has 1 header row per section, estimate ~2-3 sections
+    const headerCount = (content.match(/^## /gm) || []).length * 1;
+    const count = dataRows ? Math.max(0, dataRows.length - headerCount) : 0;
     return count;
   } catch {
     return 0;
@@ -854,11 +1030,13 @@ async function acquireLock(filePath, options = {}) {
   const {
     retries = 5,
     retryDelay = 100,
-    staleMs = 30000
+    staleMs = 60000  // 60s default - allow for complex operations
   } = options;
 
   const lockDir = `${filePath}.lock`;
   const lockInfoFile = path.join(lockDir, 'info.json');
+  let staleCleanupAttempts = 0;
+  const maxStaleCleanupAttempts = 3;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -884,30 +1062,44 @@ async function acquireLock(filePath, options = {}) {
     } catch (err) {
       if (err.code === 'EEXIST') {
         // Lock exists - check if stale
+        let isStale = false;
+        let lockAge = 0;
+
         try {
           const info = JSON.parse(fs.readFileSync(lockInfoFile, 'utf-8'));
-          const age = Date.now() - info.timestamp;
-
-          if (age > staleMs) {
-            // Stale lock - force cleanup
-            if (process.env.DEBUG) {
-              console.warn(`[DEBUG] Removing stale lock (${age}ms old) for ${filePath}`);
-            }
-            try {
-              fs.unlinkSync(lockInfoFile);
-              fs.rmdirSync(lockDir);
-            } catch {
-              // May have been cleaned up by another process
-            }
-            // Try again immediately
-            continue;
-          }
+          lockAge = Date.now() - info.timestamp;
+          isStale = lockAge > staleMs;
         } catch {
-          // Can't read lock info - treat as stale after delay
+          // Can't read lock info - assume stale if we've waited long enough
+          isStale = attempt >= 2;
+        }
+
+        if (isStale) {
+          staleCleanupAttempts++;
+          if (staleCleanupAttempts > maxStaleCleanupAttempts) {
+            throw new Error(`Failed to clean up stale lock for ${filePath} after ${maxStaleCleanupAttempts} attempts`);
+          }
+
+          if (process.env.DEBUG) {
+            console.warn(`[DEBUG] Removing stale lock (${lockAge}ms old) for ${filePath} (cleanup attempt ${staleCleanupAttempts})`);
+          }
+
+          try {
+            fs.unlinkSync(lockInfoFile);
+            fs.rmdirSync(lockDir);
+          } catch (cleanupErr) {
+            // Cleanup failed - wait before retrying
+            if (process.env.DEBUG) {
+              console.warn(`[DEBUG] Stale lock cleanup failed: ${cleanupErr.message}`);
+            }
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+          }
+          // Try again
+          continue;
         }
 
         if (attempt < retries) {
-          // Wait and retry
+          // Wait and retry with exponential backoff
           await new Promise(resolve => setTimeout(resolve, retryDelay * (attempt + 1)));
           continue;
         }
@@ -1205,6 +1397,15 @@ module.exports = {
   warn,
   error,
   info,
+
+  // Task ID Generation (v1.9.0)
+  generateTaskId,
+  validateTaskId,
+  isLegacyTaskId,
+
+  // JSON Output & CLI Flags (v1.9.0)
+  outputJson,
+  parseFlags,
 
   // File Operations
   fileExists,

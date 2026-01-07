@@ -1,9 +1,12 @@
-# BUG-XXX: [Title]
+# wf-XXXXXXXX: [Title]
 
 **Created**: [date]
 **Status**: Open / In Progress / Fixed / Closed
 **Severity**: Critical / High / Medium / Low
+**Priority**: P0-P4
 **Tags**: #bug #component:[name] #screen:[name]
+**Discovered From**: [wf-XXXXXXXX or empty if not during task]
+**Discovered During**: implementation / testing / review
 
 ## Description
 [Clear description of the bug]

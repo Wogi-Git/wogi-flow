@@ -148,7 +148,8 @@ function readMemoryBlocks() {
  * Creates the section if it doesn't exist
  */
 function writeMemoryBlocks(blocks) {
-  blocks.lastUpdated = new Date().toISOString();
+  // Clone to avoid mutating caller's data
+  const toWrite = { ...blocks, lastUpdated: new Date().toISOString() };
 
   let content;
   if (!fileExists(PROGRESS_PATH)) {
@@ -159,7 +160,7 @@ function writeMemoryBlocks(blocks) {
 
   const blockContent = `${BLOCK_START}
 \`\`\`json
-${JSON.stringify(blocks, null, 2)}
+${JSON.stringify(toWrite, null, 2)}
 \`\`\`
 ${BLOCK_END}`;
 

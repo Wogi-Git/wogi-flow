@@ -1,6 +1,6 @@
 {
   "name": "wogi-flow",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "AI-powered development workflow management system",
   "private": true,
   "scripts": {
@@ -17,11 +17,11 @@
   ],
   "license": "AGPL-3.0",
   "dependencies": {
-    "sql.js": "^1.10.0",
-    "@xenova/transformers": "^2.15.0"
+    "sql.js": "^1.10.0"
   },
   "optionalDependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@xenova/transformers": "^2.15.0"
   },
   "engines": {
     "node": ">=18.0.0"

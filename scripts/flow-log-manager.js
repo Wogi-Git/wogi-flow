@@ -169,20 +169,31 @@ function archiveOldEntries() {
   // Prepare archive content
   const archiveContent = toArchive.map(e => e.raw).join('\n\n');
 
-  if (fileExists(archivePath)) {
-    // Append to existing archive
-    const existing = readFile(archivePath, '');
-    writeFile(archivePath, existing + '\n\n' + archiveContent);
-  } else {
-    // Create new archive with header
-    const archiveHeader = `# Request Log Archive - ${archiveDate}
+  // Write to archive first - only update main log if archive succeeds
+  try {
+    if (fileExists(archivePath)) {
+      // Append to existing archive
+      const existing = readFile(archivePath, '');
+      writeFile(archivePath, existing + '\n\n' + archiveContent);
+    } else {
+      // Create new archive with header
+      const archiveHeader = `# Request Log Archive - ${archiveDate}
 
 Archived entries from request-log.md.
 
 ---
 
 `;
-    writeFile(archivePath, archiveHeader + archiveContent);
+      writeFile(archivePath, archiveHeader + archiveContent);
+    }
+  } catch (err) {
+    // Archive write failed - don't update main log to prevent data loss
+    console.error(`Failed to write archive: ${err.message}`);
+    return {
+      archived: 0,
+      remaining: entries.length,
+      error: `Archive write failed: ${err.message}`
+    };
   }
 
   // Update summary if enabled
@@ -190,7 +201,7 @@ Archived entries from request-log.md.
     updateSummary(toArchive, archiveDate);
   }
 
-  // Rewrite main log with only recent entries
+  // Rewrite main log with only recent entries (only after archive succeeded)
   const header = getLogHeader(content);
   const recentContent = header + toKeep.map(e => e.raw).join('\n\n') + '\n';
   writeFile(LOG_PATH, recentContent);

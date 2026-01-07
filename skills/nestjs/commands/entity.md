@@ -4,7 +4,7 @@ Usage: `/nestjs-entity [EntityName]`
 
 ## Steps
 
-1. Read template: `.claude/skills/nestjs/templates/entity.template.ts`
+1. Read template: `skills/nestjs/templates/entity.template.ts`
 2. Ask for entity details:
    - Table name (snake_case)
    - Columns needed (name, type, nullable, default)

@@ -314,23 +314,73 @@ function parseJsonResponse(response) {
     } catch {}
   }
 
-  // Look for JSON object pattern
-  const objectMatch = content.match(/\{[\s\S]*\}/);
-  if (objectMatch) {
-    try {
-      return JSON.parse(objectMatch[0]);
-    } catch {}
+  // Look for JSON object pattern - find balanced braces
+  const objectStart = content.indexOf('{');
+  if (objectStart !== -1) {
+    const jsonStr = extractBalancedJson(content, objectStart, '{', '}');
+    if (jsonStr) {
+      try {
+        return JSON.parse(jsonStr);
+      } catch {}
+    }
   }
 
-  // Look for JSON array pattern
-  const arrayMatch = content.match(/\[[\s\S]*\]/);
-  if (arrayMatch) {
-    try {
-      return JSON.parse(arrayMatch[0]);
-    } catch {}
+  // Look for JSON array pattern - find balanced brackets
+  const arrayStart = content.indexOf('[');
+  if (arrayStart !== -1) {
+    const jsonStr = extractBalancedJson(content, arrayStart, '[', ']');
+    if (jsonStr) {
+      try {
+        return JSON.parse(jsonStr);
+      } catch {}
+    }
   }
 
   return null;
+}
+
+/**
+ * Extract a balanced JSON structure starting at the given index
+ * Handles nested structures correctly (won't match across unrelated objects)
+ */
+function extractBalancedJson(content, startIdx, openChar, closeChar) {
+  if (content[startIdx] !== openChar) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = startIdx; i < content.length; i++) {
+    const char = content[i];
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+
+    if (char === '\\' && inString) {
+      escape = true;
+      continue;
+    }
+
+    if (char === '"' && !escape) {
+      inString = !inString;
+      continue;
+    }
+
+    if (!inString) {
+      if (char === openChar) {
+        depth++;
+      } else if (char === closeChar) {
+        depth--;
+        if (depth === 0) {
+          return content.substring(startIdx, i + 1);
+        }
+      }
+    }
+  }
+
+  return null; // Unbalanced
 }
 
 /**

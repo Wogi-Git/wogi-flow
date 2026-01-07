@@ -501,9 +501,10 @@ function trackStrategyEffectiveness(modelName, strategy, succeeded) {
     stats[modelName][strategy].failures++;
   }
 
-  // Calculate effectiveness rate
+  // Calculate effectiveness rate (guard against division by zero)
   const s = stats[modelName][strategy];
-  s.rate = s.successes / (s.successes + s.failures);
+  const total = s.successes + s.failures;
+  s.rate = total > 0 ? s.successes / total : 0;
 
   const dir = path.dirname(STRATEGY_STATS_PATH);
   if (!fs.existsSync(dir)) {
@@ -570,17 +571,17 @@ function isDuplicateLearning(modelName, category, details) {
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
   const dateStr = sevenDaysAgo.toISOString().split('T')[0];
 
-  // Simple pattern match - if we have the same category learning recently, skip
-  const categoryPattern = new RegExp(`### \\d{4}-\\d{2}-\\d{2}.*${category}`, 'i');
-  if (categoryPattern.test(learnings)) {
-    // Check if the date is recent
-    const matches = learnings.match(/### (\d{4}-\d{2}-\d{2})/g);
-    if (matches) {
-      for (const match of matches) {
-        const date = match.replace('### ', '');
-        if (date >= dateStr && learnings.includes(category)) {
-          return true; // Recent duplicate found
-        }
+  // Find entries with both a recent date AND the category on the same line or nearby
+  // Pattern: ### YYYY-MM-DD followed by category on same line
+  const categoryEscaped = category.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const recentCategoryPattern = new RegExp(`### (\\d{4}-\\d{2}-\\d{2}).*?${categoryEscaped}`, 'gi');
+  const recentMatches = learnings.match(recentCategoryPattern);
+
+  if (recentMatches) {
+    for (const match of recentMatches) {
+      const dateMatch = match.match(/(\d{4}-\d{2}-\d{2})/);
+      if (dateMatch && dateMatch[1] >= dateStr) {
+        return true; // Recent duplicate found - same date+category header
       }
     }
   }

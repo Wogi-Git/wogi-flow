@@ -100,7 +100,7 @@ mkdir -p "$INSTALL_DIR/.workflow/archive"
 mkdir -p "$INSTALL_DIR/.workflow/tests/flows"
 mkdir -p "$INSTALL_DIR/.workflow/specs/capabilities"
 mkdir -p "$INSTALL_DIR/.claude/rules"
-mkdir -p "$INSTALL_DIR/.claude/skills"
+mkdir -p "$INSTALL_DIR/skills"
 
 # Copy default state files only if they don't exist
 DEFAULT_STATE_FILES=(

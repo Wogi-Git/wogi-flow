@@ -43,6 +43,18 @@
     "fallbackToManual": true,
     "suggestBrowserTests": true
   },
+  "durableSteps": {
+    "enabled": true,
+    "autoResume": true,
+    "checkSuspensionsOnStart": true,
+    "defaultMaxAttempts": 5
+  },
+  "suspension": {
+    "enabled": true,
+    "pollIntervalSeconds": 60,
+    "maxPollAttempts": 120,
+    "reminderAfterHours": 24
+  },
   "parallel": {
     "enabled": true,
     "maxConcurrent": 3,
@@ -384,7 +396,7 @@
     "generateOn": ["onboarding", "manual"]
   },
   "lsp": {
-    "enabled": false,
+    "enabled": true,
     "server": "typescript-language-server",
     "timeout": 5000,
     "cacheTypes": true
@@ -539,5 +551,26 @@
     "onBlock": "error",
     "onAsk": "prompt",
     "logging": true
+  },
+  "priorities": {
+    "defaultPriority": "P2",
+    "autoBoostDays": 2,
+    "autoBoostAmount": 1,
+    "levels": {
+      "P0": { "label": "Critical", "description": "Drop everything" },
+      "P1": { "label": "High", "description": "Do today" },
+      "P2": { "label": "Medium", "description": "Do this week" },
+      "P3": { "label": "Low", "description": "Do when possible" },
+      "P4": { "label": "Backlog", "description": "Someday" }
+    }
+  },
+  "morningBriefing": {
+    "enabled": true,
+    "showLastSession": true,
+    "showChanges": true,
+    "showRecommendedTasks": 3,
+    "generatePrompt": true,
+    "showBlockers": true,
+    "showKeyContext": true
   }
 }

@@ -35,4 +35,4 @@
 # - .workflow/bugs/* (your bug reports)
 # - .workflow/corrections/* (your correction reports)
 # - .claude/rules/* (your custom rules)
-# - .claude/skills/* (your installed skills)
+# - skills/*/knowledge/learnings.md (your skill learnings)
