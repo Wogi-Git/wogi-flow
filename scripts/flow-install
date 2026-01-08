@@ -17,8 +17,13 @@ NC='\033[0m'
 
 # Default values
 PROJECT_NAME=""
+IS_EXISTING_PROJECT=false
+DETECTED_FRAMEWORK=""
+DETECTED_LANGUAGE=""
+DETECTED_DATABASE=""
+DETECTED_COMPONENTS=0
 AGENT_STRUCTURE="unified"
-CORRECTION_MODE="inline"
+CORRECTION_MODE="hybrid"
 PLANNING_STYLE="feature-based"
 SKILLS=""
 ENABLE_HOOKS=false
@@ -26,6 +31,7 @@ ENABLE_STORYBOOK=false
 STRICT_VERIFICATION=false
 STRICT_CORRECTIONS=false
 STRICT_REPORTS=false
+RUN_STACK_WIZARD=false
 
 print_header() {
     clear
@@ -75,18 +81,198 @@ ask_project_name() {
     echo ""
 }
 
-# Question 2: Agent structure
+# Question 2: Project type (new vs existing)
+ask_project_type() {
+    echo -e "${BOLD}2. Project Type${NC}"
+    echo "   Is this a new project or an existing one?"
+    echo ""
+    echo "   (a) New project - Start fresh with guided setup"
+    echo "   (b) Existing project - Analyze and configure based on codebase"
+    echo ""
+
+    read -p "   Choice [a]: " choice
+    case "$choice" in
+        b|B)
+            IS_EXISTING_PROJECT=true
+            echo ""
+            echo -e "${CYAN}Analyzing project...${NC}"
+            run_project_detection
+            ;;
+        *) IS_EXISTING_PROJECT=false ;;
+    esac
+    echo ""
+}
+
+# Detection functions for existing projects
+detect_language() {
+    if [ -f "tsconfig.json" ]; then
+        echo "TypeScript"
+    elif [ -f "package.json" ]; then
+        echo "JavaScript"
+    elif [ -f "requirements.txt" ] || [ -f "setup.py" ] || [ -f "pyproject.toml" ]; then
+        echo "Python"
+    elif [ -f "go.mod" ]; then
+        echo "Go"
+    elif [ -f "Cargo.toml" ]; then
+        echo "Rust"
+    elif [ -f "pom.xml" ] || [ -f "build.gradle" ]; then
+        echo "Java"
+    else
+        echo "unknown"
+    fi
+}
+
+detect_framework() {
+    local framework="unknown"
+
+    if [ -f "package.json" ]; then
+        if grep -q '"next"' package.json 2>/dev/null; then
+            framework="nextjs"
+        elif grep -q '"@nestjs/core"' package.json 2>/dev/null; then
+            framework="nestjs"
+        elif grep -q '"react-native"' package.json 2>/dev/null; then
+            framework="react-native"
+        elif grep -q '"expo"' package.json 2>/dev/null; then
+            framework="expo"
+        elif grep -q '"react"' package.json 2>/dev/null; then
+            framework="react"
+        elif grep -q '"vue"' package.json 2>/dev/null; then
+            framework="vue"
+        elif grep -q '"nuxt"' package.json 2>/dev/null; then
+            framework="nuxt"
+        elif grep -q '"@angular/core"' package.json 2>/dev/null; then
+            framework="angular"
+        elif grep -q '"svelte"' package.json 2>/dev/null; then
+            framework="svelte"
+        elif grep -q '"express"' package.json 2>/dev/null; then
+            framework="express"
+        elif grep -q '"fastify"' package.json 2>/dev/null; then
+            framework="fastify"
+        fi
+    fi
+
+    if [ -f "requirements.txt" ]; then
+        if grep -qi "fastapi" requirements.txt 2>/dev/null; then
+            framework="fastapi"
+        elif grep -qi "django" requirements.txt 2>/dev/null; then
+            framework="django"
+        elif grep -qi "flask" requirements.txt 2>/dev/null; then
+            framework="flask"
+        fi
+    fi
+
+    # Check for specific config files
+    if [ -f "next.config.js" ] || [ -f "next.config.mjs" ] || [ -f "next.config.ts" ]; then
+        framework="nextjs"
+    elif [ -f "nest-cli.json" ]; then
+        framework="nestjs"
+    elif [ -f "angular.json" ]; then
+        framework="angular"
+    elif [ -f "nuxt.config.js" ] || [ -f "nuxt.config.ts" ]; then
+        framework="nuxt"
+    elif [ -f "svelte.config.js" ]; then
+        framework="svelte"
+    fi
+
+    echo "$framework"
+}
+
+detect_database() {
+    local db=""
+
+    if [ -f "package.json" ]; then
+        if grep -q '"prisma"' package.json 2>/dev/null; then
+            db="Prisma"
+        elif grep -q '"typeorm"' package.json 2>/dev/null; then
+            db="TypeORM"
+        elif grep -q '"drizzle-orm"' package.json 2>/dev/null; then
+            db="Drizzle"
+        elif grep -q '"mongoose"' package.json 2>/dev/null; then
+            db="MongoDB (Mongoose)"
+        elif grep -q '"sequelize"' package.json 2>/dev/null; then
+            db="Sequelize"
+        fi
+    fi
+
+    if [ -f "docker-compose.yml" ] || [ -f "docker-compose.yaml" ]; then
+        local docker_file="docker-compose.yml"
+        [ -f "docker-compose.yaml" ] && docker_file="docker-compose.yaml"
+
+        if grep -q "postgres" "$docker_file" 2>/dev/null; then
+            db="${db:+$db + }PostgreSQL"
+        fi
+        if grep -q "mysql" "$docker_file" 2>/dev/null; then
+            db="${db:+$db + }MySQL"
+        fi
+        if grep -q "mongo" "$docker_file" 2>/dev/null; then
+            db="${db:+$db + }MongoDB"
+        fi
+        if grep -q "redis" "$docker_file" 2>/dev/null; then
+            db="${db:+$db + }Redis"
+        fi
+    fi
+
+    echo "${db:-unknown}"
+}
+
+count_components() {
+    local count=0
+
+    # Count React/Vue components
+    if [ -d "src/components" ]; then
+        count=$((count + $(find src/components -type f \( -name "*.tsx" -o -name "*.jsx" -o -name "*.vue" \) 2>/dev/null | wc -l)))
+    fi
+
+    # Count pages
+    for dir in "src/pages" "pages" "app"; do
+        if [ -d "$dir" ]; then
+            count=$((count + $(find "$dir" -type f \( -name "*.tsx" -o -name "*.jsx" -o -name "*.vue" \) 2>/dev/null | wc -l)))
+        fi
+    done
+
+    # Count NestJS modules
+    if [ -d "src" ]; then
+        count=$((count + $(find src -name "*.module.ts" 2>/dev/null | wc -l)))
+    fi
+
+    echo "$count"
+}
+
+run_project_detection() {
+    DETECTED_LANGUAGE=$(detect_language)
+    DETECTED_FRAMEWORK=$(detect_framework)
+    DETECTED_DATABASE=$(detect_database)
+    DETECTED_COMPONENTS=$(count_components)
+
+    echo ""
+    echo -e "${GREEN}Detected:${NC}"
+    echo "  - Language:   $DETECTED_LANGUAGE"
+    echo "  - Framework:  $DETECTED_FRAMEWORK"
+    echo "  - Database:   $DETECTED_DATABASE"
+    echo "  - Components: $DETECTED_COMPONENTS found"
+    echo ""
+
+    read -p "   Configure based on these detections? [Y/n]: " use_detected
+    if [[ "${use_detected:-y}" =~ ^[Nn]$ ]]; then
+        IS_EXISTING_PROJECT=false
+        echo -e "   ${YELLOW}Will proceed with manual configuration.${NC}"
+    else
+        echo -e "   ${GREEN}Will pre-fill settings based on detection.${NC}"
+    fi
+}
+
+# Question 3: Agent structure
 ask_agent_structure() {
-    echo -e "${BOLD}2. Agent Structure${NC}"
+    echo -e "${BOLD}3. Agent Structure${NC}"
     echo "   How should development agents be organized?"
     echo ""
-    echo "   (a) Unified - Single developer/reviewer/tester agents [recommended]"
+    echo "   (a) Unified - Single developer/reviewer/tester agents [Recommended]"
     echo "       Best for: Solo devs, small teams, fullstack developers"
     echo ""
     echo "   (b) Split - Separate frontend/backend agents"
     echo "       Best for: Large teams with specialists, complex projects"
     echo ""
-    
+
     read -p "   Choice [a]: " choice
     case "$choice" in
         b|B) AGENT_STRUCTURE="split" ;;
@@ -95,42 +281,42 @@ ask_agent_structure() {
     echo ""
 }
 
-# Question 3: Correction report mode
+# Question 4: Correction report mode
 ask_correction_mode() {
-    echo -e "${BOLD}3. Correction Report Mode${NC}"
+    echo -e "${BOLD}4. Correction Report Mode${NC}"
     echo "   How detailed should bug fix documentation be?"
     echo ""
-    echo "   (a) Inline only - Everything in request-log.md [recommended]"
+    echo "   (a) Inline only - Everything in request-log.md"
     echo "       Quick entries, low overhead"
     echo ""
-    echo "   (b) Hybrid - Summary in log, detailed doc for significant fixes"
+    echo "   (b) Hybrid - Summary in log, detailed doc for significant fixes [Recommended]"
     echo "       Balance of speed and thoroughness"
     echo ""
     echo "   (c) Always detailed - Summary + linked detailed doc for every fix"
     echo "       Maximum traceability, higher overhead"
     echo ""
-    
-    read -p "   Choice [a]: " choice
+
+    read -p "   Choice [b]: " choice
     case "$choice" in
-        b|B) CORRECTION_MODE="hybrid" ;;
+        a|A) CORRECTION_MODE="inline" ;;
         c|C) CORRECTION_MODE="always-detailed" ;;
-        *) CORRECTION_MODE="inline" ;;
+        *) CORRECTION_MODE="hybrid" ;;
     esac
     echo ""
 }
 
-# Question 4: Planning style
+# Question 5: Planning style
 ask_planning_style() {
-    echo -e "${BOLD}4. Planning Style${NC}"
+    echo -e "${BOLD}5. Planning Style${NC}"
     echo "   How should features and tasks be organized?"
     echo ""
-    echo "   (a) Feature-based - Flexible, work on any feature [recommended]"
+    echo "   (a) Feature-based - Flexible, work on any feature [Recommended]"
     echo "       Best for: Ongoing products, agile teams, maintenance"
     echo ""
     echo "   (b) Phase-based - Sequential phases with milestones"
     echo "       Best for: New projects, fixed scope, waterfall-ish"
     echo ""
-    
+
     read -p "   Choice [a]: " choice
     case "$choice" in
         b|B) PLANNING_STYLE="phase-based" ;;
@@ -139,52 +325,59 @@ ask_planning_style() {
     echo ""
 }
 
-# Question 5: Skills
-ask_skills() {
-    echo -e "${BOLD}5. Install Skills${NC}"
-    echo "   Skills add specialized commands and templates for specific tech stacks."
+# Question 6: Tech Stack Wizard
+ask_tech_stack() {
+    echo -e "${BOLD}6. Tech Stack Configuration${NC}"
+    echo "   Configure your tech stack to generate framework-specific skills?"
     echo ""
-    echo "   Available skills:"
-    echo "   • nestjs    - NestJS module builder, entity/DTO templates, migrations"
-    echo "   • react     - Component templates, hooks, Storybook integration"
-    echo "   • python    - FastAPI/Django patterns, pytest templates"
+    echo "   This will:"
+    echo "   - Ask about your frontend/backend frameworks"
+    echo "   - Configure state management, styling, testing, etc."
+    echo "   - Generate skills with best practices for your stack"
+    echo "   - Fetch latest documentation via Context7"
     echo ""
-    echo "   Enter: skill names (comma-separated), 'all', or 'none'"
+    echo "   (a) Run tech stack wizard now [Recommended]"
+    echo "   (b) Skip - I'll configure later with /wogi-setup-stack"
     echo ""
-    
-    read -p "   Skills to install [none]: " SKILLS
-    SKILLS="${SKILLS:-none}"
-    
-    if [ "$SKILLS" = "all" ]; then
-        SKILLS="nestjs,react,python"
-    fi
+
+    read -p "   Choice [a]: " choice
+    case "$choice" in
+        b|B)
+            echo -e "   ${YELLOW}Skipped.${NC} Run /wogi-setup-stack later to configure."
+            SKILLS="none"
+            ;;
+        *)
+            # Will run the wizard after confirmation
+            RUN_STACK_WIZARD=true
+            ;;
+    esac
     echo ""
 }
 
-# Question 6: Optional features
+# Question 7: Optional features
 ask_optional_features() {
-    echo -e "${BOLD}6. Optional Features${NC}"
+    echo -e "${BOLD}7. Optional Features${NC}"
     echo "   Enable additional features? (y/n for each)"
     echo ""
-    
+
     read -p "   Pre-commit git hooks? [n]: " choice
     [[ "$choice" =~ ^[Yy]$ ]] && ENABLE_HOOKS=true
-    
+
     read -p "   Auto-generate Storybook stories? [n]: " choice
     [[ "$choice" =~ ^[Yy]$ ]] && ENABLE_STORYBOOK=true
-    
+
     echo ""
     echo -e "${BOLD}   Strict Mode Options:${NC}"
-    
+
     read -p "   Require verification checklist before done? [n]: " choice
     [[ "$choice" =~ ^[Yy]$ ]] && STRICT_VERIFICATION=true
-    
+
     read -p "   Require correction reports on test failures? [n]: " choice
     [[ "$choice" =~ ^[Yy]$ ]] && STRICT_CORRECTIONS=true
-    
+
     read -p "   Require feature reports on completion? [n]: " choice
     [[ "$choice" =~ ^[Yy]$ ]] && STRICT_REPORTS=true
-    
+
     echo ""
 }
 
@@ -195,21 +388,32 @@ confirm_settings() {
     echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
     echo ""
     echo "   Project Name:        $PROJECT_NAME"
+    if [ "$IS_EXISTING_PROJECT" = true ]; then
+        echo "   Project Type:        Existing project"
+        echo "   Detected Framework:  $DETECTED_FRAMEWORK"
+        echo "   Detected Language:   $DETECTED_LANGUAGE"
+    else
+        echo "   Project Type:        New project"
+    fi
     echo "   Agent Structure:     $AGENT_STRUCTURE"
     echo "   Correction Mode:     $CORRECTION_MODE"
     echo "   Planning Style:      $PLANNING_STYLE"
-    echo "   Skills:              $SKILLS"
+    if [ "$RUN_STACK_WIZARD" = true ]; then
+        echo "   Tech Stack:          Will configure with wizard"
+    else
+        echo "   Tech Stack:          Skip (configure later)"
+    fi
     echo ""
     echo "   Optional Features:"
-    echo "   • Pre-commit hooks:           $ENABLE_HOOKS"
-    echo "   • Auto Storybook:             $ENABLE_STORYBOOK"
-    echo "   • Strict verification:        $STRICT_VERIFICATION"
-    echo "   • Strict correction reports:  $STRICT_CORRECTIONS"
-    echo "   • Strict feature reports:     $STRICT_REPORTS"
+    echo "   - Pre-commit hooks:           $ENABLE_HOOKS"
+    echo "   - Auto Storybook:             $ENABLE_STORYBOOK"
+    echo "   - Strict verification:        $STRICT_VERIFICATION"
+    echo "   - Strict correction reports:  $STRICT_CORRECTIONS"
+    echo "   - Strict feature reports:     $STRICT_REPORTS"
     echo ""
     echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
     echo ""
-    
+
     read -p "Proceed with installation? (y/n): " confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         echo "Installation cancelled."
@@ -579,7 +783,7 @@ generate_config() {
   },
 
   "automaticPromotion": {
-    "enabled": false,
+    "enabled": true,
     "threshold": 3,
     "minRelevance": 0.8,
     "destinations": ["decisions.md"],
@@ -887,39 +1091,47 @@ migrate_old_skills() {
     fi
 }
 
-# Ask about tech stack wizard
-ask_tech_stack_wizard() {
-    echo ""
-    echo -e "${BOLD}7. Tech Stack Wizard (Optional)${NC}"
-    echo "   Configure your tech stack and generate coding patterns?"
-    echo ""
-    echo "   The wizard will ask about your:"
-    echo "   • Frontend framework (React, Vue, Svelte, etc.)"
-    echo "   • Backend framework (NestJS, FastAPI, Express, etc.)"
-    echo "   • Database, styling, state management"
-    echo "   • Testing framework and additional tools"
-    echo ""
-    echo "   It will then fetch documentation and generate skill files"
-    echo "   with best practices, patterns, and anti-patterns."
-    echo ""
-    echo "   You can also run this later with: /wogi-setup-stack"
-    echo ""
-
-    read -p "   Run tech stack wizard now? [Y/n]: " run_wizard
-    if [[ "$run_wizard" =~ ^[Nn]$ ]]; then
-        echo -e "   ${YELLOW}Skipped.${NC} Run /wogi-setup-stack later to configure."
-        return
+# Install LSP dependencies for auto-context enrichment
+install_lsp_dependencies() {
+    # Only install if this is a Node.js project
+    if [ ! -f "package.json" ]; then
+        return 0
     fi
 
-    echo ""
-    echo -e "${CYAN}Starting Tech Stack Wizard...${NC}"
-    echo ""
+    echo -e "${CYAN}Installing LSP dependencies for enhanced auto-context...${NC}"
 
-    # Run the wizard
-    if [ -f "$SCRIPT_DIR/flow-stack-wizard.js" ]; then
-        node "$SCRIPT_DIR/flow-stack-wizard.js"
+    # Check if typescript-language-server is already installed
+    if command -v typescript-language-server &> /dev/null; then
+        echo -e "  ${GREEN}✓${NC} typescript-language-server already installed (global)"
+        return 0
+    fi
+
+    # Check if it's in local node_modules
+    if [ -f "node_modules/.bin/typescript-language-server" ]; then
+        echo -e "  ${GREEN}✓${NC} typescript-language-server already installed (local)"
+        return 0
+    fi
+
+    # Ask user before installing
+    echo ""
+    echo "  LSP enrichment provides:"
+    echo "    • Type information for discovered files"
+    echo "    • Error/warning indicators"
+    echo "    • Exported function/class names"
+    echo ""
+    read -p "  Install typescript-language-server as dev dependency? (Y/n): " install_lsp
+
+    if [[ "$install_lsp" =~ ^[Nn]$ ]]; then
+        echo -e "  ${YELLOW}○${NC} Skipped LSP installation (can install later with: npm i -D typescript-language-server typescript)"
+        return 0
+    fi
+
+    # Install as dev dependency
+    if npm install --save-dev typescript-language-server typescript 2>/dev/null; then
+        echo -e "  ${GREEN}✓${NC} typescript-language-server installed"
     else
-        echo -e "${YELLOW}⚠${NC} Tech stack wizard not found. Run /wogi-setup-stack in Claude Code."
+        echo -e "  ${YELLOW}⚠${NC} Could not install typescript-language-server"
+        echo "     You can install it manually: npm i -D typescript-language-server typescript"
     fi
 }
 
@@ -972,28 +1184,45 @@ print_completion() {
 main() {
     print_header
     check_existing
-    
+
     ask_project_name
+    ask_project_type
     ask_agent_structure
     ask_correction_mode
     ask_planning_style
-    ask_skills
+    ask_tech_stack
     ask_optional_features
-    
+
     confirm_settings
-    
+
     echo -e "${CYAN}Installing Wogi Flow...${NC}"
     echo ""
-    
+
     create_structure
     generate_config
     generate_state_files
     generate_phase_files
     copy_core_files
-    install_skills
     setup_hooks
     migrate_old_skills
-    ask_tech_stack_wizard
+    install_lsp_dependencies
+
+    # Run tech stack wizard if selected
+    if [ "$RUN_STACK_WIZARD" = true ]; then
+        echo ""
+        echo -e "${CYAN}Starting Tech Stack Wizard...${NC}"
+        echo ""
+        if [ -f "$SCRIPT_DIR/flow-stack-wizard.js" ]; then
+            # Pass detected framework if existing project
+            if [ "$IS_EXISTING_PROJECT" = true ] && [ -n "$DETECTED_FRAMEWORK" ]; then
+                DETECTED_FRAMEWORK="$DETECTED_FRAMEWORK" node "$SCRIPT_DIR/flow-stack-wizard.js"
+            else
+                node "$SCRIPT_DIR/flow-stack-wizard.js"
+            fi
+        else
+            echo -e "${YELLOW}Tech stack wizard not found. Run /wogi-setup-stack in Claude Code.${NC}"
+        fi
+    fi
 
     print_completion
 }
@@ -1006,6 +1235,17 @@ if [ "${1:-}" = "--quick" ]; then
     generate_state_files
     copy_core_files
     migrate_old_skills
+
+    # Auto-install LSP dependencies for Node.js projects (non-interactive)
+    if [ -f "package.json" ]; then
+        if ! command -v typescript-language-server &> /dev/null && [ ! -f "node_modules/.bin/typescript-language-server" ]; then
+            echo -e "${CYAN}Installing LSP dependencies...${NC}"
+            npm install --save-dev typescript-language-server typescript 2>/dev/null && \
+                echo -e "  ${GREEN}✓${NC} typescript-language-server installed" || \
+                echo -e "  ${YELLOW}○${NC} LSP install skipped (run: npm i -D typescript-language-server typescript)"
+        fi
+    fi
+
     echo -e "${GREEN}✓ Quick install complete${NC}"
     echo ""
     echo -e "${YELLOW}⚠️  STRICT MODE ENABLED (default)${NC}"

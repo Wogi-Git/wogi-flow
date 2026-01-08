@@ -87,6 +87,7 @@
   "qualityGates": {
     "feature": {
       "require": [
+        "loopComplete",
         "tests",
         "appMapUpdate",
         "requestLogEntry"
@@ -98,6 +99,7 @@
     },
     "bugfix": {
       "require": [
+        "loopComplete",
         "tests",
         "requestLogEntry"
       ],
@@ -107,6 +109,7 @@
     },
     "refactor": {
       "require": [
+        "loopComplete",
         "tests",
         "noNewFeatures"
       ],
@@ -377,7 +380,17 @@
     "maxComponentMatches": 15,
     "maxContentLines": 50,
     "includeContent": false,
-    "useAstGrep": false
+    "useAstGrep": false,
+    "maxSemanticFacts": 5,
+    "semanticMinRelevance": 40,
+    "lspEnrichment": {
+      "enabled": true,
+      "maxFiles": 5,
+      "timeoutMs": 2000,
+      "showExports": true,
+      "showDiagnostics": true,
+      "prioritizeHealthyFiles": true
+    }
   },
   "metrics": {
     "enabled": true,
@@ -508,7 +521,7 @@
     }
   },
   "automaticPromotion": {
-    "enabled": false,
+    "enabled": true,
     "threshold": 3,
     "minRelevance": 0.8,
     "destinations": ["decisions.md"],

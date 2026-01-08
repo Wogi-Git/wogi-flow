@@ -37,7 +37,7 @@ const {
   STEP_STATUS
 } = require('./flow-durable-session');
 
-function main() {
+async function main() {
   const taskId = process.argv[2];
   const forceResume = process.argv.includes('--force-resume');
   const skipSuspensionCheck = process.argv.includes('--skip-suspension');
@@ -200,7 +200,7 @@ function main() {
   const taskDescription = result.task?.title || result.task?.description || taskId;
 
   if (config.autoContext?.enabled !== false) {
-    const context = getAutoContext(taskDescription);
+    const context = await getAutoContext(taskDescription);
     if (context.files && context.files.length > 0) {
       console.log('');
       console.log(formatAutoContext(context));
@@ -229,4 +229,7 @@ function main() {
   }
 }
 
-main();
+main().catch(err => {
+  console.error(`Error: ${err.message}`);
+  process.exit(1);
+});

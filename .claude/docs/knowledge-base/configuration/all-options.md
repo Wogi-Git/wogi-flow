@@ -867,7 +867,7 @@ Multiple solution analysis configuration.
 
 ## autoContext
 
-Auto-loading related files configuration.
+Auto-loading related files configuration. Automatically discovers relevant files, semantic memory facts, and LSP type information when starting a task.
 
 ```json
 {
@@ -879,7 +879,17 @@ Auto-loading related files configuration.
     "maxComponentMatches": 15,
     "maxContentLines": 50,
     "includeContent": false,
-    "useAstGrep": false
+    "useAstGrep": false,
+    "maxSemanticFacts": 5,
+    "semanticMinRelevance": 40,
+    "lspEnrichment": {
+      "enabled": true,
+      "maxFiles": 5,
+      "timeoutMs": 2000,
+      "showExports": true,
+      "showDiagnostics": true,
+      "prioritizeHealthyFiles": true
+    }
   }
 }
 ```
@@ -894,6 +904,36 @@ Auto-loading related files configuration.
 | `maxContentLines` | number | `50` | Max lines per file |
 | `includeContent` | boolean | `false` | Include file content |
 | `useAstGrep` | boolean | `false` | Use AST-based grep |
+| `maxSemanticFacts` | number | `5` | Max semantic memory facts to include |
+| `semanticMinRelevance` | number | `40` | Min relevance % for semantic facts |
+
+### LSP Enrichment (v2.2+)
+
+LSP enrichment adds type information and diagnostics to discovered files.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `lspEnrichment.enabled` | boolean | `true` | Enable LSP enrichment |
+| `lspEnrichment.maxFiles` | number | `5` | Max files to enrich |
+| `lspEnrichment.timeoutMs` | number | `2000` | LSP timeout in ms |
+| `lspEnrichment.showExports` | boolean | `true` | Show exported symbols |
+| `lspEnrichment.showDiagnostics` | boolean | `true` | Show error/warning counts |
+| `lspEnrichment.prioritizeHealthyFiles` | boolean | `true` | Sort error-free files first |
+
+**Output Example:**
+```
+📂 Auto-loaded context:
+   ✓ src/services/AuthService.ts
+   ⚠️ src/hooks/useAuth.ts (2 warnings)
+   ❌ src/utils/broken.ts (1 error)
+
+📦 Key exports:
+   AuthService.ts: login, logout, refreshToken
+   useAuth.ts: useAuth, AuthProvider
+
+🧠 Learned facts:
+   ● Always use AuthContext for user state
+```
 
 ---
 
@@ -995,7 +1035,7 @@ Project analysis configuration.
 
 ## lsp
 
-Language server integration configuration.
+Language server integration configuration. LSP provides type information, diagnostics, and symbol navigation.
 
 ```json
 {
@@ -1014,6 +1054,23 @@ Language server integration configuration.
 | `server` | string | `"typescript-language-server"` | LSP server to use |
 | `timeout` | number | `5000` | Request timeout in ms |
 | `cacheTypes` | boolean | `true` | Cache type information |
+
+### Installation
+
+LSP dependencies are installed automatically during `flow install`. To install manually:
+
+```bash
+npm i -D typescript-language-server typescript
+```
+
+### Auto-Context Integration
+
+When `autoContext.lspEnrichment.enabled` is `true`, the LSP server enriches auto-context results with:
+- **Exported symbols**: Function, class, interface, and variable names
+- **Diagnostics**: Error and warning counts per file
+- **Health prioritization**: Files with errors are sorted to the bottom
+
+See [autoContext.lspEnrichment](#lsp-enrichment-v22) for configuration options.
 
 ---
 

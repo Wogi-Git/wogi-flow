@@ -13,7 +13,7 @@
  *
  * Usage as module:
  *   const { getAutoContext } = require('./flow-auto-context');
- *   const context = getAutoContext('implement user authentication');
+ *   const context = await getAutoContext('implement user authentication');
  *
  * Usage as CLI:
  *   flow auto-context "task description"
@@ -34,6 +34,15 @@ const {
   findCustomHooks,
   findTypeDefinitions
 } = require('./flow-utils');
+
+// Semantic memory search (optional - may not be initialized)
+let searchFacts = null;
+try {
+  const memoryDb = require('./flow-memory-db');
+  searchFacts = memoryDb.searchFacts;
+} catch {
+  // Memory DB not available - that's ok
+}
 
 const PROJECT_ROOT = getProjectRoot();
 
@@ -446,6 +455,131 @@ function searchRelatedTasks(keywords) {
 }
 
 /**
+ * Search semantic memory (SQLite facts) for relevant context
+ * Returns facts that match the task description
+ *
+ * @param {object} keywords - Extracted keywords
+ * @param {object} config - Config object
+ */
+async function searchSemanticMemory(keywords, config = null) {
+  // Skip if searchFacts not available or memory disabled
+  if (!searchFacts) return [];
+
+  const cfg = config || getConfig();
+  if (!cfg.memory?.enabled) return [];
+
+  const results = [];
+  const maxFacts = cfg.autoContext?.maxSemanticFacts || 5;
+
+  try {
+    // Build query from high-value keywords
+    const query = keywords.high.join(' ') || keywords.medium.slice(0, 3).join(' ');
+    if (!query) return [];
+
+    // Search for relevant facts
+    const facts = await searchFacts({
+      query,
+      limit: maxFacts,
+      trackAccess: true // Boost relevance when recalled
+    });
+
+    for (const fact of facts) {
+      // Only include facts with reasonable relevance (>40%)
+      if (fact.relevance >= 40) {
+        results.push({
+          source: 'semantic-memory',
+          fact: fact.fact,
+          category: fact.category,
+          relevance: fact.relevance,
+          score: Math.round(fact.relevance / 25) // Score 1-4 based on relevance
+        });
+      }
+    }
+  } catch (err) {
+    // Graceful fallback - memory search is optional
+    if (cfg.debug) {
+      console.warn(`Semantic memory search failed: ${err.message}`);
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Enrich file results with LSP type information
+ * Runs AFTER initial grep/search phase completes
+ * v2.2: LSP enrichment for auto-context
+ *
+ * @param {Array} fileResults - Results with path property
+ * @param {object} config - Config object
+ */
+async function enrichWithLSP(fileResults, config) {
+  // Skip if disabled
+  if (!config.autoContext?.lspEnrichment?.enabled) return fileResults;
+
+  // Lazy load LSP module to avoid circular dependencies
+  let getLSP, isLSPEnabled;
+  try {
+    const lspModule = require('./flow-lsp');
+    getLSP = lspModule.getLSP;
+    isLSPEnabled = lspModule.isLSPEnabled;
+  } catch {
+    return fileResults; // LSP module not available
+  }
+
+  if (!isLSPEnabled()) return fileResults;
+
+  const lsp = await getLSP();
+  if (!lsp) return fileResults;
+
+  const timeout = config.autoContext?.lspEnrichment?.timeoutMs || 2000;
+  const maxFiles = config.autoContext?.lspEnrichment?.maxFiles || 5;
+
+  // Only enrich top N JS/TS files to limit latency
+  const filesToEnrich = fileResults
+    .filter(r => r.path && /\.(ts|tsx|js|jsx)$/.test(r.path))
+    .slice(0, maxFiles);
+
+  if (filesToEnrich.length === 0) return fileResults;
+
+  try {
+    const enriched = await Promise.race([
+      Promise.all(filesToEnrich.map(async (result) => {
+        try {
+          const [symbols, diagnostics] = await Promise.all([
+            lsp.getDocumentSymbols(result.path),
+            lsp.getDiagnostics(result.path)
+          ]);
+
+          return {
+            ...result,
+            lsp: {
+              exports: (symbols || [])
+                .filter(s => ['function', 'class', 'interface', 'variable'].includes(s.kind))
+                .slice(0, 10)
+                .map(s => ({ name: s.name, kind: s.kind })),
+              errorCount: (diagnostics || []).filter(d => d.severity === 'error').length,
+              warningCount: (diagnostics || []).filter(d => d.severity === 'warning').length
+            }
+          };
+        } catch {
+          return result; // Graceful fallback for individual files
+        }
+      })),
+      // Timeout fallback - return original results if LSP takes too long
+      new Promise(resolve => setTimeout(() => resolve(filesToEnrich), timeout))
+    ]);
+
+    // Merge enriched results back into full list
+    const enrichedMap = new Map(enriched.map(r => [r.path, r]));
+    return fileResults.map(r => enrichedMap.get(r.path) || r);
+  } catch {
+    // If anything fails, return original results
+    return fileResults;
+  }
+}
+
+/**
  * Search codebase using AST-grep for structural patterns
  * Falls back gracefully if ast-grep is not installed
  *
@@ -572,8 +706,9 @@ function searchWithAstGrep(keywords, taskType = null, config = null) {
 /**
  * Get auto-context for a task description
  * Returns prioritized list of relevant files and context
+ * Now async to support semantic memory search
  */
-function getAutoContext(description, options = {}) {
+async function getAutoContext(description, options = {}) {
   const config = getConfig();
 
   // Check if auto-context is enabled
@@ -604,13 +739,17 @@ function getAutoContext(description, options = {}) {
   // Determine task type from keywords/options for ast-grep
   const taskType = options.taskType || inferTaskType(keywords);
 
+  // v2.2: Search semantic memory (async)
+  const semanticResults = await searchSemanticMemory(keywords, config);
+
   // Gather context from all sources (pass config for truncation settings)
   const allResults = [
     ...searchAppMap(keywords),
     ...searchComponentIndex(keywords, config),
     ...searchWithAstGrep(keywords, taskType, config),  // AST-grep search (if enabled)
     ...grepCodebase(keywords, 10, config),
-    ...searchRelatedTasks(keywords)
+    ...searchRelatedTasks(keywords),
+    ...semanticResults  // v2.2: Include semantic memory
   ];
 
   // Collect truncation notices separately
@@ -632,13 +771,37 @@ function getAutoContext(description, options = {}) {
   // Sort by score (higher first)
   unique.sort((a, b) => (b.score || 0) - (a.score || 0));
 
+  // v2.2: LSP enrichment (async, with timeout)
+  const enrichedUnique = await enrichWithLSP(unique, config);
+
+  // Re-sort: prioritize files without errors (if LSP enrichment added data)
+  if (config.autoContext?.lspEnrichment?.prioritizeHealthyFiles !== false) {
+    enrichedUnique.sort((a, b) => {
+      // Files with LSP errors go to bottom
+      const aErrors = a.lsp?.errorCount || 0;
+      const bErrors = b.lsp?.errorCount || 0;
+      if (aErrors !== bErrors) return aErrors - bErrors;
+      // Then by original score
+      return (b.score || 0) - (a.score || 0);
+    });
+  }
+
   // Take top results
-  const topResults = unique.slice(0, maxFiles);
+  const topResults = enrichedUnique.slice(0, maxFiles);
 
   // Extract unique file paths
   const files = topResults
     .filter(r => r.path)
     .map(r => r.path);
+
+  // Extract semantic memory facts (v2.2)
+  const semanticFacts = topResults
+    .filter(r => r.source === 'semantic-memory')
+    .map(r => ({
+      fact: r.fact,
+      category: r.category,
+      relevance: r.relevance
+    }));
 
   // Build context summary
   const context = {
@@ -651,11 +814,13 @@ function getAutoContext(description, options = {}) {
       appMap: topResults.filter(r => r.source === 'app-map').length,
       componentIndex: topResults.filter(r => r.source === 'component-index').length,
       grep: topResults.filter(r => r.source === 'grep').length,
-      relatedTasks: topResults.filter(r => r.source === 'related-task').length
+      relatedTasks: topResults.filter(r => r.source === 'related-task').length,
+      semanticMemory: semanticFacts.length  // v2.2
     },
     relatedTasks: topResults
       .filter(r => r.source === 'related-task')
       .map(r => ({ id: r.taskId, title: r.title })),
+    semanticFacts,  // v2.2: Include learned facts
     truncated: truncationNotices.length > 0,
     truncationNotices: truncationNotices.map(t => t.message)
   };
@@ -665,10 +830,11 @@ function getAutoContext(description, options = {}) {
     files,
     results: topResults,
     context,
+    semanticFacts,  // v2.2: Top-level for easy access
     truncationNotices,
     message: files.length > 0
-      ? `Found ${files.length} relevant file(s)${truncationNotices.length > 0 ? ' (results truncated)' : ''}`
-      : 'No directly relevant files found'
+      ? `Found ${files.length} relevant file(s)${semanticFacts.length > 0 ? `, ${semanticFacts.length} learned facts` : ''}${truncationNotices.length > 0 ? ' (results truncated)' : ''}`
+      : (semanticFacts.length > 0 ? `Found ${semanticFacts.length} learned fact(s)` : 'No directly relevant files found')
   };
 }
 
@@ -685,10 +851,39 @@ function formatAutoContext(result) {
   if (result.files.length > 0) {
     output += `${colors.cyan}📂 Auto-loaded context:${colors.reset}\n`;
     for (const file of result.files.slice(0, 8)) {
-      output += `   ${colors.dim}•${colors.reset} ${file}\n`;
+      // v2.2: Look up LSP enrichment data for this file
+      const fileResult = result.results?.find(r => r.path === file);
+      const lsp = fileResult?.lsp;
+
+      let icon = '•';
+      let suffix = '';
+      if (lsp) {
+        if (lsp.errorCount > 0) {
+          icon = '❌';
+          suffix = ` ${colors.red}(${lsp.errorCount} error${lsp.errorCount > 1 ? 's' : ''})${colors.reset}`;
+        } else if (lsp.warningCount > 0) {
+          icon = '⚠️';
+          suffix = ` ${colors.yellow}(${lsp.warningCount} warning${lsp.warningCount > 1 ? 's' : ''})${colors.reset}`;
+        } else {
+          icon = '✓';
+        }
+      }
+      output += `   ${colors.dim}${icon}${colors.reset} ${file}${suffix}\n`;
     }
     if (result.files.length > 8) {
       output += `   ${colors.dim}... and ${result.files.length - 8} more${colors.reset}\n`;
+    }
+
+    // v2.2: Show key exports from LSP-enriched files
+    const filesWithExports = result.results?.filter(r => r.lsp?.exports?.length > 0) || [];
+    if (filesWithExports.length > 0) {
+      output += `\n${colors.cyan}📦 Key exports:${colors.reset}\n`;
+      for (const fileInfo of filesWithExports.slice(0, 3)) {
+        const fileName = path.basename(fileInfo.path);
+        const exportNames = fileInfo.lsp.exports.slice(0, 5).map(e => e.name).join(', ');
+        const more = fileInfo.lsp.exports.length > 5 ? ` +${fileInfo.lsp.exports.length - 5}` : '';
+        output += `   ${colors.dim}${fileName}:${colors.reset} ${exportNames}${more}\n`;
+      }
     }
   } else {
     output += `${colors.dim}No specific files matched. Proceeding with general context.${colors.reset}\n`;
@@ -698,6 +893,18 @@ function formatAutoContext(result) {
     output += `\n${colors.cyan}📋 Related tasks:${colors.reset}\n`;
     for (const task of result.context.relatedTasks.slice(0, 3)) {
       output += `   ${colors.dim}•${colors.reset} ${task.id}: ${task.title}\n`;
+    }
+  }
+
+  // v2.2: Show semantic memory facts
+  if (result.semanticFacts?.length > 0) {
+    output += `\n${colors.cyan}🧠 Learned facts:${colors.reset}\n`;
+    for (const fact of result.semanticFacts.slice(0, 5)) {
+      const relevanceIcon = fact.relevance >= 70 ? '●' : fact.relevance >= 50 ? '◐' : '○';
+      output += `   ${colors.dim}${relevanceIcon}${colors.reset} ${fact.fact.slice(0, 100)}${fact.fact.length > 100 ? '...' : ''}\n`;
+    }
+    if (result.semanticFacts.length > 5) {
+      output += `   ${colors.dim}... and ${result.semanticFacts.length - 5} more${colors.reset}\n`;
     }
   }
 
@@ -739,7 +946,7 @@ Examples:
 `);
 }
 
-function main() {
+async function main() {
   const args = process.argv.slice(2);
 
   if (args.includes('--help') || args.includes('-h')) {
@@ -765,7 +972,7 @@ function main() {
     process.exit(1);
   }
 
-  const result = getAutoContext(description, { maxFiles });
+  const result = await getAutoContext(description, { maxFiles });
 
   if (jsonOutput) {
     console.log(JSON.stringify(result, null, 2));
@@ -792,6 +999,8 @@ module.exports = {
   grepCodebase,
   searchRelatedTasks,
   searchWithAstGrep,
+  searchSemanticMemory,  // v2.2
+  enrichWithLSP,         // v2.2: LSP enrichment
   inferTaskType,
   checkAndRefreshIndex,
   getAutoContext,
@@ -799,5 +1008,8 @@ module.exports = {
 };
 
 if (require.main === module) {
-  main();
+  main().catch(err => {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  });
 }
