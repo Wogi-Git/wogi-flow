@@ -24,7 +24,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { colors: c } = require('./flow-utils');
+const { colors: c, parseFlags: utilsParseFlags } = require('./flow-utils');
 
 // Exit codes
 const EXIT_CODES = {
@@ -50,22 +50,14 @@ let globalOptions = {
 
 /**
  * Parse common CLI flags
+ * Uses the comprehensive implementation from flow-utils.js
  */
 function parseFlags(args) {
-  const flags = {
-    json: args.includes('--json'),
-    quiet: args.includes('--quiet') || args.includes('-q'),
-    verbose: args.includes('--verbose') || args.includes('-v'),
-    help: args.includes('--help') || args.includes('-h'),
-    version: args.includes('--version')
-  };
-
-  // Remove flags from args
-  const positional = args.filter(arg =>
-    !['--json', '--quiet', '-q', '--verbose', '-v', '--help', '-h', '--version'].includes(arg)
-  );
-
-  return { flags, positional };
+  // Use the flow-utils implementation which handles:
+  // - --key=value style
+  // - Valued flags (--priority, --from, etc.)
+  // - Named flags dictionary
+  return utilsParseFlags(args);
 }
 
 /**

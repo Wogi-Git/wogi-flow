@@ -159,6 +159,21 @@ function printSection(title) {
   console.log(color('cyan', title));
 }
 
+// ============================================================
+// Standard Messaging Functions
+// ============================================================
+//
+// STANDARD: All scripts should use these functions for consistent output:
+//   success(msg) - Green checkmark ✓ for successful operations
+//   warn(msg)    - Yellow warning ⚠ for non-fatal issues
+//   error(msg)   - Red X ✗ for errors (use before process.exit(1))
+//   info(msg)    - Cyan info ℹ for informational messages
+//
+// Import with: const { success, warn, error, info } = require('./flow-utils');
+//
+// AVOID: Direct console.log with color() for status messages.
+// ============================================================
+
 /**
  * Print success message
  */

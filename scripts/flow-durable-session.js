@@ -104,7 +104,12 @@ function createDurableSession(taskId, taskType, steps = []) {
     startedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
 
-    steps: steps.map((step, index) => normalizeStep(step, index)),
+    // Cache config once to avoid repeated access in loop
+    steps: (() => {
+      const config = getConfig();
+      const defaultMaxAttempts = config.durableSteps?.defaultMaxAttempts || 5;
+      return steps.map((step, index) => normalizeStep(step, index, defaultMaxAttempts));
+    })(),
 
     execution: {
       currentStepIndex: 0,
@@ -129,8 +134,11 @@ function createDurableSession(taskId, taskType, steps = []) {
 
 /**
  * Normalize a step to the standard schema
+ * @param {string|Object} step - Step definition
+ * @param {number} index - Step index
+ * @param {number} defaultMaxAttempts - Default max attempts from config (passed to avoid repeated getConfig calls)
  */
-function normalizeStep(step, index) {
+function normalizeStep(step, index, defaultMaxAttempts = 5) {
   // Handle string input (backward compat with acceptance criteria)
   if (typeof step === 'string') {
     return {
@@ -142,7 +150,7 @@ function normalizeStep(step, index) {
       startedAt: null,
       completedAt: null,
       attempts: 0,
-      maxAttempts: getConfig().durableSteps?.defaultMaxAttempts || 5,
+      maxAttempts: defaultMaxAttempts,
       lastAttemptAt: null,
       verificationProof: null,
       error: null,
@@ -160,7 +168,7 @@ function normalizeStep(step, index) {
     startedAt: step.startedAt || null,
     completedAt: step.completedAt || null,
     attempts: step.attempts || 0,
-    maxAttempts: step.maxAttempts || getConfig().durableSteps?.defaultMaxAttempts || 5,
+    maxAttempts: step.maxAttempts || defaultMaxAttempts,
     lastAttemptAt: step.lastAttemptAt || null,
     verificationProof: step.verificationProof || null,
     error: step.error || null,
@@ -426,7 +434,10 @@ function addSteps(newSteps) {
   if (!session) return null;
 
   const startIndex = session.steps.length;
-  const normalizedSteps = newSteps.map((s, i) => normalizeStep(s, startIndex + i));
+  // Cache config once to avoid repeated access in loop
+  const config = getConfig();
+  const defaultMaxAttempts = config.durableSteps?.defaultMaxAttempts || 5;
+  const normalizedSteps = newSteps.map((s, i) => normalizeStep(s, startIndex + i, defaultMaxAttempts));
 
   session.steps.push(...normalizedSteps);
 
