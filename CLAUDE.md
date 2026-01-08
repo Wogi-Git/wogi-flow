@@ -287,9 +287,35 @@ When user corrects you:
 Check `config.json → qualityGates` before closing any task:
 ```json
 "qualityGates": {
-  "feature": { "require": ["tests", "appMapUpdate"] }
+  "feature": { "require": ["loopComplete", "tests", "appMapUpdate", "requestLogEntry"] }
 }
 ```
+
+## Durable Sessions (v2.0)
+
+Tasks can be suspended and resumed with full context recovery:
+
+```bash
+# Suspend current task
+/wogi-suspend                  # Manual suspend
+/wogi-suspend --wait-ci        # Wait for CI pipeline
+/wogi-suspend --review         # Wait for human review
+
+# Resume suspended task
+/wogi-resume                   # Resume with context
+/wogi-resume --status          # Check suspension status
+
+# Session management
+flow session status            # Show durable session
+flow session clear             # Clear active session
+```
+
+## Guided Edit Mode
+
+For complex multi-file changes, use `/wogi-guided-edit`. This mode:
+- Shows each proposed edit for approval before applying
+- Validates after each change
+- Allows rollback if issues found
 
 ## Advanced Features
 
@@ -301,7 +327,7 @@ Detailed documentation in `.claude/docs/knowledge-base/`:
 
 ## Context Management
 
-Use `/compact` when:
+Use `/wogi-compact` when:
 - After completing 2-3 tasks
 - After 15-20 messages
 - Before starting large tasks

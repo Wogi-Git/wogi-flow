@@ -353,15 +353,15 @@ Per-task-type quality requirements.
 {
   "qualityGates": {
     "feature": {
-      "require": ["tests", "appMapUpdate", "requestLogEntry"],
+      "require": ["loopComplete", "tests", "appMapUpdate", "requestLogEntry"],
       "optional": ["review", "docs"]
     },
     "bugfix": {
-      "require": ["tests", "requestLogEntry"],
+      "require": ["loopComplete", "tests", "requestLogEntry"],
       "optional": ["review"]
     },
     "refactor": {
-      "require": ["tests", "noNewFeatures"],
+      "require": ["loopComplete", "tests", "noNewFeatures"],
       "optional": ["review"]
     }
   }
@@ -370,6 +370,7 @@ Per-task-type quality requirements.
 
 | Gate | Description |
 |------|-------------|
+| `loopComplete` | Self-completing loop must finish all acceptance criteria |
 | `tests` | Tests must pass |
 | `appMapUpdate` | App-map must be updated |
 | `requestLogEntry` | Request log must be updated |

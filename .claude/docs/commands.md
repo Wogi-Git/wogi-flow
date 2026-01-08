@@ -133,6 +133,50 @@ When user types these commands, execute the corresponding action immediately.
 | `/wogi-hybrid-status` | Show current hybrid mode configuration. |
 | `/wogi-hybrid-edit` | Edit the current execution plan before running. |
 
+### Durable Sessions (v2.0)
+
+| Command | Action |
+|---------|--------|
+| `/wogi-suspend` | Suspend current task. Options: `--wait-ci`, `--review`, `--rate-limit N`. |
+| `/wogi-resume` | Resume suspended task. Options: `--status`, `--approve`. |
+| `/wogi-session-end` | Properly end work session. Update logs, commit changes. |
+
+### Loop Enforcement
+
+| Command | Action |
+|---------|--------|
+| `/wogi-loop` | Show loop status (active session, progress). |
+
+### Memory & Knowledge (v1.8+)
+
+| Command | Action |
+|---------|--------|
+| `/wogi-compact` | Run memory compaction. Preview with `--preview`. |
+
+### Morning Briefing
+
+| Command | Action |
+|---------|--------|
+| `/wogi-morning` | Morning briefing - show where you left off, pending tasks, recent changes. |
+
+### Verification
+
+| Command | Action |
+|---------|--------|
+| `/wogi-verify [gate]` | Run verification gate (lint, typecheck, test, build). Use `all` for all gates. |
+
+### Voice Input
+
+| Command | Action |
+|---------|--------|
+| `/wogi-voice` | Voice-to-transcript input. Subcommands: setup, status, test, record. |
+
+### Guided Edit
+
+| Command | Action |
+|---------|--------|
+| `/wogi-guided-edit` | Guide through multi-file changes step by step. Shows each edit for approval. |
+
 ### Planning & Documentation
 
 | Command | Action |
@@ -159,23 +203,55 @@ When user types these commands, execute the corresponding action immediately.
 # Setup
 ./scripts/flow install            # Interactive installer
 ./scripts/flow install --quick    # Quick install with defaults
+./scripts/flow onboard            # Analyze existing project & set up context
+./scripts/flow update             # Update to latest version
+./scripts/flow update --check     # Check for available updates
 
 # Task Management
 ./scripts/flow ready              # See unblocked tasks
 ./scripts/flow start TASK-X       # Start a task
 ./scripts/flow done TASK-X        # Complete a task
 ./scripts/flow story "title"      # Create detailed story
+./scripts/flow story "t" --deep   # Create story with automatic decomposition
 ./scripts/flow new-feature        # Create feature
 ./scripts/flow bug                # Report bug
 ./scripts/flow status             # Project overview
+./scripts/flow deps TASK-X        # Show task dependencies
 
 # Workflow
+./scripts/flow morning            # Morning briefing
 ./scripts/flow health             # Check workflow health
+./scripts/flow verify <gate>      # Run verification gate (lint, typecheck, test, build)
+./scripts/flow verify all         # Run all verification gates
+./scripts/flow regression         # Run regression tests
+./scripts/flow regression --all   # Test all completed tasks
+./scripts/flow browser-suggest    # Suggest browser tests for a task
 ./scripts/flow standup            # Generate standup summary
+./scripts/flow session-end        # End session properly
 ./scripts/flow search "#tag"      # Search request-log
 ./scripts/flow context TASK-X     # Load task context
 ./scripts/flow export-profile     # Export workflow config for team
 ./scripts/flow import-profile     # Import team config
+./scripts/flow archive            # Archive old request-log entries
+./scripts/flow watch              # Run file watcher for auto-validation
+
+# Durable Sessions (v2.0)
+./scripts/flow suspend            # Suspend current task
+./scripts/flow suspend --wait-ci  # Suspend waiting for CI
+./scripts/flow suspend --review   # Suspend for human review
+./scripts/flow resume             # Resume suspended task
+./scripts/flow resume --status    # Show suspension status
+./scripts/flow resume --approve   # Approve human review
+./scripts/flow session status     # Show durable session status
+./scripts/flow session stats      # Show session statistics
+./scripts/flow session clear      # Clear active session
+
+# Loop Enforcement
+./scripts/flow loop status        # Show active loop session
+./scripts/flow loop stats         # Show loop statistics
+./scripts/flow loop can-exit      # Check if current loop can exit
+./scripts/flow loop enable        # Enable loop enforcement
+./scripts/flow loop disable       # Disable loop enforcement
 
 # Components
 ./scripts/flow update-map         # Add/scan components
@@ -183,18 +259,93 @@ When user types these commands, execute the corresponding action immediately.
 ./scripts/flow map-index scan     # Rescan codebase
 ./scripts/flow map-sync           # Compare index with app-map
 
+# Skills & Learning
+./scripts/flow skill-learn        # Extract learnings from recent changes
+./scripts/flow skill-create <n>   # Create a new skill
+./scripts/flow skill detect       # Detect frameworks in project
+./scripts/flow skill list         # List installed skills
+./scripts/flow correct            # Capture a correction/learning
+./scripts/flow correct "desc"     # Quick mode with description
+./scripts/flow correct list       # List recent corrections
+./scripts/flow aggregate          # Aggregate learnings across skills
+./scripts/flow aggregate --promote # Interactive promotion wizard
+
 # Code Traces
 ./scripts/flow trace "prompt"     # Generate code trace
 ./scripts/flow trace list         # List saved traces
+./scripts/flow trace show <name>  # Show a saved trace
+
+# Run History
+./scripts/flow run-trace start <n> # Start a new traced run
+./scripts/flow run-trace end       # End current run
+./scripts/flow history             # List recent runs
+./scripts/flow inspect <run-id>    # Show run details
+
+# Diff Preview
+./scripts/flow diff <f1> <f2>     # Show diff between files
+./scripts/flow diff --preview <j> # Preview proposed changes
+./scripts/flow diff --apply <j>   # Apply changes from JSON
+./scripts/flow diff --dry-run <j> # Show diff without prompting
+
+# Checkpoints
+./scripts/flow checkpoint create  # Create manual checkpoint
+./scripts/flow checkpoint list    # List all checkpoints
+./scripts/flow checkpoint rollback <id> # Rollback to checkpoint
+./scripts/flow checkpoint cleanup # Remove old checkpoints
+
+# Memory & Knowledge (v1.8+)
+./scripts/flow memory search <q>  # Search stored facts
+./scripts/flow memory stats       # Show memory statistics
+./scripts/flow memory-server      # Start MCP memory server
+./scripts/flow entropy            # Show memory entropy stats
+./scripts/flow entropy --auto     # Auto-compact if entropy high
+./scripts/flow entropy --history  # Show entropy history
+./scripts/flow compact-memory     # Run full memory compaction
+./scripts/flow compact-memory --preview # Show what would be affected
+./scripts/flow memory-sync        # Check patterns for promotion
+./scripts/flow memory-sync --auto # Auto-promote to decisions.md
+./scripts/flow knowledge-route <t> # Detect route for a learning
+./scripts/flow knowledge-route store # Store a learning with route
+./scripts/flow log-manager status  # Show request-log statistics
+./scripts/flow log-manager archive # Archive old log entries
 
 # Hybrid Mode
+./scripts/flow hybrid setup       # Full setup (templates + config)
 ./scripts/flow hybrid enable      # Enable hybrid mode
 ./scripts/flow hybrid disable     # Disable hybrid mode
 ./scripts/flow hybrid status      # Show hybrid configuration
 ./scripts/flow hybrid execute     # Execute a plan file
 ./scripts/flow hybrid rollback    # Rollback last execution
 ./scripts/flow hybrid test        # Test hybrid installation
+./scripts/flow hybrid learning    # Show learning stats
 ./scripts/flow templates generate # Generate project templates
+
+# Model Providers
+./scripts/flow providers list     # List all available providers
+./scripts/flow providers detect   # Detect running local providers
+./scripts/flow providers test <t> # Test a provider connection
+
+# Declarative Workflows
+./scripts/flow workflow list      # List available workflows
+./scripts/flow workflow run <n>   # Run a workflow
+./scripts/flow workflow create <n> # Create workflow template
+
+# Metrics & Analysis
+./scripts/flow metrics            # Show command success/failure stats
+./scripts/flow metrics --problems # Show only problematic commands
+./scripts/flow metrics --reset    # Clear all metrics
+./scripts/flow insights           # Generate codebase insights
+./scripts/flow auto-context "t"   # Preview context for a task
+./scripts/flow model-adapter      # Show model adapter info
+./scripts/flow complexity "task"  # Assess task complexity
+./scripts/flow safety             # Run security scan
+./scripts/flow context-init "t"   # Initialize context for task
+
+# Voice Input
+./scripts/flow voice-input setup  # Set up voice input
+./scripts/flow voice-input status # Check voice input status
+./scripts/flow voice-input test   # Test voice input
+./scripts/flow voice-input record # Record voice input
 
 # Worktree Isolation
 ./scripts/flow worktree enable    # Enable worktree isolation
@@ -206,6 +357,8 @@ When user types these commands, execute the corresponding action immediately.
 # Parallel Execution
 ./scripts/flow parallel config    # Show parallel config
 ./scripts/flow parallel check     # Check tasks for parallel potential
+./scripts/flow parallel analyze   # Analyze tasks for parallel potential
+./scripts/flow parallel suggest   # Check if parallel should be suggested
 ./scripts/flow parallel enable    # Enable parallel execution
 ./scripts/flow parallel disable   # Disable parallel execution
 
