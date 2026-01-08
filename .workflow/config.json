@@ -1,6 +1,6 @@
 {
   "version": "1.9.0",
-  "projectName": "",
+  "projectName": "wogi-flow",
   "enforcement": {
     "strictMode": true,
     "requireTaskForImplementation": true,
@@ -467,13 +467,6 @@
       "requestLog": "recent",
       "tasks": false
     },
-    "syncDecisions": true,
-    "syncAppMap": true,
-    "syncComponentIndex": true,
-    "syncSkillLearnings": true,
-    "syncMemory": false,
-    "syncRequestLog": "recent",
-    "syncTasks": false,
     "conflictResolution": "newest-wins",
     "aws": {
       "apiEndpoint": "https://slbche87zj.execute-api.eu-west-1.amazonaws.com/v1",

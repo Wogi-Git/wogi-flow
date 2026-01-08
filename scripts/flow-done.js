@@ -35,6 +35,9 @@ const { suggestBrowserTests } = require('./flow-browser-suggest');
 // v2.0 durable session support
 const { loadDurableSession, archiveDurableSession } = require('./flow-durable-session');
 
+// v2.1 loop enforcement as explicit quality gate
+const { canExitLoop, getActiveLoop } = require('./flow-loop-enforcer');
+
 // Path for last failure artifact
 const LAST_FAILURE_PATH = path.join(PATHS.state, 'last-failure.json');
 
@@ -170,6 +173,25 @@ function runQualityGates(taskId) {
       }
     } else if (gate === 'appMapUpdate') {
       console.log(`  ${color('yellow', '○')} appMapUpdate (verify manually if components created)`);
+    } else if (gate === 'loopComplete') {
+      // v2.1: Explicit loop completion check
+      const activeLoop = getActiveLoop();
+      if (!activeLoop) {
+        // No active loop - either completed or not used
+        console.log(`  ${color('green', '✓')} loopComplete (no active loop session)`);
+      } else {
+        const exitResult = canExitLoop();
+        if (exitResult.canExit) {
+          console.log(`  ${color('green', '✓')} loopComplete (${exitResult.reason})`);
+        } else {
+          console.log(`  ${color('red', '✗')} loopComplete (${exitResult.pending || 0} pending, ${exitResult.failed || 0} failed)`);
+          errors.loopComplete = exitResult.message || 'Loop not complete';
+          failed.push('loopComplete');
+        }
+      }
+    } else if (gate === 'noNewFeatures') {
+      // Refactor-specific gate - manual check
+      console.log(`  ${color('yellow', '○')} noNewFeatures (verify no behavior changes)`);
     } else {
       console.log(`  ${color('yellow', '○')} ${gate} (manual check)`);
     }
@@ -196,8 +218,8 @@ function commitChanges(commitMsg) {
     if (status.trim()) {
       console.log('');
       console.log(color('yellow', 'Committing changes...'));
-      execSync('git add -A', { stdio: 'pipe' });
-      // Use execFileSync to prevent command injection from user-provided commit message
+      // Use execFileSync to prevent command injection
+      execFileSync('git', ['add', '-A'], { stdio: 'pipe' });
       execFileSync('git', ['commit', '-m', `feat: ${commitMsg}`], { stdio: 'pipe' });
       success('Changes committed');
     }
@@ -347,7 +369,7 @@ async function main() {
   if (config.componentIndex?.autoScan !== false && scanOn.includes('afterTask')) {
     try {
       console.log(color('dim', '🔄 Refreshing component index...'));
-      execSync('bash scripts/flow-map-index scan --quiet', {
+      execFileSync('bash', ['scripts/flow-map-index', 'scan', '--quiet'], {
         encoding: 'utf-8',
         stdio: 'pipe'
       });

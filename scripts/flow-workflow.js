@@ -31,6 +31,20 @@ const WORKFLOW_DIR = path.join(PROJECT_ROOT, '.workflow');
 const WORKFLOWS_DIR = path.join(WORKFLOW_DIR, 'workflows');
 
 /**
+ * Validate that a path is within the project root (prevent path traversal)
+ */
+function validatePathWithinProject(targetPath, baseRoot = PROJECT_ROOT) {
+  const resolvedPath = path.resolve(baseRoot, targetPath);
+  const resolvedRoot = path.resolve(baseRoot);
+
+  if (!resolvedPath.startsWith(resolvedRoot + path.sep) && resolvedPath !== resolvedRoot) {
+    throw new Error(`Path traversal detected: ${targetPath} escapes project root`);
+  }
+
+  return resolvedPath;
+}
+
+/**
  * Step types
  */
 const STEP_TYPES = {
@@ -47,29 +61,34 @@ const STEP_TYPES = {
  * Returns { language, packageManager } with defaults to Node.js/npm
  */
 function detectProjectType(projectRoot = PROJECT_ROOT) {
+  // Validate projectRoot to prevent path traversal
+  const safeRoot = projectRoot === PROJECT_ROOT
+    ? PROJECT_ROOT
+    : validatePathWithinProject(projectRoot, PROJECT_ROOT);
+
   // Check for Go
-  if (fs.existsSync(path.join(projectRoot, 'go.mod'))) {
+  if (fs.existsSync(path.join(safeRoot, 'go.mod'))) {
     return { language: 'go', packageManager: 'go' };
   }
 
   // Check for Rust
-  if (fs.existsSync(path.join(projectRoot, 'Cargo.toml'))) {
+  if (fs.existsSync(path.join(safeRoot, 'Cargo.toml'))) {
     return { language: 'rust', packageManager: 'cargo' };
   }
 
   // Check for Python
-  if (fs.existsSync(path.join(projectRoot, 'pyproject.toml')) ||
-      fs.existsSync(path.join(projectRoot, 'requirements.txt'))) {
-    const pm = fs.existsSync(path.join(projectRoot, 'poetry.lock')) ? 'poetry'
-             : fs.existsSync(path.join(projectRoot, 'Pipfile.lock')) ? 'pipenv'
+  if (fs.existsSync(path.join(safeRoot, 'pyproject.toml')) ||
+      fs.existsSync(path.join(safeRoot, 'requirements.txt'))) {
+    const pm = fs.existsSync(path.join(safeRoot, 'poetry.lock')) ? 'poetry'
+             : fs.existsSync(path.join(safeRoot, 'Pipfile.lock')) ? 'pipenv'
              : 'pip';
     return { language: 'python', packageManager: pm };
   }
 
   // Default to Node.js - detect specific package manager
-  const pm = fs.existsSync(path.join(projectRoot, 'pnpm-lock.yaml')) ? 'pnpm'
-           : fs.existsSync(path.join(projectRoot, 'yarn.lock')) ? 'yarn'
-           : fs.existsSync(path.join(projectRoot, 'bun.lockb')) ? 'bun'
+  const pm = fs.existsSync(path.join(safeRoot, 'pnpm-lock.yaml')) ? 'pnpm'
+           : fs.existsSync(path.join(safeRoot, 'yarn.lock')) ? 'yarn'
+           : fs.existsSync(path.join(safeRoot, 'bun.lockb')) ? 'bun'
            : 'npm';
 
   return { language: 'node', packageManager: pm };

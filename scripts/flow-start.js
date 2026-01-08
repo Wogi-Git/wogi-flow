@@ -200,10 +200,15 @@ async function main() {
   const taskDescription = result.task?.title || result.task?.description || taskId;
 
   if (config.autoContext?.enabled !== false) {
-    const context = await getAutoContext(taskDescription);
-    if (context.files && context.files.length > 0) {
-      console.log('');
-      console.log(formatAutoContext(context));
+    try {
+      const context = await getAutoContext(taskDescription);
+      if (context.files && context.files.length > 0) {
+        console.log('');
+        console.log(formatAutoContext(context));
+      }
+    } catch (e) {
+      // Auto-context is best-effort; don't block task start on failure
+      if (process.env.DEBUG) console.error(`[DEBUG] Auto-context: ${e.message}`);
     }
   }
 

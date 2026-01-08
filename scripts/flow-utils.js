@@ -392,13 +392,19 @@ function readJson(filePath, defaultValue = undefined) {
 }
 
 /**
- * Write JSON file with pretty formatting
+ * Write JSON file with pretty formatting using atomic write pattern
+ * (writes to temp file, then renames for crash safety)
  */
 function writeJson(filePath, data) {
+  const tempPath = filePath + '.tmp.' + process.pid;
   try {
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n');
+    const content = JSON.stringify(data, null, 2) + '\n';
+    fs.writeFileSync(tempPath, content);
+    fs.renameSync(tempPath, filePath);  // Atomic rename
     return true;
   } catch (e) {
+    // Clean up temp file if it exists
+    try { fs.unlinkSync(tempPath); } catch { /* ignore */ }
     throw new Error(`Failed to write JSON to ${filePath}: ${e.message}`);
   }
 }
@@ -419,13 +425,18 @@ function readFile(filePath, defaultValue = undefined) {
 }
 
 /**
- * Write text file
+ * Write text file using atomic write pattern
+ * (writes to temp file, then renames for crash safety)
  */
 function writeFile(filePath, content) {
+  const tempPath = filePath + '.tmp.' + process.pid;
   try {
-    fs.writeFileSync(filePath, content);
+    fs.writeFileSync(tempPath, content);
+    fs.renameSync(tempPath, filePath);  // Atomic rename
     return true;
   } catch (e) {
+    // Clean up temp file if it exists
+    try { fs.unlinkSync(tempPath); } catch { /* ignore */ }
     throw new Error(`Failed to write file ${filePath}: ${e.message}`);
   }
 }
@@ -595,9 +606,50 @@ function getConfigValue(configPath, defaultValue = null) {
 }
 
 /**
- * Update config value
+ * Update config value (uses locking to prevent race conditions)
  */
-function setConfigValue(configPath, newValue) {
+async function setConfigValue(configPath, newValue) {
+  // Use file lock to prevent concurrent writes
+  const lockPath = PATHS.config;
+  let release;
+
+  try {
+    release = await acquireLock(lockPath, { retries: 3, retryDelay: 100 });
+  } catch {
+    // Fall back to non-locked write if locking fails
+    if (process.env.DEBUG) {
+      console.warn('[DEBUG] Could not acquire config lock, proceeding without lock');
+    }
+  }
+
+  try {
+    // Re-read config after acquiring lock (may have changed)
+    invalidateConfigCache();
+    const config = getConfig();
+    const parts = configPath.split('.');
+    let obj = config;
+
+    for (let i = 0; i < parts.length - 1; i++) {
+      const part = parts[i];
+      if (!(part in obj)) {
+        obj[part] = {};
+      }
+      obj = obj[part];
+    }
+
+    obj[parts[parts.length - 1]] = newValue;
+    writeJson(PATHS.config, config);
+    invalidateConfigCache();
+  } finally {
+    if (release) release();
+  }
+}
+
+/**
+ * Update config value (synchronous version - no locking)
+ * Use setConfigValue for concurrent-safe writes
+ */
+function setConfigValueSync(configPath, newValue) {
   const config = getConfig();
   const parts = configPath.split('.');
   let obj = config;
@@ -612,7 +664,6 @@ function setConfigValue(configPath, newValue) {
 
   obj[parts[parts.length - 1]] = newValue;
   writeJson(PATHS.config, config);
-  // Invalidate cache after writing to ensure next getConfig() reads fresh data
   invalidateConfigCache();
 }
 
@@ -1427,7 +1478,8 @@ module.exports = {
   // Config
   getConfig,
   getConfigValue,
-  setConfigValue,
+  setConfigValue,       // Async with locking
+  setConfigValueSync,   // Sync without locking (use when already locked)
   invalidateConfigCache,
   validateConfig,
   KNOWN_CONFIG_KEYS,
