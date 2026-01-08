@@ -138,7 +138,7 @@
     "preCommit": false
   },
   "skills": {
-    "installed": []
+    "installed": ["nestjs", "react", "python", "figma-analyzer"]
   },
   "skillLearning": {
     "enabled": true,
@@ -174,8 +174,11 @@
   "componentIndex": {
     "autoScan": true,
     "scanOn": [
-      "sessionStart"
+      "sessionStart",
+      "afterTask",
+      "preCommit"
     ],
+    "staleAfterMinutes": 60,
     "directories": [
       "src/components",
       "src/hooks",
@@ -193,6 +196,12 @@
       "__tests__",
       "__mocks__"
     ]
+  },
+  "guidedEdit": {
+    "enabled": true,
+    "sessionFile": ".workflow/state/guided-edit-session.json",
+    "extensions": ["ts", "tsx", "js", "jsx", "vue", "svelte"],
+    "srcDir": null
   },
   "figmaAnalyzer": {
     "enabled": true,

@@ -26,7 +26,7 @@ Skills are modular add-ons that extend Wogi Flow with specialized commands, temp
 ```
 
 Or manually:
-1. Copy skill folder to `skills/`
+1. Copy skill folder to `.claude/skills/`
 2. Add skill name to `config.json` → `skills.installed`
 
 ## Using Skills
@@ -45,7 +45,7 @@ Once installed, skill commands are available:
 Each skill follows this structure:
 
 ```
-skills/[name]/
+.claude/skills/[name]/
 ├── skill.md              # Description, when to use, commands list
 ├── rules/                # Coding conventions (auto-loaded)
 │   ├── conventions.md
@@ -63,7 +63,7 @@ skills/[name]/
 ### 1. Create Skill Directory
 
 ```bash
-mkdir -p skills/my-skill/{rules,commands,templates}
+mkdir -p .claude/skills/my-skill/{rules,commands,templates}
 ```
 
 ### 2. Create skill.md
@@ -87,7 +87,7 @@ Description of what this skill does.
 
 ### 3. Add Commands
 
-Create `skills/my-skill/commands/action.md`:
+Create `.claude/skills/my-skill/commands/action.md`:
 
 ```markdown
 Do the action for my skill.
@@ -103,7 +103,7 @@ Usage: `/my-skill-action [args]`
 
 ### 4. Add Rules
 
-Create `skills/my-skill/rules/conventions.md`:
+Create `.claude/skills/my-skill/rules/conventions.md`:
 
 ```markdown
 # My Skill Conventions

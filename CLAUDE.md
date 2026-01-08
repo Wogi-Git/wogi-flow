@@ -223,9 +223,11 @@ Load from `agents/` when needed:
 ## Skills System
 
 Check `config.json → skills.installed`. When a skill applies:
-- Load `skills/[name]/skill.md`
-- Load `skills/[name]/knowledge/patterns.md`
-- Avoid `skills/[name]/knowledge/anti-patterns.md`
+- Load `.claude/skills/[name]/skill.md`
+- Load `.claude/skills/[name]/knowledge/patterns.md`
+- Avoid `.claude/skills/[name]/knowledge/anti-patterns.md`
+
+Skills are now in `.claude/skills/` for Claude Code hot-reload support (v2.1.0).
 
 ## Instruction Learning
 
@@ -245,6 +247,9 @@ When user corrects you:
 | Components | `.workflow/state/app-map.md` |
 | Rules | `.workflow/state/decisions.md` |
 | Progress | `.workflow/state/progress.md` |
+| Roadmap | `.workflow/roadmap/roadmap.md` |
+
+**Note**: When user asks to add something to the roadmap, add it to `.workflow/roadmap/roadmap.md` in the appropriate priority section.
 
 ## Workflow State Files
 
@@ -288,11 +293,11 @@ Check `config.json → qualityGates` before closing any task:
 
 ## Advanced Features
 
-Detailed documentation in `.claude/docs/`:
+Detailed documentation in `.claude/docs/knowledge-base/`:
+- [Task Execution](/.claude/docs/knowledge-base/02-task-execution/) - Loops, hybrid mode, parallel execution
+- [Development Tools](/.claude/docs/knowledge-base/05-development-tools/) - Figma analyzer, code traces, voice
+- [Configuration](/.claude/docs/knowledge-base/configuration/all-options.md) - All 200+ config options
 - `commands.md` - Full command reference
-- `hybrid-mode.md` - Local LLM execution (85-95% token savings)
-- `worktree-parallel.md` - Safe parallel execution
-- `figma-analyzer.md` - Figma component matching
 
 ## Context Management
 

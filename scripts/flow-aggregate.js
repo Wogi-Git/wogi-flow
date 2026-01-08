@@ -28,14 +28,16 @@ const {
   color,
   success,
   warn,
+  info,
   error
 } = require('./flow-utils');
+const { syncDecisionsToRules } = require('./flow-rules-sync');
 
 // ============================================================
 // Paths
 // ============================================================
 
-const SKILLS_DIR = path.join(PROJECT_ROOT, 'skills');
+const SKILLS_DIR = PATHS.skills;
 const CORRECTIONS_DIR = path.join(PROJECT_ROOT, '.workflow', 'corrections');
 
 // ============================================================
@@ -436,6 +438,9 @@ function appendToDecisions(pattern) {
 
   content += entry;
   writeFile(decisionsPath, content);
+
+  // Sync to .claude/rules/ for Claude Code integration
+  syncDecisionsToRules();
 }
 
 /**

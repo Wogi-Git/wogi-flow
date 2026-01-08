@@ -3,85 +3,102 @@ View and manage project coding rules.
 Usage:
 - `/wogi-rules` - List all rules
 - `/wogi-rules [name]` - View specific rule
-- `/wogi-rules add [name]` - Create new rule file
+- `/wogi-rules sync` - Sync decisions.md to .claude/rules/
 
-## What Are Rules?
+## How Rules Work (v2.1.0)
 
-Rules are coding standards and conventions stored in `.claude/rules/`.
-They're automatically loaded and applied when relevant.
-
-## Structure
+Rules are **auto-generated** from `.workflow/state/decisions.md`:
 
 ```
-.claude/rules/
-  typescript.md      # TypeScript conventions
-  api-design.md      # API patterns
-  testing.md         # Testing standards
-  security.md        # Security practices
-  database.md        # Database patterns
-  [custom].md        # Your project-specific rules
+decisions.md (Source of Truth)     .claude/rules/ (Auto-Generated)
+  ├── ## Component Architecture   →  component-architecture.md
+  ├── ## Coding Standards         →  coding-standards.md
+  ├── ## API Patterns             →  api-patterns.md
+  └── ## 2026-01-02               →  2026-01-02.md
 ```
+
+**Key Points:**
+- Edit `decisions.md` to add/change rules
+- `.claude/rules/` is auto-generated (don't edit directly)
+- Rules sync automatically when decisions.md changes
+- Path-scoped rules only load when working on relevant files
+
+## Manual Sync
+
+If rules seem out of date:
+```bash
+node scripts/flow-rules-sync.js
+```
+
+Or use this command:
+```
+/wogi-rules sync
+```
+
+## Path Scoping
+
+Rules are automatically scoped based on section keywords:
+
+| Keyword in Section | Files Loaded For |
+|--------------------|------------------|
+| component, ui | `src/components/**/*` |
+| api, backend | `src/api/**/*` |
+| test, testing | `**/*.{test,spec}.*` |
+| style, css | `**/*.{css,scss}` |
+| database, entity | `src/**/*.entity.*` |
 
 ## Output - List
 
 ```
-📋 Project Rules
+Project Rules
 
-Core Rules:
-  • typescript.md - TypeScript conventions
-  • testing.md - Testing patterns
+Source: .workflow/state/decisions.md
 
-Skill Rules (from installed skills):
-  • nestjs/conventions.md - NestJS architecture
-  • nestjs/database.md - TypeORM patterns
+Generated Rules (.claude/rules/):
+  - component-architecture.md (paths: src/components/**/*)
+  - coding-standards.md
+  - api-patterns.md (paths: src/api/**/*)
+  - 2026-01-02.md
 
-Custom Rules:
-  • our-api-style.md - Company API standards
+Last synced: 2026-01-08
 
 Use: /wogi-rules [name] to view a rule
-     /wogi-rules add [name] to create new rule
+     /wogi-rules sync to regenerate rules
 ```
 
-## Output - View Rule
+## Adding Rules
 
-```
-📜 Rule: typescript
+To add a new rule:
 
-# TypeScript Conventions
+1. Add a new `## Section` to decisions.md:
+   ```markdown
+   ## API Validation
 
-## Naming
-- Files: kebab-case
-- Classes: PascalCase
-- Variables: camelCase
-- Constants: SCREAMING_SNAKE_CASE
-
-## Types
-- Prefer interfaces over types for objects
-- Use strict null checks
-- No `any` without justification
-
-[... full rule content ...]
-```
-
-## Creating Rules
-
-When you identify a pattern that should be followed:
-
-1. Create rule file:
-   ```
-   /wogi-rules add component-patterns
+   - All API endpoints must validate input
+   - Use Zod schemas for request validation
+   - Return 400 for validation errors
    ```
 
-2. Document the pattern:
-   - What: The rule/pattern
-   - Why: Reason for the rule
-   - Examples: Good and bad examples
+2. Rules auto-sync on next decisions.md update, or run:
+   ```
+   /wogi-rules sync
+   ```
 
-3. Rule is automatically applied in future work
+## Execution
 
-## Auto-Loading
+When user runs `/wogi-rules`:
 
-Rules are loaded when:
-- Starting a task that relates to the rule
-- Creating files in a domain covered by a rule
-- Skill rules load when skill is installed
+1. List rules in `.claude/rules/`
+2. Show source (decisions.md)
+3. Show path scoping for each rule
+4. Show last sync time
+
+When user runs `/wogi-rules sync`:
+
+1. Run `node scripts/flow-rules-sync.js`
+2. Show updated rules
+
+When user runs `/wogi-rules [name]`:
+
+1. Read `.claude/rules/[name].md`
+2. Display content

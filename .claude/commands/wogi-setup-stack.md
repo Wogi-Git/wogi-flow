@@ -31,7 +31,7 @@ Usage:
    - `knowledge/anti-patterns.md` - Common mistakes
    - `rules/conventions.md` - Coding standards
 
-4. **Skills Index** - Creates `skills/skills-index.json` for easy access
+4. **Skills Index** - Creates `.claude/skills/skills-index.json` for easy access
 
 5. **Updates**:
    - Adds tech stack to `decisions.md`
@@ -92,11 +92,11 @@ Generate skills and fetch documentation? [Y/n] y
     - Prisma
 
   Processing Next.js...
-    ✓ Created: skills/nextjs
+    ✓ Created: .claude/skills/nextjs
 
   ...
 
-  ✓ Created: skills/skills-index.json
+  ✓ Created: .claude/skills/skills-index.json
   ✓ Updated: .workflow/state/decisions.md
   ✓ Updated: .workflow/config.json
 
@@ -125,7 +125,7 @@ This uses Context7 MCP to fetch latest docs and extract:
   "generated": "2024-01-06T12:00:00Z",
   "skills": {
     "nextjs": {
-      "path": "skills/nextjs/",
+      "path": ".claude/skills/nextjs/",
       "covers": ["next.js", "app router", "server components"],
       "sections": {
         "patterns": "knowledge/patterns.md",

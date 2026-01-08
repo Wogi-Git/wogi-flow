@@ -38,6 +38,51 @@ const {
 const PROJECT_ROOT = getProjectRoot();
 
 // ============================================================
+// Index Freshness Check
+// ============================================================
+
+/**
+ * Check if component index is stale and refresh if needed
+ * @param {object} config - Config object with componentIndex settings
+ * @returns {boolean} - True if index was refreshed
+ */
+function checkAndRefreshIndex(config) {
+  const indexPath = path.join(PATHS.state, 'component-index.json');
+
+  if (!fs.existsSync(indexPath)) {
+    return false; // No index to refresh
+  }
+
+  const staleAfterMinutes = config.componentIndex?.staleAfterMinutes || 60;
+  const scanOn = config.componentIndex?.scanOn || [];
+
+  // Only check if sessionStart is a trigger
+  if (!scanOn.includes('sessionStart')) {
+    return false;
+  }
+
+  try {
+    const stats = fs.statSync(indexPath);
+    const ageMs = Date.now() - stats.mtimeMs;
+    const staleMs = staleAfterMinutes * 60 * 1000;
+
+    if (ageMs > staleMs) {
+      // Index is stale - refresh it
+      execSync('bash scripts/flow-map-index scan --quiet', {
+        encoding: 'utf-8',
+        stdio: 'pipe',
+        timeout: 30000 // 30 second timeout
+      });
+      return true;
+    }
+  } catch {
+    // Ignore errors - stale check is best-effort
+  }
+
+  return false;
+}
+
+// ============================================================
 // Keyword Extraction
 // ============================================================
 
@@ -536,6 +581,11 @@ function getAutoContext(description, options = {}) {
     return { enabled: false, files: [], context: [] };
   }
 
+  // v2.0: Check and refresh stale component index
+  if (config.componentIndex?.autoScan !== false) {
+    checkAndRefreshIndex(config);
+  }
+
   const maxFiles = options.maxFiles || config.autoContext?.maxFilesToLoad || 10;
   const showFiles = options.showFiles ?? config.autoContext?.showLoadedFiles ?? true;
 
@@ -743,6 +793,7 @@ module.exports = {
   searchRelatedTasks,
   searchWithAstGrep,
   inferTaskType,
+  checkAndRefreshIndex,
   getAutoContext,
   formatAutoContext
 };

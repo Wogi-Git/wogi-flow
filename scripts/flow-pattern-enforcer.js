@@ -108,7 +108,7 @@ function loadAppMapComponents(projectRoot = PROJECT_ROOT) {
  * Load skill patterns for a given file type
  */
 function loadSkillPatterns(projectRoot, fileExtension, taskDescription = '') {
-  const skillsDir = path.join(projectRoot, 'skills');
+  const skillsDir = path.join(projectRoot, '.claude', 'skills');
   if (!fs.existsSync(skillsDir)) return null;
 
   // Map file extensions to skills
@@ -479,13 +479,13 @@ function generateSessionSummary(projectRoot = PROJECT_ROOT) {
   }
 
   // Skills summary
-  const skillsDir = path.join(projectRoot, 'skills');
+  const skillsDir = path.join(projectRoot, '.claude', 'skills');
   if (fs.existsSync(skillsDir)) {
     const skills = fs.readdirSync(skillsDir).filter(d =>
       fs.statSync(path.join(skillsDir, d)).isDirectory() && !d.startsWith('_')
     );
     if (skills.length > 0) {
-      summary += `│\n│  skills/: ${skills.join(', ')}\n`;
+      summary += `│\n│  .claude/skills/: ${skills.join(', ')}\n`;
     }
   }
 

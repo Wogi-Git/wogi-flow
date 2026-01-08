@@ -49,7 +49,7 @@ cat .workflow/config.json          # Know mandatory steps
 cat .workflow/state/request-log.md # What was done
 cat .workflow/state/app-map.md     # What components exist
 cat .workflow/state/decisions.md   # Coding patterns
-ls skills/                         # Check available skills
+ls .claude/skills/                 # Check available skills
 ```
 
 ## Using Skills (IMPORTANT)
@@ -67,10 +67,10 @@ Match file types to skills:
 When a skill applies to your task:
 
 ```bash
-cat skills/[name]/skill.md                    # Quick reference
-cat skills/[name]/knowledge/patterns.md       # What works
-cat skills/[name]/knowledge/anti-patterns.md  # What to avoid
-cat skills/[name]/rules/conventions.md        # Coding rules
+cat .claude/skills/[name]/skill.md                    # Quick reference
+cat .claude/skills/[name]/knowledge/patterns.md       # What works
+cat .claude/skills/[name]/knowledge/anti-patterns.md  # What to avoid
+cat .claude/skills/[name]/rules/conventions.md        # Coding rules
 ```
 
 ### Using Skill Commands
@@ -201,7 +201,7 @@ Run all required checks.
 
 1. Read task and specs
 2. Check app-map for reusable components
-3. **Load relevant skills** - Check `skills/` for matching patterns
+3. **Load relevant skills** - Check `.claude/skills/` for matching patterns
 4. Follow decisions.md patterns
 5. **Follow skill patterns** - Use patterns.md, avoid anti-patterns.md
 6. Implement with frequent commits

@@ -8,6 +8,15 @@
 const fs = require('fs');
 const path = require('path');
 
+// Lazy-load to avoid circular dependency
+let _syncDecisionsToRules = null;
+function syncDecisionsToRules() {
+  if (!_syncDecisionsToRules) {
+    _syncDecisionsToRules = require('./flow-rules-sync').syncDecisionsToRules;
+  }
+  return _syncDecisionsToRules();
+}
+
 // ============================================
 // CONFIGURATION
 // ============================================
@@ -198,7 +207,7 @@ function generateSkillsIndex(technologies, selections) {
     const keywords = TECH_KEYWORDS[tech.value] || [];
 
     skills[skillId] = {
-      path: `skills/${skillId}/`,
+      path: `.claude/skills/${skillId}/`,
       label: tech.label,
       context7: tech.context7,
       covers: [tech.value, tech.label.toLowerCase(), ...keywords],
@@ -225,16 +234,16 @@ function generateSkillsIndex(technologies, selections) {
 }
 
 // ============================================
-// MIGRATION: .claude/skills/ -> skills/
+// MIGRATION: skills/ -> .claude/skills/ (v2.1.0)
 // ============================================
 
 /**
- * Migrate skills from old .claude/skills/ location to new skills/ location
- * Called during skill generation to ensure consistency
+ * Migrate skills from old skills/ location to new .claude/skills/ location
+ * Called during skill generation to ensure consistency with Claude Code 2.1.0
  */
 function migrateOldSkills(projectRoot) {
-  const oldSkillsDir = path.join(projectRoot, '.claude', 'skills');
-  const newSkillsDir = path.join(projectRoot, 'skills');
+  const oldSkillsDir = path.join(projectRoot, 'skills');
+  const newSkillsDir = path.join(projectRoot, '.claude', 'skills');
 
   if (!fs.existsSync(oldSkillsDir)) {
     return { migrated: [], skipped: [] };
@@ -261,7 +270,7 @@ function migrateOldSkills(projectRoot) {
             migrated.push(`skills-index.json`);
           } else {
             fs.unlinkSync(oldPath);
-            skipped.push(`skills-index.json (newer exists)`);
+            skipped.push(`skills-index.json (newer exists in .claude/skills/)`);
           }
         }
         continue;
@@ -275,7 +284,7 @@ function migrateOldSkills(projectRoot) {
       if (fs.existsSync(newSkillPath)) {
         // Skill exists in both places - keep new, remove old
         fs.rmSync(oldSkillPath, { recursive: true, force: true });
-        skipped.push(`${skillName} (already in skills/)`);
+        skipped.push(`${skillName} (already in .claude/skills/)`);
       } else {
         // Move skill to new location
         ensureDir(newSkillsDir);
@@ -284,7 +293,7 @@ function migrateOldSkills(projectRoot) {
       }
     }
 
-    // Clean up empty .claude/skills directory
+    // Clean up empty skills/ directory
     const remainingEntries = fs.readdirSync(oldSkillsDir);
     if (remainingEntries.length === 0) {
       fs.rmdirSync(oldSkillsDir);
@@ -309,7 +318,7 @@ function ensureDir(dirPath) {
 
 async function writeSkillFiles(tech, docs, projectRoot) {
   const skillId = tech.value.toLowerCase().replace(/[^a-z0-9]/g, '-');
-  const skillDir = path.join(projectRoot, 'skills', skillId);
+  const skillDir = path.join(projectRoot, '.claude', 'skills', skillId);
 
   // Create directory structure
   ensureDir(skillDir);
@@ -379,7 +388,7 @@ function updateDecisionsMd(selections, technologies, projectRoot) {
     lines.push(`- **Additional Tools**: ${selections.additionalTools.join(', ')}`);
   }
 
-  lines.push('\nSee `skills/skills-index.json` for detailed patterns.\n');
+  lines.push('\nSee `.claude/skills/skills-index.json` for detailed patterns.\n');
 
   const techStackSection = lines.join('\n');
 
@@ -400,6 +409,9 @@ function updateDecisionsMd(selections, technologies, projectRoot) {
   content = content.trimEnd() + '\n' + techStackSection;
 
   fs.writeFileSync(decisionsPath, content, 'utf8');
+
+  // Sync to .claude/rules/ for Claude Code integration
+  syncDecisionsToRules();
 }
 
 function updateConfigJson(technologies, projectRoot) {
@@ -428,10 +440,10 @@ function updateConfigJson(technologies, projectRoot) {
 async function generateSkills(technologies, selections) {
   const projectRoot = process.cwd();
 
-  // Migrate any skills from old .claude/skills/ location
+  // Migrate any skills from old skills/ location to .claude/skills/
   const migration = migrateOldSkills(projectRoot);
   if (migration.migrated.length > 0) {
-    console.log('\n  Migrated skills from .claude/skills/ to skills/:');
+    console.log('\n  Migrated skills from skills/ to .claude/skills/:');
     for (const skill of migration.migrated) {
       console.log(`    ✓ ${skill}`);
     }
@@ -469,10 +481,10 @@ async function generateSkills(technologies, selections) {
 
   // Generate skills index
   const skillsIndex = generateSkillsIndex(technologies, selections);
-  const indexPath = path.join(projectRoot, 'skills', 'skills-index.json');
+  const indexPath = path.join(projectRoot, '.claude', 'skills', 'skills-index.json');
   ensureDir(path.dirname(indexPath));
   fs.writeFileSync(indexPath, JSON.stringify(skillsIndex, null, 2), 'utf8');
-  console.log(`\n  ✓ Created: skills/skills-index.json`);
+  console.log(`\n  ✓ Created: .claude/skills/skills-index.json`);
 
   // Update decisions.md
   updateDecisionsMd(selections, technologies, projectRoot);
@@ -511,7 +523,7 @@ async function generateSkills(technologies, selections) {
  */
 async function enhanceSkillWithDocs(skillId, docs) {
   const projectRoot = process.cwd();
-  const skillDir = path.join(projectRoot, 'skills', skillId);
+  const skillDir = path.join(projectRoot, '.claude', 'skills', skillId);
 
   if (!fs.existsSync(skillDir)) {
     throw new Error(`Skill directory not found: ${skillDir}`);

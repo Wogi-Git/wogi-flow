@@ -228,7 +228,7 @@ function updateFeedbackPatterns(brief, taskId, skillName) {
  * Update skill learnings if skill is specified
  */
 function updateSkillLearnings(skillName, data) {
-  const skillDir = path.join(PROJECT_ROOT, 'skills', skillName, 'knowledge');
+  const skillDir = path.join(PROJECT_ROOT, '.claude', 'skills', skillName, 'knowledge');
   const learningsPath = path.join(skillDir, 'learnings.md');
 
   if (!dirExists(skillDir)) {

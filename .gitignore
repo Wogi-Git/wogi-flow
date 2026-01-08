@@ -23,6 +23,9 @@ node_modules/
 .workflow/state/export-map.json
 .workflow/state/hybrid-context.md
 
+# Auto-generated rules (regenerated from decisions.md)
+.claude/rules/
+
 # v1.7.0 session state (user-specific, transient)
 .workflow/state/session-state.json
 

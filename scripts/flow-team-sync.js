@@ -20,6 +20,15 @@ const path = require('path');
 const crypto = require('crypto');
 const { getConfig, getProjectRoot } = require('./flow-utils');
 
+// Lazy-load to avoid circular dependency
+let _syncDecisionsToRules = null;
+function syncDecisionsToRules() {
+  if (!_syncDecisionsToRules) {
+    _syncDecisionsToRules = require('./flow-rules-sync').syncDecisionsToRules;
+  }
+  return _syncDecisionsToRules();
+}
+
 /**
  * Get team sync configuration
  */
@@ -109,10 +118,10 @@ function getSyncableFiles() {
 
   // Sync skill learnings if enabled
   if (teamConfig.syncSkillLearnings !== false) {
-    const skillsDir = path.join(projectRoot, 'skills');
+    const skillsDir = path.join(projectRoot, '.claude', 'skills');
     if (fs.existsSync(skillsDir)) {
       const skillDirs = fs.readdirSync(skillsDir, { withFileTypes: true })
-        .filter(d => d.isDirectory())
+        .filter(d => d.isDirectory() && !d.name.startsWith('_'))
         .map(d => d.name);
 
       files.skillLearnings = {};
@@ -291,6 +300,8 @@ function applyRemoteChanges(remotePayload, strategy = 'newest-wins') {
     );
     if (result.changed) {
       fs.writeFileSync(result.path, result.content);
+      // Sync to .claude/rules/ for Claude Code integration
+      syncDecisionsToRules();
       changes.push({ file: 'decisions.md', action: result.action });
     }
   }
@@ -316,12 +327,12 @@ function applyRemoteChanges(remotePayload, strategy = 'newest-wins') {
 
       if (result.changed) {
         // Create skill directory if needed
-        const skillDir = path.join(projectRoot, 'skills', skill, 'knowledge');
+        const skillDir = path.join(projectRoot, '.claude', 'skills', skill, 'knowledge');
         if (!fs.existsSync(skillDir)) {
           fs.mkdirSync(skillDir, { recursive: true });
         }
         fs.writeFileSync(result.path, result.content);
-        changes.push({ file: `skills/${skill}/learnings.md`, action: result.action });
+        changes.push({ file: `.claude/skills/${skill}/learnings.md`, action: result.action });
       }
     }
   }

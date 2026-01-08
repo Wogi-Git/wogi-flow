@@ -1,21 +1,25 @@
-# Multi-Model Orchestration Backlog
+# Wogi Flow Roadmap
 
-**Source**: AI Council Review (2026-01-02)
-**Council Members**: Claude Opus 4.5, GPT 5.2, Grok 4, Gemini 3 Pro
-**Status**: Backlog - implement based on user demand
+**Status**: Active backlog - implement based on user demand
 
 ---
 
 ## How to Use This Document
 
-This backlog contains valuable suggestions from a council review of multi-model architecture.
-We've organized them by priority based on current Wogi Flow needs.
+This roadmap contains planned features and improvements for Wogi Flow.
+Items are organized by priority based on user demand and implementation effort.
 
 **Rules**:
 1. Review quarterly - are users asking for any of these?
 2. Promote on demand - move items up when users request them
 3. Delete if stale - remove items no one has asked about in 6 months
 4. Track triggers - note what would make each feature valuable
+
+**Adding Items**: When the user asks to add something to the roadmap, add it to the appropriate priority section with:
+- **Source**: Where the idea came from
+- **Why**: The problem it solves
+- **Trigger**: When to implement
+- **Effort**: Estimated effort
 
 ---
 
@@ -113,6 +117,40 @@ const LEARNING_TIERS = {
 ## Priority 2: Valuable If Proven
 
 Implement when data shows clear need.
+
+### Jira/Linear Integration
+
+**Source**: Augment Code analysis (2026-01-08)
+**Why**: See assigned tasks from project management tools, sync completed tasks back
+**Trigger**: When users ask for task management integration
+**Effort**: 1-2 days per integration
+**Risk**: API changes, authentication complexity
+
+Features:
+- `/wogi-external-tasks` - List assigned tasks from Jira/Linear
+- `/wogi-external-tasks --sync` - Sync completed tasks back
+- `/wogi-external-tasks PROJ-123` - Import and start specific task
+- Auto-create stories in ready.json from external tasks
+
+```json
+"integrations": {
+  "jira": {
+    "enabled": false,
+    "baseUrl": "https://company.atlassian.net",
+    "projectKey": "PROJ",
+    "apiToken": "$JIRA_API_TOKEN"
+  },
+  "linear": {
+    "enabled": false,
+    "apiKey": "$LINEAR_API_KEY",
+    "teamId": "TEAM-123"
+  }
+}
+```
+
+**Would implement when**: Users request integration with their project management tools.
+
+---
 
 ### Quality Gate Confidence
 
@@ -348,6 +386,10 @@ We're skeptical these add value. Would need strong evidence.
 
 | Date | Change |
 |------|--------|
+| 2026-01-08 | Added: Jira/Linear Integration (from Augment Code analysis) |
+| 2026-01-08 | ✅ Implemented: agent_requested rule type in flow-rules-sync.js |
+| 2026-01-08 | ✅ Implemented: Component Index Freshness (afterTask, staleCheck, gitHooks) |
+| 2026-01-08 | ✅ Implemented: Guided Edit Mode (flow-guided-edit.js, wogi-guided-edit command) |
 | 2026-01-07 | Added: Team Observability Web UI (from Vercel Workflow DevKit analysis) |
 | 2026-01-06 | Added: Multi-Model Orchestration (from oh-my-opencode analysis) |
 | 2026-01-06 | Added: Background Sync Daemon (from Beads analysis) |

@@ -161,7 +161,7 @@ function scanDirectory(dir, maxDepth, currentDepth = 0) {
  */
 function skillExists(framework) {
   const projectRoot = getProjectRoot();
-  const skillPath = path.join(projectRoot, 'skills', framework);
+  const skillPath = path.join(projectRoot, '.claude', 'skills', framework);
   return fs.existsSync(skillPath);
 }
 
@@ -178,7 +178,7 @@ function getInstalledSkills() {
  */
 function generateSkillStructure(framework, docsUrl) {
   const projectRoot = getProjectRoot();
-  const skillPath = path.join(projectRoot, 'skills', framework);
+  const skillPath = path.join(projectRoot, '.claude', 'skills', framework);
 
   // Create directory structure
   const dirs = [
@@ -525,7 +525,7 @@ if (require.main === module) {
           console.log(`   Docs: ${result.docsUrl}`);
         }
         console.log('\nNext steps:');
-        console.log('1. Review generated files in skills/' + framework);
+        console.log('1. Review generated files in .claude/skills/' + framework);
         console.log('2. Add patterns from official documentation');
         console.log('3. Add project-specific conventions');
       } else {

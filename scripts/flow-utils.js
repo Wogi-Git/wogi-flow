@@ -66,10 +66,13 @@ const PROJECT_ROOT = getProjectRoot();
 const WORKFLOW_DIR = path.join(PROJECT_ROOT, '.workflow');
 const STATE_DIR = path.join(WORKFLOW_DIR, 'state');
 
+const CLAUDE_DIR = path.join(PROJECT_ROOT, '.claude');
+
 const PATHS = {
   root: PROJECT_ROOT,
   workflow: WORKFLOW_DIR,
   state: STATE_DIR,
+  claude: CLAUDE_DIR,
   config: path.join(WORKFLOW_DIR, 'config.json'),
   ready: path.join(STATE_DIR, 'ready.json'),
   requestLog: path.join(STATE_DIR, 'request-log.md'),
@@ -93,6 +96,10 @@ const PATHS = {
   approaches: path.join(STATE_DIR, 'approaches'),
   modelAdapters: path.join(WORKFLOW_DIR, 'model-adapters'),
   codebaseInsights: path.join(STATE_DIR, 'codebase-insights.md'),
+  // Claude Code integration (v2.1.0)
+  skills: path.join(CLAUDE_DIR, 'skills'),
+  rules: path.join(CLAUDE_DIR, 'rules'),
+  commands: path.join(CLAUDE_DIR, 'commands'),
 };
 
 // ============================================================
@@ -1385,6 +1392,7 @@ module.exports = {
   PROJECT_ROOT,
   WORKFLOW_DIR,
   STATE_DIR,
+  CLAUDE_DIR,
   getProjectRoot,
 
   // Colors & Output

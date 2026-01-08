@@ -342,6 +342,23 @@ async function main() {
     }
   }
 
+  // v2.0: Refresh component index after task if configured
+  const scanOn = config.componentIndex?.scanOn || [];
+  if (config.componentIndex?.autoScan !== false && scanOn.includes('afterTask')) {
+    try {
+      console.log(color('dim', '🔄 Refreshing component index...'));
+      execSync('bash scripts/flow-map-index scan --quiet', {
+        encoding: 'utf-8',
+        stdio: 'pipe'
+      });
+      if (process.env.DEBUG) {
+        console.log(color('dim', '   Component index updated'));
+      }
+    } catch (e) {
+      if (process.env.DEBUG) console.error(`[DEBUG] Component index refresh: ${e.message}`);
+    }
+  }
+
   // v1.7.0: Check context health after task
   if (config.contextMonitor?.checkAfterTask !== false) {
     warnIfContextHigh();

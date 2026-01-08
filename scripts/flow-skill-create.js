@@ -17,7 +17,7 @@ const readline = require('readline');
 const { getProjectRoot, colors } = require('./flow-utils');
 
 const PROJECT_ROOT = getProjectRoot();
-const SKILLS_DIR = path.join(PROJECT_ROOT, 'skills');
+const SKILLS_DIR = path.join(PROJECT_ROOT, '.claude', 'skills');
 const TEMPLATE_DIR = path.join(SKILLS_DIR, '_template');
 
 function log(color, ...args) {

@@ -1,4 +1,4 @@
-# Wogi Flow v1.9
+# Wogi Flow v1.9.2
 
 A self-improving AI development workflow that learns from your feedback and accumulates knowledge over time.
 
@@ -30,6 +30,30 @@ A self-improving AI development workflow that learns from your feedback and accu
 | **Skills System**         | Modular add-ons for specific tech stacks with accumulated knowledge                         |
 | **Profile Sharing**       | Export refined workflows for your team                                                      |
 | **Team Backend**          | AWS-powered team sync: shared memory, proposals, activity logging                           |
+| **Durable Sessions**      | Crash recovery - resume interrupted tasks with full context                                 |
+| **Suspend/Resume**        | Pause tasks for external blockers with automatic resumption                                 |
+| **Morning Briefing**      | Context restoration at session start with recommended tasks                                 |
+| **Regression Testing**    | Sample-based testing of completed tasks after new changes                                   |
+| **Story Decomposition**   | Auto-decompose complex stories into granular sub-tasks                                      |
+| **Model Adapters**        | Per-model learning captures quirks and optimizes prompts                                    |
+| **Context Monitor**       | Tracks context window usage with warnings at 70%/85%                                        |
+| **Guided Edit Mode**      | Step-by-step multi-file editing with session persistence                                    |
+| **Smart Rule Loading**    | Rules with `alwaysApply: false` loaded only when relevant to task context                   |
+| **Component Index Freshness** | Auto-refresh on session start, post-task, and pre-commit with configurable staleness    |
+
+## Documentation
+
+**Comprehensive documentation is available in the [Knowledge Base](.claude/docs/knowledge-base/README.md):**
+
+| Category | Description |
+|----------|-------------|
+| [Setup & Onboarding](.claude/docs/knowledge-base/01-setup-onboarding/) | Installation, onboarding, component indexing |
+| [Task Execution](.claude/docs/knowledge-base/02-task-execution/) | The execution pipeline with trade-offs |
+| [Self-Improvement](.claude/docs/knowledge-base/03-self-improvement/) | How wogi-flow learns and improves |
+| [Memory & Context](.claude/docs/knowledge-base/04-memory-context/) | Context management and session persistence |
+| [Development Tools](.claude/docs/knowledge-base/05-development-tools/) | Figma, traces, voice, MCP integrations |
+| [Safety & Guardrails](.claude/docs/knowledge-base/06-safety-guardrails/) | Protection and recovery systems |
+| [Configuration Reference](.claude/docs/knowledge-base/configuration/all-options.md) | All 200+ configuration options |
 
 ## Quick Start
 
@@ -107,6 +131,7 @@ Daily commands for working with Wogi Flow. Start with `/wogi-ready` to see tasks
 - [Task Management](#task-management)
 - [Component Registry](#component-registry)
 - [Code Traces](#code-traces)
+- [Guided Edit Mode](#guided-edit-mode)
 - [Skills System](#skills-system)
 - [Team Backend](#team-backend)
 - [Configuration](#configuration)
@@ -362,7 +387,7 @@ Sync workflow files at project scope - share decisions, patterns, and knowledge 
 | `decisions.md` | Coding rules and patterns | Full sync |
 | `app-map.md` | Component registry | Full sync |
 | `component-index.json` | Auto-generated index | Full sync |
-| `skills/*/knowledge/` | Skill learnings | Full sync |
+| `.claude/skills/*/knowledge/` | Skill learnings | Full sync |
 | Memory facts | Local database facts | Export to JSON |
 | `request-log.md` | Activity history | Recent entries only |
 | Tasks | Task queue | Optional |
@@ -923,7 +948,7 @@ Skills now automatically capture learnings from every session. Knowledge persist
 ┌─────────────────────────────────────────────────────────────┐
 │                    SKILL KNOWLEDGE                           │
 ├─────────────────────────────────────────────────────────────┤
-│  skills/[name]/knowledge/                                   │
+│  .claude/skills/[name]/knowledge/                           │
 │  ├── learnings.md      ← Session insights (auto-updated)   │
 │  ├── patterns.md       ← What works                         │
 │  └── anti-patterns.md  ← What to avoid                     │
@@ -933,7 +958,7 @@ Skills now automatically capture learnings from every session. Knowledge persist
 ### Skill Structure
 
 ```
-skills/nestjs/
+.claude/skills/nestjs/
 ├── skill.md              # Core definition (always loaded)
 ├── knowledge/
 │   ├── learnings.md      # Session learnings (auto-updated)
@@ -1143,11 +1168,39 @@ Human-maintained with rich context:
 
 ### 2. Auto-generated `component-index.json`
 
-Machine-generated, always current:
+Machine-generated with automatic freshness:
 
 ```bash
 ./scripts/flow map-index scan   # Scan codebase
 ./scripts/flow map-sync         # Compare with app-map
+```
+
+### Component Index Freshness
+
+The index automatically refreshes based on configuration:
+
+```json
+{
+  "componentIndex": {
+    "autoScan": true,
+    "scanOn": ["sessionStart", "afterTask", "preCommit"],
+    "staleAfterMinutes": 60
+  }
+}
+```
+
+| Trigger | When |
+|---------|------|
+| `sessionStart` | Beginning of each Claude session (also checks stale) |
+| `afterTask` | After completing any task via `flow done` |
+| `preCommit` | Before git commits (requires git hooks installed) |
+
+Install git hooks for pre-commit scanning:
+
+```bash
+./scripts/flow setup-hooks install   # Install hooks
+./scripts/flow setup-hooks --status  # Check status
+./scripts/flow setup-hooks --remove  # Remove hooks
 ```
 
 ---
@@ -1168,6 +1221,69 @@ Traces include:
 - Execution steps with file/line references
 - Mermaid diagrams
 - Security/performance notes
+
+---
+
+## Guided Edit Mode
+
+Step-by-step guided editing for multi-file changes like large refactors, library upgrades, or schema changes.
+
+### How It Works
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Analyze   │ ──▶ │   Review    │ ──▶ │   Apply     │
+│  Description│     │  Each File  │     │  Approved   │
+└─────────────┘     └─────────────┘     └─────────────┘
+                          │
+              ┌───────────┼───────────┐
+              ▼           ▼           ▼
+        ┌──────────┐ ┌──────────┐ ┌──────────┐
+        │ Approve  │ │  Reject  │ │   Skip   │
+        │   (a)    │ │   (r)    │ │   (s)    │
+        └──────────┘ └──────────┘ └──────────┘
+```
+
+### Use Cases
+
+| Use Case | Example |
+|----------|---------|
+| **Large Refactors** | `rename UserService to UserManager` |
+| **Library Upgrades** | `replace import { X } from 'old-lib' with 'new-lib'` |
+| **Schema Changes** | `find UserEntity` to review all usages |
+| **Code Cleanup** | `find componentWillMount` |
+
+### Commands
+
+```bash
+/wogi-guided-edit "rename Button to BaseButton"   # Start session
+/wogi-guided-edit --continue                      # Resume session
+```
+
+During a session:
+- `next` / `n` - Show next file
+- `approve` / `a` / `y` - Apply changes to current file
+- `reject` / `r` - Skip this file
+- `skip` / `s` - Skip for now (can revisit)
+- `status` - Show progress
+- `abort` / `q` - Cancel session
+
+### Session Persistence
+
+Progress is saved to `.workflow/state/guided-edit-session.json`. You can close Claude and resume later.
+
+### Configuration
+
+```json
+{
+  "guidedEdit": {
+    "enabled": true,
+    "sessionFile": ".workflow/state/guided-edit-session.json",
+    "extensions": ["ts", "tsx", "js", "jsx", "vue", "svelte"],
+    "srcDir": null
+  }
+}
+```
 
 ---
 
@@ -1357,6 +1473,12 @@ flow map-sync                   # Compare index with app-map
 flow trace "<prompt>"           # Generate trace
 flow trace list                 # List traces
 
+# Guided Edit (v1.9.2)
+flow guided-edit "description"  # Start guided edit session
+flow guided-edit --continue     # Resume session
+flow guided-edit status         # Show session progress
+flow guided-edit abort          # Cancel session
+
 # Skills
 flow skill-learn                # Extract learnings
 flow skill-create <name>        # Create skill
@@ -1466,9 +1588,10 @@ flow team status                # Show team connection status
 flow team sync                  # Sync local memory to team
 flow team activity              # Show team activity
 
-# Hooks
+# Hooks (v1.9.2)
 flow setup-hooks install        # Install git hooks
-flow setup-hooks uninstall      # Remove hooks
+flow setup-hooks --status       # Check hook status
+flow setup-hooks --remove       # Remove hooks
 ```
 
 ---
@@ -1484,6 +1607,7 @@ Quick reference for chat commands:
 | **Components** | `/wogi-map`, `/wogi-map-add`, `/wogi-map-scan`, `/wogi-map-check`, `/wogi-map-sync`                  |
 | **Figma**      | `flow figma scan`, `flow figma analyze`, `flow figma confirm`, `flow figma generate`, `flow figma server` |
 | **Traces**     | `/wogi-trace`                                                                                        |
+| **Refactoring**| `/wogi-guided-edit`                                                                                  |
 | **Skills**     | `/wogi-skills`, `/wogi-skill-learn`                                                                  |
 | **Hybrid**     | `/wogi-hybrid-setup`, `/wogi-hybrid`, `/wogi-hybrid-off`, `/wogi-hybrid-status`                      |
 | **Workflow**   | `/wogi-health`, `/wogi-standup`, `/wogi-session-end`, `/wogi-search`, `/wogi-context`                |
@@ -1512,7 +1636,7 @@ Quick reference for chat commands:
 ├── traces/                  # Code trace documents
 └── tests/flows/             # Browser test flows
 
-skills/
+.claude/skills/              # Skills (Claude Code 2.1+ native)
 ├── _template/               # Template for new skills
 ├── figma-analyzer/          # Figma design analyzer
 ├── nestjs/
@@ -1560,6 +1684,15 @@ After 3+ similar corrections → Claude suggests promoting to permanent instruct
 ---
 
 ## Changelog
+
+### v1.9.2 - Guided Edit & Index Freshness
+
+- **Guided Edit Mode**: Step-by-step multi-file editing with session persistence for large refactors
+- **Component Index Freshness**: Auto-refresh on session start (stale check), post-task completion, and pre-commit
+- **Smart Rule Loading**: Rules now have `alwaysApply` frontmatter - Claude loads rules only when relevant
+- **Git Hooks Setup**: New `flow setup-hooks` command to install pre-commit/post-commit hooks
+- **New commands**: `flow guided-edit`, `flow setup-hooks`, `/wogi-guided-edit`
+- **Configuration**: New `guidedEdit` section, enhanced `componentIndex.scanOn` triggers
 
 ### v1.9.1 - Damage Control & Auto-Verification
 
@@ -1622,7 +1755,7 @@ After 3+ similar corrections → Claude suggests promoting to permanent instruct
 - **Interactive confirmation**: Choose to reuse, add variant, or create new
 - **MCP Server**: Both stdio and HTTP modes for Claude Desktop/Cursor integration
 - **New commands**: `flow figma [scan|show|extract|match|analyze|confirm|generate|server]`
-- **New skill**: `skills/figma-analyzer/`
+- **New skill**: `.claude/skills/figma-analyzer/`
 
 ### v1.4.0 - Continual Learning Skills
 

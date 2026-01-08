@@ -116,7 +116,7 @@ When user types these commands, execute the corresponding action immediately.
 | Command | Action |
 |---------|--------|
 | `/wogi-skills` | List installed and available skills. Show what commands each skill provides. |
-| `/wogi-skills add [name]` | Install a skill package. Copy to `skills/`, update config.json. |
+| `/wogi-skills add [name]` | Install a skill package. Copy to `.claude/skills/`, update config.json. |
 | `/wogi-skills remove [name]` | Remove installed skill. |
 | `/wogi-skills info [name]` | Show skill details, commands, templates. |
 | `/wogi-rules` | List all coding rules from `.claude/rules/` and installed skills. |

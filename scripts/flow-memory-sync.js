@@ -19,6 +19,15 @@ const fs = require('fs');
 const path = require('path');
 const memoryDb = require('./flow-memory-db');
 
+// Lazy-load to avoid circular dependency
+let _syncDecisionsToRules = null;
+function syncDecisionsToRules() {
+  if (!_syncDecisionsToRules) {
+    _syncDecisionsToRules = require('./flow-rules-sync').syncDecisionsToRules;
+  }
+  return _syncDecisionsToRules();
+}
+
 // ============================================================
 // Configuration
 // ============================================================
@@ -266,6 +275,9 @@ async function promoteFact(factId, dryRun = false) {
   const newContent = appendToDecisions(formatted, decisionsContent);
   fs.writeFileSync(DECISIONS_PATH, newContent);
 
+  // Sync to .claude/rules/ for Claude Code integration
+  syncDecisionsToRules();
+
   // Mark fact as promoted
   await memoryDb.markFactPromoted(factId, 'decisions.md');
 
@@ -334,6 +346,8 @@ async function autoPromote(config) {
 
   if (promoted > 0) {
     fs.writeFileSync(DECISIONS_PATH, currentContent);
+    // Sync to .claude/rules/ for Claude Code integration
+    syncDecisionsToRules();
     await memoryDb.recordMemoryMetric('auto_promote');
   }
 

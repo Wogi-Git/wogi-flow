@@ -41,6 +41,9 @@ const { storeSingleLearning: storeModelLearning, getCurrentModel } = require('./
 // Use shared memory database for proposals
 const memoryDb = require('./flow-memory-db');
 
+// Rules sync for Claude Code integration
+const { syncDecisionsToRules } = require('./flow-rules-sync');
+
 // ============================================================
 // Route Detection
 // ============================================================
@@ -96,7 +99,7 @@ function detectKnowledgeRoute(correction, context = {}) {
     routes.push({
       type: 'skill',
       skill: skillMatch.name,
-      file: `skills/${skillMatch.name}/knowledge/learnings.md`,
+      file: `.claude/skills/${skillMatch.name}/knowledge/learnings.md`,
       confidence: skillMatch.confidence,
       description: `Add to ${skillMatch.name} skill knowledge`
     });
@@ -247,7 +250,7 @@ async function storeModelSpecific(correction, route, context) {
 
 async function storeSkillLearning(correction, route, context) {
   // Use the centralized skill-learn module
-  const skillPath = path.join(process.cwd(), 'skills', route.skill);
+  const skillPath = path.join(PATHS.skills, route.skill);
 
   // Adapt context format for skill-learn's appendLearning
   const skillContext = {
@@ -263,7 +266,7 @@ async function storeSkillLearning(correction, route, context) {
   if (success) {
     return {
       success: true,
-      file: path.join(skillPath, 'knowledge', 'learnings.md'),
+      file: path.join(PATHS.skills, route.skill, 'knowledge', 'learnings.md'),
       message: `Added to ${route.skill} skill learnings`
     };
   }
@@ -299,6 +302,9 @@ ${correction}
 
   content += entry;
   fs.writeFileSync(decisionsPath, content);
+
+  // Sync to .claude/rules/ for Claude Code integration
+  syncDecisionsToRules();
 
   return {
     success: true,
@@ -461,7 +467,7 @@ Available route types:
                     Stored in: .workflow/model-adapters/<model>.md
 
   skill:<name>      Learnings related to a specific skill
-                    Stored in: skills/<name>/knowledge/learnings.md
+                    Stored in: .claude/skills/<name>/knowledge/learnings.md
 
   project           Project-specific decisions and conventions
                     Stored in: .workflow/state/decisions.md

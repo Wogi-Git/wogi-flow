@@ -24,7 +24,7 @@ const { getProjectRoot, getConfig, colors } = require('./flow-utils');
 
 const PROJECT_ROOT = getProjectRoot();
 const WORKFLOW_DIR = path.join(PROJECT_ROOT, '.workflow');
-const SKILLS_DIR = path.join(PROJECT_ROOT, 'skills');
+const SKILLS_DIR = path.join(PROJECT_ROOT, '.claude', 'skills');
 const STATE_DIR = path.join(WORKFLOW_DIR, 'state');
 
 function log(color, ...args) {
