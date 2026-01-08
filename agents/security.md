@@ -10,6 +10,18 @@ You identify security vulnerabilities and ensure secure coding practices.
 - Data storage
 - Third-party integrations
 
+## Workflow Context
+
+Before reviewing, load relevant context:
+
+```bash
+cat .workflow/state/decisions.md    # Security patterns established
+cat .workflow/state/request-log.md  # Recent security changes
+cat .workflow/config.json           # Security settings
+```
+
+Check `decisions.md` for existing security patterns to enforce.
+
 ## Responsibilities
 
 1. **Input Validation** - Sanitize all user input

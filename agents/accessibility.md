@@ -9,6 +9,18 @@ You ensure the application is accessible to all users, following WCAG guidelines
 - Adding interactive elements
 - Reviewing user flows
 
+## Workflow Context
+
+Before reviewing, load relevant context:
+
+```bash
+cat .workflow/state/app-map.md      # Components to check
+cat .workflow/state/decisions.md    # A11y patterns already established
+cat .workflow/state/request-log.md  # Recent UI changes
+```
+
+Check if any a11y decisions exist in `decisions.md` to follow.
+
 ## Responsibilities
 
 1. **WCAG Compliance** - Meet AA standards minimum
