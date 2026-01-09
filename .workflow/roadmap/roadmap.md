@@ -279,6 +279,167 @@ Model performance data aggregated across ALL wogi-flow users:
 - **Default**: CLI's native model orchestrates
 - **Configurable**: User sets preferred primary model in config
 
+**Model-Specific Configuration & Prompting**:
+
+Each model/provider needs tailored instructions for optimal results:
+
+1. **Folder Structure Conventions**
+   - Claude expects `.claude/skills/`, `.claude/rules/`
+   - Gemini may expect `.gemini/` or different structure
+   - Each CLI has its own hot-reload conventions
+   - Universal `.workflow/` → CLI-specific bridge generation
+
+2. **Provider-Level Rules** (e.g., all Gemini models)
+   - Response format preferences
+   - Tool use conventions
+   - Context window handling
+   - Known limitations/strengths
+
+3. **Model Version Adjustments** (e.g., Opus 4.5 vs Opus 4)
+   - Different prompting styles per version
+   - Capability differences (older may lack features)
+   - Cost tier mapping (use Opus 4.5 for planning, Opus 4 for execution)
+   - Version-specific optimizations
+
+4. **Prompt Templates per Model**
+   - Base prompts adjusted for each model's training
+   - System prompt variations
+   - Tool call format differences
+   - Output parsing expectations
+
+```json
+{
+  "modelConfig": {
+    "providers": {
+      "anthropic": {
+        "folderStructure": ".claude/",
+        "rulesFile": "CLAUDE.md",
+        "skillsPath": ".claude/skills/",
+        "baseSystemPrompt": "You are Claude...",
+        "models": {
+          "claude-opus-4.5": {
+            "promptStyle": "detailed",
+            "costTier": "premium",
+            "bestFor": ["planning", "architecture", "complex reasoning"],
+            "systemPromptAdditions": "Focus on quality over speed."
+          },
+          "claude-opus-4": {
+            "promptStyle": "detailed",
+            "costTier": "standard",
+            "bestFor": ["implementation", "code generation"],
+            "systemPromptAdditions": ""
+          },
+          "claude-sonnet-4": {
+            "promptStyle": "concise",
+            "costTier": "budget",
+            "bestFor": ["simple tasks", "boilerplate"],
+            "systemPromptAdditions": "Be concise."
+          }
+        }
+      },
+      "google": {
+        "folderStructure": ".gemini/",
+        "rulesFile": "GEMINI.md",
+        "skillsPath": ".gemini/skills/",
+        "baseSystemPrompt": "You are Gemini...",
+        "generalRules": [
+          "Gemini prefers shorter context chunks",
+          "Use explicit JSON mode for structured output",
+          "Avoid nested tool calls"
+        ],
+        "models": {
+          "gemini-2.5-pro": {
+            "promptStyle": "structured",
+            "costTier": "premium",
+            "bestFor": ["planning", "multi-modal"],
+            "knownIssues": ["May be verbose"]
+          },
+          "gemini-2.5-flash": {
+            "promptStyle": "direct",
+            "costTier": "budget",
+            "bestFor": ["quick tasks", "simple edits"]
+          }
+        }
+      }
+    },
+    "taskRouting": {
+      "planning": { "preferModel": "claude-opus-4.5", "fallback": "gemini-2.5-pro" },
+      "implementation": { "preferModel": "claude-opus-4", "fallback": "claude-sonnet-4" },
+      "review": { "preferModel": "claude-opus-4.5" },
+      "boilerplate": { "preferModel": "claude-sonnet-4", "fallback": "gemini-2.5-flash" }
+    }
+  }
+}
+```
+
+**Why This Matters**:
+- Same prompt yields different quality across models
+- Optimal prompts for Opus differ from Sonnet differ from Gemini
+- Model versions within same family have capability gaps
+- Cost optimization requires knowing which model fits which task
+
+**Hosted Pricing & Performance Table**:
+
+Replace vague cost tiers ("expensive", "cheap") with real-time pricing data and measured performance:
+
+1. **Live Pricing API**
+   - Fetch current pricing from provider APIs (Anthropic, Google, OpenAI)
+   - Update daily/weekly (prices change)
+   - Show $/1M input tokens, $/1M output tokens
+   - Calculate estimated cost per task type
+
+2. **Performance Benchmarks per Task Type**
+   - Measured success rates (not guesses)
+   - Average tokens used per task type
+   - Latency measurements
+   - Quality scores from user feedback
+
+3. **Cost-Performance Matrix**
+   ```
+   | Model           | Planning | Implementation | Review | Boilerplate |
+   |-----------------|----------|----------------|--------|-------------|
+   | claude-opus-4.5 | A ($0.42)| A ($0.38)      | A+     | C (overkill)|
+   | claude-sonnet-4 | B ($0.08)| A ($0.07)      | B+     | A ($0.05)   |
+   | gemini-2.5-pro  | A ($0.31)| B+ ($0.28)     | B      | C           |
+   | gemini-2.5-flash| C ($0.02)| B ($0.02)      | C      | A ($0.01)   |
+   ```
+
+4. **Hosted Service Benefits**
+   - Central source of truth (no stale local data)
+   - Aggregated performance data across all users
+   - Automatic model recommendations based on budget
+   - Price alerts when models become cheaper/expensive
+
+```json
+{
+  "pricingService": {
+    "endpoint": "https://api.wogi-flow.io/pricing",
+    "refreshInterval": "daily",
+    "features": {
+      "livePricing": true,
+      "performanceBenchmarks": true,
+      "costEstimates": true,
+      "modelRecommendations": true
+    }
+  },
+  "localCache": {
+    "pricingData": ".workflow/cache/pricing.json",
+    "maxAge": "24h"
+  }
+}
+```
+
+**Example Output**:
+```
+Model Recommendations for your task (implementation, TypeScript):
+
+1. claude-sonnet-4    - $0.07 est. | Quality: A  | Best value
+2. claude-opus-4      - $0.38 est. | Quality: A+ | Premium
+3. gemini-2.5-flash   - $0.02 est. | Quality: B  | Budget
+
+Based on 12,847 similar tasks across wogi-flow users.
+```
+
 **Auth & Team Management**:
 
 | Tier | Setup | API Keys | Limits |
@@ -599,6 +760,8 @@ We're skeptical these add value. Would need strong evidence.
 
 | Date | Change |
 |------|--------|
+| 2026-01-09 | Added: Hosted Pricing & Performance Table - live pricing API, performance benchmarks, cost-performance matrix, model recommendations |
+| 2026-01-09 | Added: Model-Specific Configuration & Prompting - folder structures, provider rules, version adjustments, prompt templates per model |
 | 2026-01-09 | Added: npm Package Distribution - easy install/update via npm (Priority 2) |
 | 2026-01-09 | ✅ Implemented: Loop Retry Learning - analyzes tasks >3 iterations, identifies root causes, suggests pattern updates |
 | 2026-01-08 | Added: Loop Retry Learning - learn from excessive loop iterations to improve future executions |
