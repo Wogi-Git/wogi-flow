@@ -295,6 +295,20 @@ function archiveDurableSession(status = 'completed') {
     fs.unlinkSync(sessionPath);
   }
 
+  // Trigger loop retry learning analysis for completed sessions
+  const config = getConfig();
+  if (config.skillLearning?.learnFromLoopRetries !== false && status === 'completed') {
+    try {
+      const { analyzeCompletedSession } = require('./flow-loop-retry-learning');
+      analyzeCompletedSession(session);
+    } catch (e) {
+      // Silent fail - learning is non-critical
+      if (process.env.DEBUG) {
+        console.warn('[DEBUG] Loop retry learning failed:', e.message);
+      }
+    }
+  }
+
   return session;
 }
 

@@ -20,51 +20,89 @@ Configuration lives in `.workflow/config.json`
 
 ## Quick Navigation
 
-| Category | Purpose |
-|----------|---------|
+### Core Settings
+| Option | Purpose |
+|--------|---------|
+| [version](#other-top-level-options) | Config schema version |
+| [projectName](#other-top-level-options) | Project name |
+| [autoLog](#other-top-level-options) | Auto-update request log |
+| [autoUpdateAppMap](#other-top-level-options) | Auto-update app-map |
+
+### Category 1: Task & Workflow
+| Section | Purpose |
+|---------|---------|
 | [enforcement](#enforcement) | Task gating and strict mode |
-| [commits](#commits) | Commit approval workflow |
 | [workflow](#workflow) | Planning and agent structure |
 | [loops](#loops) | Self-completing execution loops |
 | [durableSteps](#durablesteps) | Crash recovery |
 | [suspension](#suspension) | Long-running task handling |
 | [parallel](#parallel) | Concurrent execution |
+| [phases](#phases) | Project phase tracking |
+| [mandatorySteps](#mandatorysteps) | Required workflow steps |
+| [priorities](#priorities) | Task priority levels |
+| [storyDecomposition](#storydecomposition) | Story breakdown |
+
+### Category 2: Quality & Validation
+| Section | Purpose |
+|---------|---------|
 | [qualityGates](#qualitygates) | Per-task-type requirements |
 | [validation](#validation) | Auto-validation commands |
-| [componentRules](#componentrules) | Component reuse rules |
 | [testing](#testing) | Test execution |
+| [regressionTesting](#regressiontesting) | Regression checks |
+| [browserTesting](#browsertesting) | Browser test integration |
+| [componentRules](#componentrules) | Component reuse rules |
+| [strictMode](#strictmode) | Additional strict options |
+
+### Category 3: Learning & Memory
+| Section | Purpose |
+|---------|---------|
 | [skills](#skills) | Installed skills |
 | [skillLearning](#skilllearning) | Skill auto-creation |
+| [memory](#memory) | Fact storage |
+| [automaticMemory](#automaticmemory) | Memory management |
+| [automaticPromotion](#automaticpromotion) | Pattern promotion |
+| [knowledgeRouting](#knowledgerouting) | Local vs team knowledge |
+| [modelAdapters](#modeladapters) | Per-model learning |
+| [prd](#prd) | PRD chunking |
+
+### Category 4: Context & Session
+| Section | Purpose |
+|---------|---------|
+| [autoContext](#autocontext) | Auto-loading related files |
+| [sessionState](#sessionstate) | Session persistence |
+| [contextMonitor](#contextmonitor) | Context window management |
+| [morningBriefing](#morningbriefing) | Session start context |
+| [requestLog](#requestlog) | Change history |
+
+### Category 5: Development Tools
+| Section | Purpose |
+|---------|---------|
 | [componentIndex](#componentindex) | Component scanning |
-| [guidedEdit](#guidededit) | Multi-file editing |
 | [figmaAnalyzer](#figmaanalyzer) | Design-to-code |
+| [guidedEdit](#guidededit) | Multi-file editing |
 | [traces](#traces) | Code flow traces |
 | [worktree](#worktree) | Git worktree isolation |
 | [hybrid](#hybrid) | Local LLM execution |
+| [voice](#voice) | Voice input |
+| [lsp](#lsp) | Language server integration |
+| [codebaseInsights](#codebaseinsights) | Project analysis |
+
+### Category 6: Safety & Commits
+| Section | Purpose |
+|---------|---------|
+| [commits](#commits) | Commit approval workflow |
+| [security](#security) | Pre-commit security scans |
+| [damageControl](#damagecontrol) | Destructive command protection |
+
+### Category 7: Integrations
+| Section | Purpose |
+|---------|---------|
+| [team](#team) | Team sync |
 | [agents](#agents) | Agent personas |
 | [multiApproach](#multiapproach) | Multiple solution analysis |
-| [autoContext](#autocontext) | Auto-loading related files |
+| [hooks](#hooks) | CLI hooks (Claude Code, etc.) |
 | [metrics](#metrics) | Usage tracking |
-| [security](#security) | Pre-commit security scans |
-| [modelAdapters](#modeladapters) | Per-model learning |
-| [codebaseInsights](#codebaseinsights) | Project analysis |
-| [lsp](#lsp) | Language server integration |
-| [contextMonitor](#contextmonitor) | Context window management |
-| [requestLog](#requestlog) | Change history |
-| [sessionState](#sessionstate) | Session persistence |
-| [team](#team) | Team sync |
-| [memory](#memory) | Fact storage |
-| [knowledgeRouting](#knowledgerouting) | Local vs team knowledge |
-| [prd](#prd) | PRD chunking |
-| [automaticMemory](#automaticmemory) | Memory management |
-| [automaticPromotion](#automaticpromotion) | Pattern promotion |
-| [voice](#voice) | Voice input |
-| [regressionTesting](#regressiontesting) | Regression checks |
-| [storyDecomposition](#storydecomposition) | Story breakdown |
-| [browserTesting](#browsertesting) | Browser test integration |
-| [damageControl](#damagecontrol) | Destructive command protection |
-| [priorities](#priorities) | Task priority levels |
-| [morningBriefing](#morningbriefing) | Session start context |
+| [corrections](#corrections) | Correction file handling |
 
 ---
 
@@ -454,19 +492,53 @@ Test execution configuration.
 
 ## hooks
 
-Git hooks configuration.
+CLI hooks configuration for AI tools (Claude Code, future Gemini/Codex support).
 
 ```json
 {
   "hooks": {
-    "preCommit": false
+    "enabled": true,
+    "targets": ["claude-code"],
+    "gracefulDegradation": true,
+    "timeout": 5000,
+    "rules": {
+      "taskGating": { "enabled": true, "blockWithoutTask": true },
+      "validation": { "enabled": true, "runAfterEdit": true },
+      "loopEnforcement": { "enabled": true },
+      "componentReuse": { "enabled": true, "threshold": 80, "blockOnSimilar": false },
+      "sessionContext": { "enabled": true, "loadSuspendedTasks": true },
+      "autoLogging": { "enabled": true }
+    },
+    "claudeCode": {
+      "installPath": ".claude/settings.local.json"
+    }
   }
 }
 ```
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `preCommit` | boolean | `false` | Enable pre-commit hook |
+| `enabled` | boolean | `true` | Enable CLI hooks |
+| `targets` | array | `["claude-code"]` | Target CLIs for hooks |
+| `gracefulDegradation` | boolean | `true` | Continue on hook failure |
+| `timeout` | number | `5000` | Hook timeout in ms |
+| `rules.taskGating.enabled` | boolean | `true` | Enable task gating hook |
+| `rules.taskGating.blockWithoutTask` | boolean | `true` | Block edits without active task |
+| `rules.validation.enabled` | boolean | `true` | Enable validation hook |
+| `rules.validation.runAfterEdit` | boolean | `true` | Run validation after file edits |
+| `rules.loopEnforcement.enabled` | boolean | `true` | Block stop until criteria met |
+| `rules.componentReuse.enabled` | boolean | `true` | Check for similar components |
+| `rules.componentReuse.threshold` | number | `80` | Similarity threshold (0-100) |
+| `rules.sessionContext.enabled` | boolean | `true` | Load context on session start |
+| `rules.autoLogging.enabled` | boolean | `true` | Auto-log session activity |
+
+**Setup/Management:**
+```bash
+./scripts/flow hooks setup    # Install hooks
+./scripts/flow hooks status   # Check hook status
+./scripts/flow hooks remove   # Remove hooks
+./scripts/flow hooks test X   # Test a specific hook
+```
 
 ---
 
