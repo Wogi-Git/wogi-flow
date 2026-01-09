@@ -1,0 +1,294 @@
+#!/usr/bin/env node
+
+/**
+ * Wogi Flow - Session Context (Core Module)
+ *
+ * CLI-agnostic session context gathering.
+ * Gathers context to inject at session start.
+ *
+ * Returns a standardized result that adapters transform for specific CLIs.
+ */
+
+const path = require('path');
+const fs = require('fs');
+
+// Import from parent scripts directory
+const { getConfig, PATHS, getReadyData } = require('../../flow-utils');
+
+/**
+ * Check if session context is enabled
+ * @returns {boolean}
+ */
+function isSessionContextEnabled() {
+  const config = getConfig();
+  return config.hooks?.rules?.sessionContext?.enabled !== false;
+}
+
+/**
+ * Get suspended task info
+ * @returns {Object|null} Suspended task info or null
+ */
+function getSuspendedTask() {
+  try {
+    const suspensionPath = path.join(PATHS.state, 'suspension.json');
+    if (!fs.existsSync(suspensionPath)) {
+      return null;
+    }
+
+    const suspension = JSON.parse(fs.readFileSync(suspensionPath, 'utf-8'));
+    if (!suspension.taskId || suspension.status === 'resumed') {
+      return null;
+    }
+
+    return suspension;
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * Get current task in progress
+ * @returns {Object|null} Current task or null
+ */
+function getCurrentTask() {
+  try {
+    const readyData = getReadyData();
+    if (readyData.inProgress && readyData.inProgress.length > 0) {
+      const task = readyData.inProgress[0];
+      return typeof task === 'string' ? { id: task } : task;
+    }
+    return null;
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * Get key decisions from decisions.md
+ * @param {number} maxEntries - Max number of decisions to return
+ * @returns {Array} Key decisions
+ */
+function getKeyDecisions(maxEntries = 5) {
+  try {
+    if (!fs.existsSync(PATHS.decisions)) {
+      return [];
+    }
+
+    const content = fs.readFileSync(PATHS.decisions, 'utf-8');
+    const decisions = [];
+
+    // Parse markdown sections
+    const sections = content.split(/^##\s+/m).slice(1);
+
+    for (const section of sections.slice(0, maxEntries)) {
+      const lines = section.split('\n');
+      const title = lines[0].trim();
+      const body = lines.slice(1).join('\n').trim();
+
+      if (title && body) {
+        decisions.push({
+          title,
+          summary: body.split('\n')[0].substring(0, 150)
+        });
+      }
+    }
+
+    return decisions;
+  } catch (err) {
+    return [];
+  }
+}
+
+/**
+ * Get recent activity from request log
+ * @param {number} maxEntries - Max entries to return
+ * @returns {Array} Recent activity
+ */
+function getRecentActivity(maxEntries = 3) {
+  try {
+    if (!fs.existsSync(PATHS.requestLog)) {
+      return [];
+    }
+
+    const content = fs.readFileSync(PATHS.requestLog, 'utf-8');
+    const entries = [];
+
+    // Parse request log entries (### R-XXX format)
+    const entryRegex = /^###\s+R-(\d+)\s*\|\s*(\d{4}-\d{2}-\d{2}[^]*?)(?=^###\s+R-|\Z)/gm;
+    let match;
+
+    while ((match = entryRegex.exec(content)) !== null && entries.length < maxEntries) {
+      const id = `R-${match[1]}`;
+      const body = match[2];
+
+      // Extract request line
+      const requestMatch = body.match(/\*\*Request\*\*:\s*"?([^"\n]+)"?/);
+      const request = requestMatch ? requestMatch[1] : 'Unknown';
+
+      entries.push({ id, request });
+    }
+
+    return entries.reverse(); // Most recent first
+  } catch (err) {
+    return [];
+  }
+}
+
+/**
+ * Get session state summary
+ * @returns {Object|null} Session state or null
+ */
+function getSessionState() {
+  try {
+    const sessionPath = path.join(PATHS.state, 'session-state.json');
+    if (!fs.existsSync(sessionPath)) {
+      return null;
+    }
+
+    const state = JSON.parse(fs.readFileSync(sessionPath, 'utf-8'));
+    return {
+      lastActive: state.lastActive,
+      recentFiles: (state.recentFiles || []).slice(0, 5),
+      recentDecisions: (state.recentDecisions || []).slice(0, 3)
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * Gather all session context
+ * @param {Object} options
+ * @param {boolean} options.includeSuspended - Include suspended task info
+ * @param {boolean} options.includeDecisions - Include key decisions
+ * @param {boolean} options.includeActivity - Include recent activity
+ * @returns {Object} Session context
+ */
+function gatherSessionContext(options = {}) {
+  const config = getConfig();
+  const hookConfig = config.hooks?.rules?.sessionContext || {};
+
+  const {
+    includeSuspended = hookConfig.loadSuspendedTasks !== false,
+    includeDecisions = hookConfig.loadDecisions !== false,
+    includeActivity = hookConfig.loadRecentActivity !== false
+  } = options;
+
+  if (!isSessionContextEnabled()) {
+    return {
+      enabled: false,
+      context: null
+    };
+  }
+
+  const context = {
+    timestamp: new Date().toISOString(),
+    projectName: config.projectName || path.basename(PATHS.root)
+  };
+
+  // Suspended task
+  if (includeSuspended) {
+    const suspended = getSuspendedTask();
+    if (suspended) {
+      context.suspendedTask = {
+        taskId: suspended.taskId,
+        reason: suspended.reason,
+        resumeCondition: suspended.resumeCondition,
+        suspendedAt: suspended.suspendedAt
+      };
+    }
+  }
+
+  // Current task
+  const currentTask = getCurrentTask();
+  if (currentTask) {
+    context.currentTask = currentTask;
+  }
+
+  // Key decisions
+  if (includeDecisions) {
+    context.keyDecisions = getKeyDecisions(5);
+  }
+
+  // Recent activity
+  if (includeActivity) {
+    context.recentActivity = getRecentActivity(3);
+  }
+
+  // Session state
+  const sessionState = getSessionState();
+  if (sessionState) {
+    context.sessionState = sessionState;
+  }
+
+  return {
+    enabled: true,
+    context
+  };
+}
+
+/**
+ * Format context for injection into a session
+ * @param {Object} context - Context from gatherSessionContext
+ * @returns {string} Formatted context string
+ */
+function formatContextForInjection(context) {
+  if (!context || !context.context) {
+    return '';
+  }
+
+  const ctx = context.context;
+  let output = '## Wogi Flow Session Context\n\n';
+
+  // Suspended task alert
+  if (ctx.suspendedTask) {
+    output += `### Suspended Task\n`;
+    output += `Task **${ctx.suspendedTask.taskId}** is suspended.\n`;
+    output += `- Reason: ${ctx.suspendedTask.reason || 'Not specified'}\n`;
+    if (ctx.suspendedTask.resumeCondition) {
+      output += `- Resume condition: ${ctx.suspendedTask.resumeCondition}\n`;
+    }
+    output += `\nRun \`/wogi-resume\` to continue.\n\n`;
+  }
+
+  // Current task
+  if (ctx.currentTask) {
+    output += `### Current Task\n`;
+    output += `Working on: **${ctx.currentTask.id}**\n`;
+    if (ctx.currentTask.title) {
+      output += `Title: ${ctx.currentTask.title}\n`;
+    }
+    output += '\n';
+  }
+
+  // Key decisions
+  if (ctx.keyDecisions && ctx.keyDecisions.length > 0) {
+    output += `### Key Decisions\n`;
+    for (const decision of ctx.keyDecisions) {
+      output += `- **${decision.title}**: ${decision.summary}\n`;
+    }
+    output += '\n';
+  }
+
+  // Recent activity
+  if (ctx.recentActivity && ctx.recentActivity.length > 0) {
+    output += `### Recent Activity\n`;
+    for (const activity of ctx.recentActivity) {
+      output += `- ${activity.id}: ${activity.request}\n`;
+    }
+    output += '\n';
+  }
+
+  return output;
+}
+
+module.exports = {
+  isSessionContextEnabled,
+  getSuspendedTask,
+  getCurrentTask,
+  getKeyDecisions,
+  getRecentActivity,
+  getSessionState,
+  gatherSessionContext,
+  formatContextForInjection
+};

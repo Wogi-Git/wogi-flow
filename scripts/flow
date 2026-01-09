@@ -67,6 +67,9 @@ show_help() {
     echo "  session-end          End session properly"
     echo "  init                 Initialize workflow (legacy)"
     echo "  setup-hooks          Install/manage git hooks"
+    echo "  hooks setup          Install CLI hooks (Claude Code, etc.)"
+    echo "  hooks remove         Remove CLI hooks"
+    echo "  hooks status         Show CLI hooks status"
     echo "  archive              Archive old request-log entries"
     echo "  watch                Run file watcher for auto-validation"
     echo ""
@@ -315,6 +318,9 @@ case "${1:-}" in
         ;;
     setup-hooks)
         "$SCRIPT_DIR/flow-setup-hooks" "${@:2}"
+        ;;
+    hooks)
+        node "$SCRIPT_DIR/flow-hooks.js" "${@:2}"
         ;;
     update-map)
         "$SCRIPT_DIR/flow-update-map" "${@:2}"

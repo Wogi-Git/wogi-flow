@@ -587,5 +587,43 @@
     "generatePrompt": true,
     "showBlockers": true,
     "showKeyContext": true
+  },
+  "hooks": {
+    "enabled": true,
+    "targets": ["claude-code"],
+    "gracefulDegradation": true,
+    "timeout": 5000,
+    "rules": {
+      "taskGating": {
+        "enabled": true,
+        "blockWithoutTask": true
+      },
+      "validation": {
+        "enabled": true,
+        "runAfterEdit": true
+      },
+      "loopEnforcement": {
+        "enabled": true
+      },
+      "componentReuse": {
+        "enabled": true,
+        "threshold": 80,
+        "blockOnSimilar": false
+      },
+      "sessionContext": {
+        "enabled": true,
+        "loadSuspendedTasks": true,
+        "loadDecisions": true,
+        "loadRecentActivity": true
+      },
+      "autoLogging": {
+        "enabled": true
+      }
+    },
+    "claudeCode": {
+      "installPath": ".claude/settings.local.json"
+    },
+    "gemini": {},
+    "codex": {}
   }
 }
