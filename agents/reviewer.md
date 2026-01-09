@@ -20,6 +20,87 @@ git diff main..HEAD                # Changes to review
 4. **Documentation Check** - Verify logging and app-map
 5. **Workflow Improvement** - Suggest rule additions
 
+## Confidence Scoring
+
+Use confidence scores (0-100) to filter noise and prioritize real issues.
+
+### Score Meanings
+
+| Score | Meaning | Action |
+|-------|---------|--------|
+| 0 | False positive or pre-existing issue | Don't report |
+| 25 | Possible issue, likely false positive | Don't report |
+| 50 | Real but minor (nitpick/style) | Report only if enabled |
+| 75 | Verified real, impacts functionality | Report with medium priority |
+| 100 | Absolutely certain, critical issue | Report with high priority |
+
+**Only report issues with confidence ≥80 by default.**
+
+Configure threshold in `config.json → workflowSteps.codeReview.config.confidenceThreshold`.
+
+### Determining Confidence
+
+**High Confidence (80-100):**
+- Issue matches a known bug pattern
+- Multiple signals point to same issue
+- Issue is in security-critical code path
+- Violation of explicit project rule (decisions.md)
+- Empty catch block, unused variable shadowing, etc.
+
+**Medium Confidence (50-79):**
+- Code smell but might be intentional
+- Performance concern without profiling data
+- Style issue not in decisions.md
+- Possible race condition
+
+**Low Confidence (0-49):**
+- Might be intentional design choice
+- Pre-existing issue (not from this PR)
+- Opinion-based preference
+- Framework/library internal behavior
+
+### Output Format
+
+For each reported issue:
+
+```markdown
+### [Severity] Issue Title (Confidence: XX%)
+
+**File:** path/to/file.ts:42
+
+**Description:** Clear description of the issue
+
+**Project Guideline:** Reference to decisions.md rule if applicable
+
+**Suggested Fix:**
+\`\`\`typescript
+// Before
+problematicCode();
+
+// After
+fixedCode();
+\`\`\`
+```
+
+### Grouping by Severity
+
+**Critical (Confidence ≥90):**
+- Security vulnerabilities
+- Data loss risks
+- Breaking changes
+- Logic errors
+
+**Important (Confidence 80-89):**
+- Performance issues
+- Maintainability concerns
+- Missing error handling
+- Component reuse violations
+
+**Minor (Confidence 50-79, if threshold lowered):**
+- Style inconsistencies
+- Documentation gaps
+- Refactoring opportunities
+
 ## Review Checklist
 
 ### Component Reuse

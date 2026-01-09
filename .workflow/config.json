@@ -1,6 +1,6 @@
 {
   "$schema": "./config.schema.json",
-  "version": "1.9.0",
+  "version": "2.0.0",
   "projectName": "wogi-flow",
   "autoLog": true,
   "autoUpdateAppMap": true,
@@ -42,7 +42,14 @@
     "pauseBetweenScenarios": false,
     "autoInferVerification": true,
     "fallbackToManual": true,
-    "suggestBrowserTests": true
+    "suggestBrowserTests": true,
+    "simpleMode": {
+      "enabled": true,
+      "completionPromise": "TASK_COMPLETE",
+      "maxIterations": 10
+    },
+    "recheckAllAfterFix": true,
+    "regressionOnRecheck": "warn"
   },
   "durableSteps": {
     "enabled": true,
@@ -601,6 +608,12 @@
   "damageControl": {
     "enabled": false,
     "patternsFile": ".workflow/damage-control.yaml",
+    "events": {
+      "bash": true,
+      "file": true,
+      "stop": true,
+      "prompt": false
+    },
     "promptHook": {
       "enabled": false,
       "model": "haiku",
@@ -764,6 +777,59 @@
       "when": "beforeCommit",
       "config": {
         "minCoverage": 80
+      }
+    },
+    "codeSimplifier": {
+      "enabled": false,
+      "mode": "prompt",
+      "when": "afterTask",
+      "config": {
+        "maxFunctionLines": 50,
+        "maxNestingDepth": 3,
+        "suggestExtraction": true
+      }
+    },
+    "codeReview": {
+      "enabled": false,
+      "mode": "warn",
+      "when": "afterTask",
+      "config": {
+        "multiAgentThreshold": 5,
+        "highRiskPatterns": ["auth", "payment", "security", "crypto"],
+        "confidenceThreshold": 80
+      }
+    },
+    "prTestAnalyzer": {
+      "enabled": true,
+      "mode": "warn",
+      "when": "beforeCommit",
+      "config": {
+        "checkCoverage": true,
+        "checkQuality": true,
+        "minCoverageForModified": 70
+      }
+    },
+    "silentFailureHunter": {
+      "enabled": false,
+      "mode": "warn",
+      "when": "afterTask",
+      "config": {
+        "checkEmptyCatch": true,
+        "checkLogOnlyCatch": true,
+        "checkUnhandledAsync": true,
+        "checkPromiseChains": true
+      }
+    },
+    "commentAnalyzer": {
+      "enabled": false,
+      "mode": "warn",
+      "when": "afterTask",
+      "config": {
+        "flagTodo": true,
+        "flagFixme": true,
+        "checkJsdoc": true,
+        "flagCommentedCode": true,
+        "flagStale": true
       }
     }
   }

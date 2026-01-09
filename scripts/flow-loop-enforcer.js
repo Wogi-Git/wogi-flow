@@ -50,6 +50,22 @@ function isSkipBlocked() {
 }
 
 /**
+ * Check if Simple Mode is enabled
+ */
+function isSimpleModeEnabled() {
+  const config = getConfig();
+  return config.loops?.simpleMode?.enabled === true;
+}
+
+/**
+ * Check if regression re-check is enabled
+ */
+function isRecheckEnabled() {
+  const config = getConfig();
+  return config.loops?.recheckAllAfterFix !== false; // Default true
+}
+
+/**
  * Attempt to skip a criterion (requires approval if blockOnSkip is true)
  * Returns { allowed: boolean, message: string }
  */
@@ -156,11 +172,184 @@ function startLoop(taskId, acceptanceCriteria) {
   return session;
 }
 
+// ============================================================
+// Simple Mode - Lightweight loop without formal criteria
+// ============================================================
+
+/**
+ * Start a Simple Mode loop
+ * Uses completion promise detection instead of formal acceptance criteria
+ *
+ * @param {string} taskId - Task identifier
+ * @param {string} completionPromise - String to detect in output for completion
+ */
+function startSimpleLoop(taskId, completionPromise = null) {
+  const config = getConfig();
+  const projectRoot = getProjectRoot();
+  const sessionPath = path.join(projectRoot, '.workflow', 'state', 'simple-loop-session.json');
+
+  // Use configured completion promise or default
+  const promise = completionPromise || config.loops?.simpleMode?.completionPromise || 'TASK_COMPLETE';
+  const maxIterations = config.loops?.simpleMode?.maxIterations || 10;
+
+  const session = {
+    taskId,
+    mode: 'simple',
+    startedAt: new Date().toISOString(),
+    completionPromise: promise,
+    maxIterations,
+    iteration: 0,
+    status: 'in_progress',
+    outputs: [] // Store recent outputs to check for completion
+  };
+
+  fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2));
+  return session;
+}
+
+/**
+ * Get active Simple Mode loop
+ */
+function getSimpleLoop() {
+  const projectRoot = getProjectRoot();
+  const sessionPath = path.join(projectRoot, '.workflow', 'state', 'simple-loop-session.json');
+
+  if (!fs.existsSync(sessionPath)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(fs.readFileSync(sessionPath, 'utf-8'));
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Record output in Simple Mode loop and check for completion
+ *
+ * @param {string} output - Output to check for completion promise
+ * @returns {object} - { completed: boolean, message: string }
+ */
+function recordSimpleOutput(output) {
+  const session = getSimpleLoop();
+  if (!session) {
+    return { completed: false, message: 'No active simple loop' };
+  }
+
+  const projectRoot = getProjectRoot();
+  const sessionPath = path.join(projectRoot, '.workflow', 'state', 'simple-loop-session.json');
+
+  // Store output (keep last 5)
+  session.outputs = session.outputs || [];
+  session.outputs.push({
+    timestamp: new Date().toISOString(),
+    content: output.substring(0, 500) // Truncate long outputs
+  });
+  if (session.outputs.length > 5) {
+    session.outputs = session.outputs.slice(-5);
+  }
+
+  // Check for completion promise
+  const completed = output.includes(session.completionPromise);
+
+  if (completed) {
+    session.status = 'completed';
+    session.completedAt = new Date().toISOString();
+    fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2));
+    return {
+      completed: true,
+      message: `Completion promise detected: "${session.completionPromise}"`
+    };
+  }
+
+  // Check max iterations
+  session.iteration++;
+  if (session.iteration >= session.maxIterations) {
+    session.status = 'max_iterations';
+    session.completedAt = new Date().toISOString();
+    fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2));
+    return {
+      completed: true,
+      message: `Max iterations (${session.maxIterations}) reached`,
+      reason: 'max_iterations'
+    };
+  }
+
+  fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2));
+  return {
+    completed: false,
+    message: `Iteration ${session.iteration}/${session.maxIterations}`,
+    iteration: session.iteration
+  };
+}
+
+/**
+ * End Simple Mode loop
+ */
+function endSimpleLoop(status = 'completed') {
+  const session = getSimpleLoop();
+  if (!session) return null;
+
+  const projectRoot = getProjectRoot();
+  const sessionPath = path.join(projectRoot, '.workflow', 'state', 'simple-loop-session.json');
+
+  session.status = status;
+  session.endedAt = new Date().toISOString();
+
+  // Archive to history
+  const historyPath = path.join(projectRoot, '.workflow', 'state', 'simple-loop-history.json');
+  let history = [];
+  if (fs.existsSync(historyPath)) {
+    try {
+      history = JSON.parse(fs.readFileSync(historyPath, 'utf-8'));
+    } catch { history = []; }
+  }
+  history.push(session);
+  if (history.length > 50) {
+    history = history.slice(-50);
+  }
+  fs.writeFileSync(historyPath, JSON.stringify(history, null, 2));
+
+  // Remove active session
+  fs.unlinkSync(sessionPath);
+  return session;
+}
+
+/**
+ * Check if Simple Mode loop can exit
+ */
+function canExitSimpleLoop() {
+  const session = getSimpleLoop();
+  if (!session) {
+    return { canExit: true, reason: 'no-active-simple-loop' };
+  }
+
+  if (session.status === 'completed' || session.status === 'max_iterations') {
+    return {
+      canExit: true,
+      reason: session.status,
+      message: `Simple loop ${session.status}`
+    };
+  }
+
+  return {
+    canExit: false,
+    reason: 'in_progress',
+    message: `Simple loop iteration ${session.iteration}/${session.maxIterations}. Output "${session.completionPromise}" to complete.`
+  };
+}
+
+// ============================================================
+// Criterion Updates with Regression Re-check
+// ============================================================
+
 /**
  * Update criterion status in loop session
  * v2.0: Delegates to durable session
+ * v2.2: Adds regression re-check after fixing any criterion
  */
-function updateCriterion(criterionId, status, verificationResult = null) {
+function updateCriterion(criterionId, status, verificationResult = null, context = {}) {
   const config = getConfig();
 
   // v2.0: Use durable session if enabled
@@ -171,6 +360,12 @@ function updateCriterion(criterionId, status, verificationResult = null) {
       : criterionId;
 
     durableSession.updateCriterion(stepId, status, verificationResult);
+
+    // v2.2: Regression re-check after completion
+    if (status === 'completed' && isRecheckEnabled()) {
+      performRegressionRecheck(criterionId, context);
+    }
+
     return durableSession.getActiveLoop();
   }
 
@@ -189,8 +384,84 @@ function updateCriterion(criterionId, status, verificationResult = null) {
     criterion.verificationResult = verificationResult;
   }
 
+  // v2.2: Regression re-check after completing a criterion
+  if (status === 'completed' && isRecheckEnabled()) {
+    const regressions = performRegressionRecheck(criterionId, context);
+    if (regressions.length > 0) {
+      session.lastRegressionCheck = {
+        timestamp: new Date().toISOString(),
+        triggeredBy: criterionId,
+        regressions: regressions
+      };
+    }
+  }
+
   fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2));
   return session;
+}
+
+/**
+ * Perform regression re-check on all previously completed criteria
+ * CRITICAL: After fixing ANY criterion, re-verify ALL criteria
+ *
+ * @param {string} excludeCriterionId - Criterion that was just completed (exclude from recheck)
+ * @param {object} context - Verification context (changedFiles, testResults, etc.)
+ * @returns {array} - Array of regressions found
+ */
+function performRegressionRecheck(excludeCriterionId, context = {}) {
+  const config = getConfig();
+  const session = getActiveLoop();
+
+  if (!session) return [];
+
+  const regressions = [];
+  const completedCriteria = session.acceptanceCriteria
+    .filter(c => c.status === 'completed' && c.id !== excludeCriterionId);
+
+  if (completedCriteria.length === 0) return [];
+
+  console.log('\n\u{1F504} Re-verifying all completed criteria for regression...');
+
+  for (const criterion of completedCriteria) {
+    const result = verifyCriterion(criterion, context);
+
+    // If verification returned passed: false, we have a regression
+    if (result.passed === false) {
+      regressions.push({
+        criterionId: criterion.id,
+        description: criterion.description,
+        message: result.message,
+        verification: result.verification
+      });
+
+      // Handle based on config
+      const onRegression = config.loops?.regressionOnRecheck || 'warn';
+
+      if (onRegression === 'block') {
+        // Mark criterion as failed - must be fixed
+        criterion.status = 'failed';
+        criterion.verificationResult = `REGRESSION: ${result.message}`;
+        console.log(`\u{26A0}\u{FE0F} REGRESSION DETECTED in ${criterion.id}: ${criterion.description}`);
+        console.log(`   ${result.message}`);
+      } else if (onRegression === 'warn') {
+        // Warn but don't change status
+        console.log(`\u{26A0}\u{FE0F} Warning: Possible regression in ${criterion.id}: ${criterion.description}`);
+        console.log(`   ${result.message}`);
+      }
+      // 'auto-fix' mode would attempt to fix, but that's handled at a higher level
+    } else if (result.passed === true) {
+      console.log(`\u{2714}\u{FE0F} ${criterion.id} still passes`);
+    }
+    // null = couldn't verify, skip
+  }
+
+  if (regressions.length > 0) {
+    console.log(`\n\u{1F6A8} ${regressions.length} regression(s) detected!`);
+  } else if (completedCriteria.length > 0) {
+    console.log('\u{2705} All previously completed criteria still pass\n');
+  }
+
+  return regressions;
 }
 
 /**
@@ -777,6 +1048,7 @@ function inferBrowserTestFlow(description) {
 // ============================================================
 
 module.exports = {
+  // Standard loop functions
   isEnforcementEnabled,
   isExitBlocked,
   isVerificationRequired,
@@ -792,7 +1064,17 @@ module.exports = {
   getLoopStats,
   verifyCriterion,
   inferBrowserTestFlow,
-  generateEnforcementMessage
+  generateEnforcementMessage,
+  // Simple Mode functions (v2.2)
+  isSimpleModeEnabled,
+  startSimpleLoop,
+  getSimpleLoop,
+  recordSimpleOutput,
+  endSimpleLoop,
+  canExitSimpleLoop,
+  // Regression re-check (v2.2)
+  isRecheckEnabled,
+  performRegressionRecheck
 };
 
 // ============================================================
@@ -847,6 +1129,60 @@ if (require.main === module) {
       break;
     }
 
+    case 'simple-status': {
+      const session = getSimpleLoop();
+      if (!session) {
+        console.log('No active simple loop session');
+        break;
+      }
+
+      console.log('\n\u{1F504} Simple Mode Loop Session\n');
+      console.log(`Task: ${session.taskId}`);
+      console.log(`Started: ${session.startedAt}`);
+      console.log(`Iteration: ${session.iteration}/${session.maxIterations}`);
+      console.log(`Completion Promise: "${session.completionPromise}"`);
+      console.log(`Status: ${session.status}`);
+
+      const exit = canExitSimpleLoop();
+      console.log(`\nCan exit: ${exit.canExit ? 'Yes' : 'No'} (${exit.reason})`);
+      break;
+    }
+
+    case 'simple-start': {
+      const taskId = args[1] || `SIMPLE-${Date.now()}`;
+      const promise = args[2];
+      const session = startSimpleLoop(taskId, promise);
+      console.log(`\u{2714}\u{FE0F} Simple Mode loop started`);
+      console.log(`   Task: ${session.taskId}`);
+      console.log(`   Completion Promise: "${session.completionPromise}"`);
+      console.log(`   Max Iterations: ${session.maxIterations}`);
+      break;
+    }
+
+    case 'simple-record': {
+      const output = args.slice(1).join(' ');
+      if (!output) {
+        console.log('Error: Output text required');
+        console.log('Usage: node flow-loop-enforcer.js simple-record "output text"');
+        process.exit(1);
+      }
+      const result = recordSimpleOutput(output);
+      console.log(JSON.stringify(result, null, 2));
+      process.exit(result.completed ? 0 : 1);
+      break;
+    }
+
+    case 'simple-end': {
+      const status = args[1] || 'completed';
+      const session = endSimpleLoop(status);
+      if (session) {
+        console.log(`\u{2714}\u{FE0F} Simple loop ended: ${status}`);
+      } else {
+        console.log('No active simple loop to end');
+      }
+      break;
+    }
+
     default:
       console.log(`
 Wogi Flow - Loop Enforcer
@@ -854,16 +1190,27 @@ Wogi Flow - Loop Enforcer
 Usage:
   node flow-loop-enforcer.js <command>
 
-Commands:
+Standard Loop Commands:
   status      Show active loop session
   stats       Show loop statistics
   can-exit    Check if loop can be exited (exit code 0=yes, 1=no)
+
+Simple Mode Commands:
+  simple-start [taskId] [promise]  Start simple loop with optional completion promise
+  simple-status                    Show simple loop status
+  simple-record "output"           Record output and check for completion
+  simple-end [status]              End simple loop
 
 Configuration (config.json):
   loops.enforced: true              Enable loop enforcement
   loops.blockExitUntilComplete: true  Block session end until complete
   loops.maxRetries: 5               Max retries before forced exit
   loops.maxIterations: 20           Max iterations before forced exit
+  loops.recheckAllAfterFix: true    Re-verify all criteria after fixing one
+  loops.regressionOnRecheck: "warn" How to handle regressions (warn|block)
+  loops.simpleMode.enabled: true    Enable Simple Mode
+  loops.simpleMode.completionPromise: "TASK_COMPLETE"
+  loops.simpleMode.maxIterations: 10
 `);
   }
 }

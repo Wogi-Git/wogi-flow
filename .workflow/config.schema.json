@@ -12,8 +12,8 @@
 
     "version": {
       "type": "string",
-      "description": "Config schema version (e.g., '1.9.0')",
-      "default": "1.9.0"
+      "description": "Config schema version (e.g., '2.0.0')",
+      "default": "2.0.0"
     },
 
     "projectName": {
@@ -181,6 +181,38 @@
           "type": "boolean",
           "description": "Suggest browser tests for UI-related tasks",
           "default": true
+        },
+        "simpleMode": {
+          "type": "object",
+          "description": "Simple Mode - lightweight loop without formal acceptance criteria",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable Simple Mode for quick tasks",
+              "default": true
+            },
+            "completionPromise": {
+              "type": "string",
+              "description": "String pattern that signals loop completion",
+              "default": "TASK_COMPLETE"
+            },
+            "maxIterations": {
+              "type": "number",
+              "description": "Max iterations in Simple Mode",
+              "default": 10
+            }
+          }
+        },
+        "recheckAllAfterFix": {
+          "type": "boolean",
+          "description": "Re-verify ALL acceptance criteria after fixing ANY criterion (regression protection)",
+          "default": true
+        },
+        "regressionOnRecheck": {
+          "type": "string",
+          "description": "Action when regression is detected during re-check",
+          "enum": ["warn", "block", "auto-fix"],
+          "default": "warn"
         }
       }
     },
@@ -1523,6 +1555,32 @@
           "description": "Path to patterns file",
           "default": ".workflow/damage-control.yaml"
         },
+        "events": {
+          "type": "object",
+          "description": "Which event types to check for damage control rules",
+          "properties": {
+            "bash": {
+              "type": "boolean",
+              "description": "Check bash/shell commands",
+              "default": true
+            },
+            "file": {
+              "type": "boolean",
+              "description": "Check file read/write/delete operations",
+              "default": true
+            },
+            "stop": {
+              "type": "boolean",
+              "description": "Check session stop events",
+              "default": true
+            },
+            "prompt": {
+              "type": "boolean",
+              "description": "Check user prompts for destructive patterns",
+              "default": false
+            }
+          }
+        },
         "promptHook": {
           "type": "object",
           "description": "AI review for dangerous commands",
@@ -1933,6 +1991,94 @@
                 "minCoverage": { "type": "number", "description": "Minimum coverage percentage required", "default": 80 },
                 "checkModifiedOnly": { "type": "boolean", "description": "Only check coverage for modified files", "default": true },
                 "runTests": { "type": "boolean", "description": "Run tests if no coverage data exists", "default": true }
+              }
+            }
+          }
+        },
+        "codeSimplifier": {
+          "type": "object",
+          "description": "AI-powered qualitative code simplification suggestions. Analyzes nesting, function length, complexity patterns.",
+          "properties": {
+            "enabled": { "type": "boolean", "description": "Enable code simplifier", "default": false },
+            "mode": { "type": "string", "description": "Behavior mode", "enum": ["block", "warn", "prompt", "auto"], "default": "prompt" },
+            "when": { "type": "string", "description": "Execution point", "default": "afterTask" },
+            "config": {
+              "type": "object",
+              "properties": {
+                "maxFunctionLines": { "type": "number", "description": "Max lines per function before flagging", "default": 50 },
+                "maxNestingDepth": { "type": "number", "description": "Max nesting levels before flagging", "default": 3 },
+                "suggestExtraction": { "type": "boolean", "description": "Suggest extracting code to functions", "default": true }
+              }
+            }
+          }
+        },
+        "codeReview": {
+          "type": "object",
+          "description": "Hybrid code review: multi-agent for large/high-risk files, simple for small changes.",
+          "properties": {
+            "enabled": { "type": "boolean", "description": "Enable code review", "default": false },
+            "mode": { "type": "string", "description": "Behavior mode", "enum": ["block", "warn", "prompt", "auto"], "default": "warn" },
+            "when": { "type": "string", "description": "Execution point", "default": "afterTask" },
+            "config": {
+              "type": "object",
+              "properties": {
+                "multiAgentThreshold": { "type": "number", "description": "File count threshold for multi-agent review", "default": 5 },
+                "highRiskPatterns": { "type": "array", "description": "Patterns that trigger multi-agent review", "items": { "type": "string" }, "default": ["auth", "payment", "security", "crypto"] },
+                "confidenceThreshold": { "type": "number", "description": "Min confidence (0-100) to report issues", "default": 80 }
+              }
+            }
+          }
+        },
+        "prTestAnalyzer": {
+          "type": "object",
+          "description": "Analyze test coverage and quality for modified files.",
+          "properties": {
+            "enabled": { "type": "boolean", "description": "Enable PR test analysis", "default": true },
+            "mode": { "type": "string", "description": "Behavior mode", "enum": ["block", "warn", "prompt", "auto"], "default": "warn" },
+            "when": { "type": "string", "description": "Execution point", "default": "beforeCommit" },
+            "config": {
+              "type": "object",
+              "properties": {
+                "checkCoverage": { "type": "boolean", "description": "Check coverage for modified files", "default": true },
+                "checkQuality": { "type": "boolean", "description": "Check test quality (mocks, assertions)", "default": true },
+                "minCoverageForModified": { "type": "number", "description": "Min coverage % for modified files", "default": 70 }
+              }
+            }
+          }
+        },
+        "silentFailureHunter": {
+          "type": "object",
+          "description": "Detect empty catch blocks, swallowed errors, and unhandled async.",
+          "properties": {
+            "enabled": { "type": "boolean", "description": "Enable silent failure detection", "default": false },
+            "mode": { "type": "string", "description": "Behavior mode", "enum": ["block", "warn", "prompt", "auto"], "default": "warn" },
+            "when": { "type": "string", "description": "Execution point", "default": "afterTask" },
+            "config": {
+              "type": "object",
+              "properties": {
+                "checkEmptyCatch": { "type": "boolean", "description": "Check for empty catch blocks", "default": true },
+                "checkLogOnlyCatch": { "type": "boolean", "description": "Check for catch blocks that only log", "default": true },
+                "checkUnhandledAsync": { "type": "boolean", "description": "Check for async without try-catch", "default": true },
+                "checkPromiseChains": { "type": "boolean", "description": "Check for .then() without .catch()", "default": true }
+              }
+            }
+          }
+        },
+        "commentAnalyzer": {
+          "type": "object",
+          "description": "Analyze comment quality: TODOs, stale comments, JSDoc accuracy.",
+          "properties": {
+            "enabled": { "type": "boolean", "description": "Enable comment analysis", "default": false },
+            "mode": { "type": "string", "description": "Behavior mode", "enum": ["block", "warn", "prompt", "auto"], "default": "warn" },
+            "when": { "type": "string", "description": "Execution point", "default": "afterTask" },
+            "config": {
+              "type": "object",
+              "properties": {
+                "flagTodo": { "type": "boolean", "description": "Flag TODO comments", "default": true },
+                "flagFixme": { "type": "boolean", "description": "Flag FIXME/XXX/HACK comments", "default": true },
+                "checkJsdoc": { "type": "boolean", "description": "Check JSDoc accuracy vs code", "default": true },
+                "flagCommentedCode": { "type": "boolean", "description": "Flag commented-out code", "default": true },
+                "flagStale": { "type": "boolean", "description": "Flag potentially stale comments", "default": true }
               }
             }
           }

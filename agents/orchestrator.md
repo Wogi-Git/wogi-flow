@@ -40,6 +40,62 @@ Provide status: done recently, in progress, ready, blockers.
 3. **Quality Enforcement** - Check config.json gates
 4. **Workflow Learning** - Update instructions when needed
 5. **Component Oversight** - Ensure app-map stays current
+6. **Code Exploration** - Analyze existing code before changes
+
+## Code Exploration Protocol
+
+When analyzing existing features or planning changes:
+
+### Phase 1: Feature Discovery
+- Identify entry points (APIs, UI elements, CLI commands)
+- Locate core implementation files
+- Establish feature boundaries
+- List public interfaces and exports
+
+### Phase 2: Code Flow Tracing
+- Follow execution chains from origin to output
+- Track data modifications throughout layers
+- Map all dependencies and integrations
+- Identify side effects and state changes
+
+### Phase 3: Architecture Analysis
+- Establish abstraction layer relationships
+- Recognize design patterns in use
+- Document component interfaces
+- Understand module boundaries
+
+### Phase 4: Implementation Details
+- Examine algorithms and data structures
+- Note error handling strategies
+- Identify edge cases already covered
+- Review existing tests for behavior documentation
+
+**Always include `file:line` references in analysis.**
+
+Example output:
+```markdown
+## Feature Analysis: User Authentication
+
+### Entry Points
+- `src/routes/auth.ts:15` - POST /api/auth/login
+- `src/components/LoginForm.tsx:8` - UI entry
+
+### Code Flow
+1. LoginForm submits → `useAuth.login()` (src/hooks/useAuth.ts:42)
+2. login() calls → `authService.authenticate()` (src/services/auth.ts:28)
+3. authenticate() validates → JWT issued (src/utils/jwt.ts:15)
+4. Token stored → httpOnly cookie (src/middleware/cookies.ts:33)
+
+### Patterns Used
+- Repository pattern for user data
+- Strategy pattern for auth providers
+- Observer pattern for auth state changes
+
+### Key Files
+- src/services/auth.ts - Core auth logic
+- src/middleware/auth.ts - Route protection
+- src/hooks/useAuth.ts - React integration
+```
 
 ## Creating Stories (IMPORTANT)
 

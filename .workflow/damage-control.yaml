@@ -4,6 +4,70 @@
 # Note: Normal git operations (commit, push) are handled by
 # the existing commits.requireApproval config. Only truly
 # dangerous operations are listed here.
+#
+# Supports event types: bash, file, stop, prompt
+# Event-based rules are checked first, then legacy patterns
+
+# ============================================================
+# EVENT-BASED RULES (new format)
+# ============================================================
+rules:
+  # Bash events - dangerous commands
+  - name: no-force-push-main
+    event: bash
+    action: block
+    conditions:
+      - field: command
+        pattern: "git push.*--force.*(main|master)"
+    message: "Force push to main/master is blocked"
+
+  - name: no-recursive-root-delete
+    event: bash
+    action: block
+    conditions:
+      - field: command
+        pattern: "rm -rf /"
+    message: "Recursive deletion of root is blocked"
+
+  # File events - protect sensitive files
+  - name: protect-env-files
+    event: file
+    action: block
+    conditions:
+      - field: file_path
+        pattern: "\\.env(\\.local|\\.production)?$"
+    message: "Cannot modify .env files directly - use environment variables"
+
+  - name: warn-config-changes
+    event: file
+    action: ask
+    conditions:
+      - field: file_path
+        pattern: "\\.workflow/config\\.json$"
+    message: "Modifying workflow config - are you sure?"
+
+  - name: protect-credentials
+    event: file
+    action: block
+    conditions:
+      - field: file_path
+        pattern: "credentials\\.json$|\\.aws/|secrets/"
+    message: "Cannot access credential files"
+
+  # Stop events - session end warnings
+  - name: confirm-session-end
+    event: stop
+    action: warn
+    message: "Session ending - ensure all work is committed and request-log is updated"
+
+  # Prompt events (opt-in, disabled by default in config)
+  - name: detect-destructive-intent
+    event: prompt
+    action: warn
+    conditions:
+      - field: user_prompt
+        pattern: "delete all|remove everything|drop database|wipe|destroy"
+    message: "Detected potentially destructive request - please confirm intent"
 
 # ============================================================
 # BLOCKED - Always prevent these commands (catastrophic)

@@ -560,30 +560,49 @@ class EnhancedStackWizard {
 
     // Define available workflow steps with descriptions
     const workflowSteps = [
-      { key: '1', name: 'regressionTest', label: 'Regression Test', desc: 'Test random completed tasks', default: true, mode: 'warn', when: 'afterTask' },
-      { key: '2', name: 'browserTest', label: 'Browser Test', desc: 'Suggest browser tests for UI changes', default: true, mode: 'prompt', when: 'afterTask' },
-      { key: '3', name: 'securityScan', label: 'Security Scan', desc: 'npm audit + secrets check', default: true, mode: 'block', when: 'beforeCommit' },
-      { key: '4', name: 'updateKnowledgeBase', label: 'Update Knowledge Base', desc: 'Document learnings after tasks', default: false, mode: 'prompt', when: 'afterTask' },
-      { key: '5', name: 'updateChangelog', label: 'Update Changelog', desc: 'Add CHANGELOG.md entries', default: false, mode: 'prompt', when: 'beforeCommit' },
-      { key: '6', name: 'codeComplexityCheck', label: 'Code Complexity Check', desc: 'Flag complex functions', default: false, mode: 'warn', when: 'afterTask' },
-      { key: '7', name: 'coverageCheck', label: 'Coverage Check', desc: 'Verify test coverage', default: false, mode: 'warn', when: 'beforeCommit' },
+      // Testing
+      { key: '1', name: 'regressionTest', label: 'Regression Test', desc: 'Test random completed tasks', default: true, mode: 'warn', when: 'afterTask', category: 'testing' },
+      { key: '2', name: 'browserTest', label: 'Browser Test', desc: 'Suggest browser tests for UI changes', default: true, mode: 'prompt', when: 'afterTask', category: 'testing' },
+      { key: '3', name: 'prTestAnalyzer', label: 'PR Test Analyzer', desc: 'Check coverage + quality for modified files', default: true, mode: 'warn', when: 'beforeCommit', category: 'testing' },
+
+      // Quality
+      { key: '4', name: 'securityScan', label: 'Security Scan', desc: 'npm audit + secrets check', default: true, mode: 'block', when: 'beforeCommit', category: 'quality' },
+      { key: '5', name: 'codeComplexityCheck', label: 'Code Complexity', desc: 'Quantitative complexity analysis', default: false, mode: 'warn', when: 'afterTask', category: 'quality' },
+      { key: '6', name: 'codeSimplifier', label: 'Code Simplifier', desc: 'AI qualitative suggestions (nesting, long functions)', default: false, mode: 'prompt', when: 'afterTask', category: 'quality' },
+      { key: '7', name: 'codeReview', label: 'Code Review', desc: 'Hybrid multi-agent review for large/high-risk', default: false, mode: 'warn', when: 'afterTask', category: 'quality' },
+      { key: '8', name: 'silentFailureHunter', label: 'Silent Failure Hunter', desc: 'Detect empty catch, swallowed errors', default: false, mode: 'warn', when: 'afterTask', category: 'quality' },
+      { key: '9', name: 'commentAnalyzer', label: 'Comment Analyzer', desc: 'Flag TODOs, stale comments, JSDoc accuracy', default: false, mode: 'warn', when: 'afterTask', category: 'quality' },
+      { key: 'a', name: 'coverageCheck', label: 'Coverage Check', desc: 'Verify test coverage meets threshold', default: false, mode: 'warn', when: 'beforeCommit', category: 'quality' },
+
+      // Documentation
+      { key: 'b', name: 'updateKnowledgeBase', label: 'Update Knowledge Base', desc: 'Document learnings after tasks', default: false, mode: 'prompt', when: 'afterTask', category: 'docs' },
+      { key: 'c', name: 'updateChangelog', label: 'Update Changelog', desc: 'Add CHANGELOG.md entries', default: false, mode: 'prompt', when: 'beforeCommit', category: 'docs' },
     ];
 
     console.log('Available steps:\n');
 
     // Group by category
-    const afterTask = workflowSteps.filter(s => s.when === 'afterTask');
-    const beforeCommit = workflowSteps.filter(s => s.when === 'beforeCommit');
+    const testing = workflowSteps.filter(s => s.category === 'testing');
+    const quality = workflowSteps.filter(s => s.category === 'quality');
+    const docs = workflowSteps.filter(s => s.category === 'docs');
 
-    console.log(c('cyan', 'After Task:'));
-    for (const step of afterTask) {
-      const defaultMark = step.default ? c('green', ' (default ON)') : '';
+    console.log(c('cyan', 'Testing:'));
+    for (const step of testing) {
+      const defaultMark = step.default ? c('green', ' (ON)') : '';
       console.log(`  (${step.key}) ${step.label} - ${step.desc}${defaultMark}`);
     }
 
-    console.log(c('cyan', '\nBefore Commit:'));
-    for (const step of beforeCommit) {
-      const defaultMark = step.default ? c('green', ' (default ON)') : '';
+    console.log(c('cyan', '\nQuality Analysis:'));
+    console.log(c('dim', '  Note: codeComplexityCheck (quantitative) and codeSimplifier (qualitative)'));
+    console.log(c('dim', '  can be enabled together for comprehensive analysis.\n'));
+    for (const step of quality) {
+      const defaultMark = step.default ? c('green', ' (ON)') : '';
+      console.log(`  (${step.key}) ${step.label} - ${step.desc}${defaultMark}`);
+    }
+
+    console.log(c('cyan', '\nDocumentation:'));
+    for (const step of docs) {
+      const defaultMark = step.default ? c('green', ' (ON)') : '';
       console.log(`  (${step.key}) ${step.label} - ${step.desc}${defaultMark}`);
     }
 
