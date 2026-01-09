@@ -49,6 +49,47 @@ const FailureCategory = {
 
 ---
 
+### Loop Retry Learning ✅
+
+**Source**: User prompt handling documentation (2026-01-08)
+**Why**: When tasks require multiple iterations, capture root cause and improve future execution
+**Trigger**: When users notice repeated failures on similar tasks
+**Effort**: 1-2 days
+**Status**: Implemented 2026-01-09 in `scripts/flow-loop-retry-learning.js`
+
+**Behavior**: When a task takes >3 iterations to complete:
+1. Analyze iteration failures (what went wrong each time?)
+2. Identify root cause category:
+   - Unclear requirements in story
+   - Missing context (skills, patterns)
+   - Bad pattern in decisions.md
+   - External issue (API, dependency)
+3. Suggest update to appropriate file
+4. Track pattern frequency across tasks
+
+**Example output**:
+```
+Iteration Analysis:
+- Iteration 1: Failed - validation schema mismatch
+- Iteration 2: Failed - missing error state
+- Iteration 3: Success
+
+Root cause: Story didn't specify validation rules
+Suggestion: Add to decisions.md - "Forms must specify validation rules in acceptance criteria"
+
+Apply this learning? (y/n)
+```
+
+**Config addition**:
+```json
+"skillLearning": {
+  "learnFromLoopRetries": true,
+  "retryLearningThreshold": 3
+}
+```
+
+---
+
 ### Cascade Fallback
 
 **Source**: Council §3.7 Failure Handling
@@ -117,6 +158,212 @@ const LEARNING_TIERS = {
 ## Priority 2: Valuable If Proven
 
 Implement when data shows clear need.
+
+### npm Package Distribution
+
+**Source**: Internal discussion (2026-01-09)
+**Why**: Enable easy installation, version pinning, and updates via npm
+**Trigger**: When user base grows beyond current 3 users, or when v1.0 approaches
+**Effort**: 1-2 days
+
+**Approach**:
+- Package name: `wogi-flow` (start at 0.x.x, hit 1.0 when roadmap complete)
+- Global CLI: `npm install -g wogi-flow`
+- Templates in package, runtime state stays per-project
+- `flow upgrade` command for migrating projects
+
+**Key requirement**: Every npm update must work perfectly - stability is critical.
+
+---
+
+### CLI Agnosticism
+
+**Source**: User request (2026-01-08)
+**Why**: Make wogi-flow work with any AI coding CLI (Claude Code, Gemini CLI, Codex, OpenCode, etc.)
+**Trigger**: When users want to use wogi-flow with non-Claude CLIs
+**Effort**: 2-4 weeks
+
+**Approach**:
+- **Universal structure**: Keep `.workflow/` as source of truth
+- **CLI bridges/adapters**: Generate CLI-specific files from universal config
+- **Installer asks CLI choice**: First question during `flow install` is "Which CLI are you using?"
+
+**Architecture**:
+```
+.workflow/                    ← Universal source of truth
+├── config.json
+├── state/
+└── skills/
+         │
+         ▼ (bridge generates)
+┌─────────────────────────────────────────────┐
+│  Claude Code    │  Gemini CLI   │  OpenCode │
+│  .claude/       │  .gemini/     │  .opencode│
+│  CLAUDE.md      │  GEMINI.md    │  config   │
+└─────────────────────────────────────────────┘
+```
+
+**CLI Selection**:
+- **Install-time** (default): Installer asks "Which CLI?" as first question
+- **Runtime detection** (advanced): Auto-detect running CLI
+- **Multi-CLI** (team scenarios): Generate for multiple CLIs
+
+**Emulation Strategy**:
+Skills = context loaders → can be emulated via bridges for CLIs without native skill support
+
+**Downsides** (acknowledged):
+- Bridge maintenance per CLI update
+- May lose CLI-specific optimizations
+- Extra abstraction layer
+
+---
+
+### Multi-Model Mode (Hybrid Evolution)
+
+**Source**: User request (2026-01-08)
+**Why**: Intelligent model routing - use best/cheapest model for each task
+**Trigger**: When users want cost optimization or model-specific strengths
+**Effort**: 3-5 weeks
+
+**Key Concept**: Replaces/evolves Hybrid Mode - "Hybrid" now means "more than one model available"
+
+**Granular Model Registry**:
+```json
+{
+  "models": {
+    "claude-opus-4.5": {
+      "provider": "anthropic",
+      "costTier": "premium",
+      "context": {
+        "maxTokens": 200000,
+        "reliableAt": 150000,
+        "hallucinationRisk": "low"
+      },
+      "languages": {
+        "typescript": { "quality": "excellent" },
+        "python": { "quality": "excellent" },
+        "rust": { "quality": "good" }
+      },
+      "taskTypes": {
+        "architecture": "excellent",
+        "debugging": "excellent",
+        "boilerplate": "overkill"
+      }
+    }
+  }
+}
+```
+
+**Intelligent Task Analysis** - Primary model estimates:
+- Complexity level
+- Token effort (context needed + expected output)
+- Domains involved (api, db, frontend, etc.)
+- Languages required
+- Risk factors
+- Recommended model + reasoning
+
+**Routing Strategies**:
+- **Task-based**: Route by task type + language
+- **Cost-optimized**: Try cheapest first, escalate on failure
+- **Quality-first**: Use best model, fallback if unavailable
+- **Learned routing**: Track success rates, auto-optimize over time
+
+**Global Learning (All Users Benefit)**:
+Model performance data aggregated across ALL wogi-flow users:
+- Success rates by task type + language + model
+- Hallucination incidents at different context sizes
+- Cost efficiency metrics
+- Updated on session start (privacy-conscious: no code/prompts shared)
+
+**Orchestrator**:
+- **Default**: CLI's native model orchestrates
+- **Configurable**: User sets preferred primary model in config
+
+**Auth & Team Management**:
+
+| Tier | Setup | API Keys | Limits |
+|------|-------|----------|--------|
+| **Individual** | User adds own keys (env vars or config) | Personal | None |
+| **Team** | Admin adds keys via web UI | Shared | Per-user limits, usage dashboard |
+
+Team flow: Business owner adds API keys → team members use via proxy → admin controls limits via web UI
+
+---
+
+### Skill Library Marketplace
+
+**Source**: Enhanced Installation Experience project (2026-01-08)
+**Why**: Enable community sharing, discovery, and installation of curated skills
+**Trigger**: When users ask "is there a skill for X?" or want to share learnings
+**Effort**: 3-4 weeks
+**Requires**: Remote hosting (GitHub-based initially), skill versioning
+
+**Features**:
+
+1. **Remote Skill Repository**
+   - GitHub-hosted skill library (community skills repo)
+   - Version control for skills with semantic versioning
+   - Community contributions via PR
+
+2. **Skill Discovery**
+   - `/wogi-skills search [keyword]` - Search available skills
+   - Browse by framework, category, popularity
+   - Ratings and reviews from users
+
+3. **Skill Installation**
+   - `./scripts/flow skill install react-query` - One-command install
+   - Dependency resolution (skill A requires skill B)
+   - Automatic updates with `./scripts/flow skill update`
+
+4. **Skill Publishing**
+   - `./scripts/flow skill publish [name]` - Publish to community
+   - Validation before publish (required files, quality checks)
+   - Author attribution and version management
+
+5. **Team Skills (Private)**
+   - Private team skill repositories
+   - Shared learnings synced across team members
+   - Skill sync via team backend (requires team tier)
+
+**Architecture**:
+```
+Community Repo (GitHub)           Team Repo (Private)
+┌─────────────────────┐           ┌─────────────────────┐
+│ skills/             │           │ team-skills/        │
+│ ├── react-query/    │           │ ├── company-auth/   │
+│ ├── stripe/         │           │ └── internal-api/   │
+│ └── playwright/     │           └─────────────────────┘
+└─────────────────────┘                     ↑
+          ↓                                 │
+    ┌─────────────────┐                     │
+    │ flow skill      │ ────────────────────┘
+    │ install/search  │
+    │ publish/update  │
+    └─────────────────┘
+```
+
+**CLI Commands**:
+```bash
+# Discovery
+./scripts/flow skill search "state management"
+./scripts/flow skill browse --category=react
+
+# Installation
+./scripts/flow skill install zustand        # From community
+./scripts/flow skill install @team/auth    # From team repo
+
+# Publishing
+./scripts/flow skill publish my-skill --description "..."
+
+# Management
+./scripts/flow skill list                  # List installed
+./scripts/flow skill update --all          # Update all skills
+./scripts/flow skill remove zustand        # Remove skill
+```
+
+**Would implement when**: Users actively share skills or ask for pre-made skills for common libraries.
+
+---
 
 ### Jira/Linear Integration
 
@@ -216,40 +463,6 @@ const CONTEXT_PRIORITIES = {
 ## Priority 3: Multi-Model Demand
 
 Only implement if users have 3+ models configured.
-
-### Multi-Model Orchestration
-
-**Source**: oh-my-opencode (Sisyphus) analysis
-**Why**: Different AI models excel at different tasks - use the right tool for the job
-**Trigger**: When users want to optimize cost/quality tradeoffs or leverage model strengths
-**Effort**: 3-5 days
-**Risk**: Complexity, API key management, cost tracking
-
-Concept from oh-my-opencode's Sisyphus agent:
-- Opus/GPT-5 for complex orchestration and debugging
-- Sonnet/Haiku for documentation and exploration
-- Gemini for frontend/UI tasks
-- Specialized models for specific domains
-
-Would require:
-- Model registry with capabilities
-- Task-to-model routing logic
-- Fallback chains when models fail
-- Cost tracking per model
-- Config for model preferences
-
-```javascript
-// Conceptual routing
-"modelRouting": {
-  "orchestration": "claude-opus",
-  "exploration": "claude-haiku",
-  "frontend": "gemini-pro",
-  "debugging": "gpt-5",
-  "documentation": "claude-sonnet"
-}
-```
-
----
 
 ### Task Router
 
@@ -386,6 +599,14 @@ We're skeptical these add value. Would need strong evidence.
 
 | Date | Change |
 |------|--------|
+| 2026-01-09 | Added: npm Package Distribution - easy install/update via npm (Priority 2) |
+| 2026-01-09 | ✅ Implemented: Loop Retry Learning - analyzes tasks >3 iterations, identifies root causes, suggests pattern updates |
+| 2026-01-08 | Added: Loop Retry Learning - learn from excessive loop iterations to improve future executions |
+| 2026-01-08 | Added: Skill Library Marketplace - community skills sharing and discovery |
+| 2026-01-08 | ✅ Implemented: Enhanced Installation Experience - hub-spoke skills, tech stack wizard |
+| 2026-01-08 | Added: CLI Agnosticism - universal structure with CLI bridges |
+| 2026-01-08 | Added: Multi-Model Mode - evolution of hybrid with intelligent routing, global learning |
+| 2026-01-08 | Removed: Multi-Model Orchestration (superseded by Multi-Model Mode) |
 | 2026-01-08 | Added: Jira/Linear Integration (from Augment Code analysis) |
 | 2026-01-08 | ✅ Implemented: agent_requested rule type in flow-rules-sync.js |
 | 2026-01-08 | ✅ Implemented: Component Index Freshness (afterTask, staleCheck, gitHooks) |
@@ -417,3 +638,9 @@ We're skeptical these add value. Would need strong evidence.
 ### Community Contribution ✅
 - **Implemented in**: `scripts/flow-adaptive-learning.js`
 - **Commands**: `flow hybrid learning contribute` and `--auto-pr` option
+
+### Loop Retry Learning ✅
+- **Implemented in**: `scripts/flow-loop-retry-learning.js`
+- **Features**: Analyzes tasks taking >3 iterations, categorizes root causes (validation failures, missing context, etc.), suggests pattern updates
+- **Config**: `skillLearning.learnFromLoopRetries`, `skillLearning.loopRetryThreshold`
+- **Commands**: `node scripts/flow-loop-retry-learning.js stats|suggestions|test`
