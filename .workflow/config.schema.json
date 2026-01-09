@@ -1802,6 +1802,142 @@
           "default": ".workflow/corrections"
         }
       }
+    },
+
+    "workflowSteps": {
+      "type": "object",
+      "description": "CATEGORY: TASK & WORKFLOW - Configurable plug-in steps that run at various points in task execution. Enable/disable steps via config or interactive setup.",
+      "additionalProperties": {
+        "type": "object",
+        "description": "Configuration for a workflow step",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether this step is enabled"
+          },
+          "mode": {
+            "type": "string",
+            "description": "Step behavior mode: 'block' (must pass), 'warn' (advisory), 'prompt' (ask user), 'auto' (silent)",
+            "enum": ["block", "warn", "prompt", "auto"]
+          },
+          "when": {
+            "type": "string",
+            "description": "When to run: 'afterTask', 'beforeCommit', 'afterCommit', 'onSessionEnd'",
+            "enum": ["afterTask", "beforeCommit", "afterCommit", "onSessionEnd"]
+          },
+          "triggerFor": {
+            "type": "array",
+            "description": "File patterns that trigger this step (e.g., ['*.tsx', '*.jsx'])",
+            "items": { "type": "string" }
+          },
+          "config": {
+            "type": "object",
+            "description": "Step-specific configuration options"
+          }
+        }
+      },
+      "properties": {
+        "regressionTest": {
+          "type": "object",
+          "description": "Test random completed tasks to catch regressions. Uses flow-regression.js under the hood.",
+          "properties": {
+            "enabled": { "type": "boolean", "description": "Enable regression testing after tasks", "default": true },
+            "mode": { "type": "string", "description": "Behavior mode", "enum": ["block", "warn", "prompt", "auto"], "default": "warn" },
+            "when": { "type": "string", "description": "Execution point", "default": "afterTask" },
+            "config": {
+              "type": "object",
+              "properties": {
+                "sampleSize": { "type": "number", "description": "Number of random tasks to test", "default": 3 }
+              }
+            }
+          }
+        },
+        "browserTest": {
+          "type": "object",
+          "description": "Suggest browser tests for UI changes. Checks .workflow/tests/flows/ for test definitions.",
+          "properties": {
+            "enabled": { "type": "boolean", "description": "Enable browser test suggestions", "default": true },
+            "mode": { "type": "string", "description": "Behavior mode", "enum": ["block", "warn", "prompt", "auto"], "default": "prompt" },
+            "when": { "type": "string", "description": "Execution point", "default": "afterTask" },
+            "triggerFor": {
+              "type": "array",
+              "description": "File extensions that trigger browser tests",
+              "default": ["*.tsx", "*.jsx", "*.vue"]
+            }
+          }
+        },
+        "securityScan": {
+          "type": "object",
+          "description": "Run npm audit and check for secrets in code. Blocks on high/critical vulnerabilities by default.",
+          "properties": {
+            "enabled": { "type": "boolean", "description": "Enable security scanning", "default": true },
+            "mode": { "type": "string", "description": "Behavior mode", "enum": ["block", "warn", "prompt", "auto"], "default": "block" },
+            "when": { "type": "string", "description": "Execution point", "default": "beforeCommit" },
+            "config": {
+              "type": "object",
+              "properties": {
+                "severity": {
+                  "type": "string",
+                  "description": "Minimum severity to block on",
+                  "enum": ["critical", "high", "moderate", "low"],
+                  "default": "high"
+                },
+                "alwaysAudit": { "type": "boolean", "description": "Run npm audit even if package.json wasn't modified", "default": false }
+              }
+            }
+          }
+        },
+        "updateKnowledgeBase": {
+          "type": "object",
+          "description": "Prompt to document learnings in .claude/docs/knowledge-base/. Detects patterns, hooks, APIs, and config changes.",
+          "properties": {
+            "enabled": { "type": "boolean", "description": "Enable knowledge base prompts", "default": false },
+            "mode": { "type": "string", "description": "Behavior mode", "enum": ["block", "warn", "prompt", "auto"], "default": "prompt" },
+            "when": { "type": "string", "description": "Execution point", "default": "afterTask" }
+          }
+        },
+        "updateChangelog": {
+          "type": "object",
+          "description": "Add entries to CHANGELOG.md following Keep a Changelog format. Auto-categorizes as Added/Fixed/Changed.",
+          "properties": {
+            "enabled": { "type": "boolean", "description": "Enable changelog updates", "default": false },
+            "mode": { "type": "string", "description": "Behavior mode", "enum": ["block", "warn", "prompt", "auto"], "default": "prompt" },
+            "when": { "type": "string", "description": "Execution point", "default": "beforeCommit" }
+          }
+        },
+        "codeComplexityCheck": {
+          "type": "object",
+          "description": "Analyze cyclomatic complexity of modified functions. Flags functions exceeding threshold.",
+          "properties": {
+            "enabled": { "type": "boolean", "description": "Enable complexity checking", "default": false },
+            "mode": { "type": "string", "description": "Behavior mode", "enum": ["block", "warn", "prompt", "auto"], "default": "warn" },
+            "when": { "type": "string", "description": "Execution point", "default": "afterTask" },
+            "config": {
+              "type": "object",
+              "properties": {
+                "threshold": { "type": "number", "description": "Max cyclomatic complexity (10 is typical)", "default": 10 }
+              }
+            }
+          }
+        },
+        "coverageCheck": {
+          "type": "object",
+          "description": "Verify test coverage meets threshold. Supports Jest, Vitest, NYC/Istanbul.",
+          "properties": {
+            "enabled": { "type": "boolean", "description": "Enable coverage checking", "default": false },
+            "mode": { "type": "string", "description": "Behavior mode", "enum": ["block", "warn", "prompt", "auto"], "default": "warn" },
+            "when": { "type": "string", "description": "Execution point", "default": "beforeCommit" },
+            "config": {
+              "type": "object",
+              "properties": {
+                "minCoverage": { "type": "number", "description": "Minimum coverage percentage required", "default": 80 },
+                "checkModifiedOnly": { "type": "boolean", "description": "Only check coverage for modified files", "default": true },
+                "runTests": { "type": "boolean", "description": "Run tests if no coverage data exists", "default": true }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "additionalProperties": true

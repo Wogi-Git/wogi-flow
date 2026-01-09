@@ -28,9 +28,12 @@ const { clearCurrentTask, addKeyFact } = require('./flow-memory-blocks');
 const { trackTaskComplete } = require('./flow-session-state');
 const { autoArchiveIfNeeded } = require('./flow-log-manager');
 
-// v1.9.0 regression testing and browser test suggestions
+// v1.9.0 regression testing and browser test suggestions (legacy - now in workflow steps)
 const { runRegressionTests } = require('./flow-regression');
 const { suggestBrowserTests } = require('./flow-browser-suggest');
+
+// v2.2 modular workflow steps
+const { runSteps, getAllSteps } = require('./flow-workflow-steps');
 
 // v2.0 durable session support
 const { loadDurableSession, archiveDurableSession } = require('./flow-durable-session');
@@ -40,6 +43,35 @@ const { canExitLoop, getActiveLoop } = require('./flow-loop-enforcer');
 
 // Path for last failure artifact
 const LAST_FAILURE_PATH = path.join(PATHS.state, 'last-failure.json');
+
+/**
+ * Get files modified in current task (from git)
+ */
+function getModifiedFiles() {
+  try {
+    // Get staged and unstaged changes
+    const staged = execSync('git diff --cached --name-only', {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe']
+    }).trim().split('\n').filter(Boolean);
+
+    const unstaged = execSync('git diff --name-only', {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe']
+    }).trim().split('\n').filter(Boolean);
+
+    const untracked = execSync('git ls-files --others --exclude-standard', {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe']
+    }).trim().split('\n').filter(Boolean);
+
+    // Combine and dedupe
+    const all = [...new Set([...staged, ...unstaged, ...untracked])];
+    return all.filter(f => f && f.length > 0);
+  } catch (e) {
+    return [];
+  }
+}
 
 /**
  * Truncate error output to reasonable length
@@ -327,12 +359,65 @@ async function main() {
     if (process.env.DEBUG) console.error(`[DEBUG] Auto-archive: ${e.message}`);
   }
 
+  // v2.2: Run afterTask workflow steps
+  const modifiedFiles = getModifiedFiles();
+  const taskTitle = result.task?.title || taskId;
+  const taskType = result.task?.type || 'feature';
+
+  try {
+    const allSteps = getAllSteps();
+    const hasAfterTaskSteps = Object.values(allSteps).some(s => s.enabled && s.when === 'afterTask');
+
+    if (hasAfterTaskSteps) {
+      console.log('');
+      console.log(color('cyan', 'Running afterTask workflow steps...'));
+      const afterTaskResult = await runSteps('afterTask', {
+        taskId,
+        taskTitle,
+        taskType,
+        files: modifiedFiles,
+      });
+
+      if (afterTaskResult.blocked) {
+        error('Workflow step blocked task completion');
+        process.exit(1);
+      }
+    }
+  } catch (e) {
+    if (process.env.DEBUG) console.error(`[DEBUG] afterTask steps: ${e.message}`);
+  }
+
+  // v2.2: Run beforeCommit workflow steps
+  try {
+    const allSteps = getAllSteps();
+    const hasBeforeCommitSteps = Object.values(allSteps).some(s => s.enabled && s.when === 'beforeCommit');
+
+    if (hasBeforeCommitSteps) {
+      console.log('');
+      console.log(color('cyan', 'Running beforeCommit workflow steps...'));
+      const beforeCommitResult = await runSteps('beforeCommit', {
+        taskId,
+        taskTitle,
+        taskType,
+        files: modifiedFiles,
+      });
+
+      if (beforeCommitResult.blocked) {
+        error('Workflow step blocked commit');
+        process.exit(1);
+      }
+    }
+  } catch (e) {
+    if (process.env.DEBUG) console.error(`[DEBUG] beforeCommit steps: ${e.message}`);
+  }
+
   // Commit if there are changes
   commitChanges(commitMsg);
 
-  // v1.9.0: Run regression tests if configured
+  // v1.9.0: Run regression tests if configured (legacy - skipped if using workflowSteps)
   const config = getConfig();
-  if (config.regressionTesting?.enabled && config.regressionTesting?.runOnTaskComplete) {
+  const usingWorkflowSteps = config.workflowSteps?.regressionTest?.enabled;
+  if (!usingWorkflowSteps && config.regressionTesting?.enabled && config.regressionTesting?.runOnTaskComplete) {
     console.log('');
     try {
       const regressionResult = await runRegressionTests({ force: true });
@@ -347,8 +432,9 @@ async function main() {
     }
   }
 
-  // v1.9.0: Suggest browser tests for UI tasks
-  if (config.browserTesting?.enabled && config.browserTesting?.runOnTaskComplete) {
+  // v1.9.0: Suggest browser tests for UI tasks (legacy - skipped if using workflowSteps)
+  const usingBrowserWorkflowStep = config.workflowSteps?.browserTest?.enabled;
+  if (!usingBrowserWorkflowStep && config.browserTesting?.enabled && config.browserTesting?.runOnTaskComplete) {
     try {
       const browserSuggestion = suggestBrowserTests(taskId, result.task);
       if (browserSuggestion.suggested && browserSuggestion.flows.length > 0) {
