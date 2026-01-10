@@ -269,8 +269,8 @@ function main() {
   console.log(color('green', '─'.repeat(50)));
   console.log(`Task: ${session.taskId}`);
 
-  // Show remaining work
-  const remaining = getRemainingSteps(result);
+  // Show remaining work (defensive null check for session)
+  const remaining = result ? getRemainingSteps(result) : [];
   if (remaining.length > 0) {
     console.log('');
     console.log(`Remaining steps: ${remaining.length}`);

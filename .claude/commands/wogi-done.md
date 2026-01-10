@@ -1,4 +1,4 @@
-Complete a task manually. Provide the task ID: `/wogi-done TASK-XXX`
+Complete a task manually. Provide the task ID: `/wogi-done wf-XXXXXXXX`
 
 **Note:** This is usually not needed. `/wogi-start` now auto-completes tasks when all acceptance criteria pass and quality gates are met. Use `/wogi-done` only if:
 - You used `--no-loop` with `/wogi-start`
@@ -24,10 +24,10 @@ Running quality gates...
   ✓ requestLogEntry found
   ✓ appMapUpdate verified
 
-✓ Completed: TASK-XXX
+✓ Completed: wf-XXXXXXXX
 
 Committing changes...
-✓ Changes committed: "feat: Complete TASK-XXX"
+✓ Changes committed: "feat: Complete wf-XXXXXXXX"
 ```
 
 If gates fail, show what needs to be fixed before completing.

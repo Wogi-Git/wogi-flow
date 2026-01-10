@@ -93,4 +93,4 @@ Example (NestJS skill):
 • Start your day: `/wogi-ready`
 • End your day: `/wogi-session-end`
 • Check health: `/wogi-health`
-• Get task context: `/wogi-context TASK-XXX`
+• Get task context: `/wogi-context wf-XXXXXXXX`

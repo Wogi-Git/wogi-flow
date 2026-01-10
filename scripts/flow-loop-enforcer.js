@@ -149,9 +149,10 @@ function getActiveLoop() {
   try {
     return JSON.parse(fs.readFileSync(sessionPath, 'utf-8'));
   } catch (parseError) {
-    // Log in debug mode to help diagnose corrupted session files
+    // Always log parse errors (corrupted session files are actionable issues)
+    console.warn(`[Warning] Could not parse loop session file: ${parseError.message}`);
     if (process.env.DEBUG) {
-      console.warn(`[DEBUG] Could not parse loop session: ${parseError.message}`);
+      console.warn(`[DEBUG] Session path: ${sessionPath}`);
     }
     return null;
   }

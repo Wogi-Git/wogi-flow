@@ -95,7 +95,7 @@ Before writing ANY code, verify:
 | Command | Purpose |
 |---------|---------|
 | `/wogi-ready` | Show available tasks |
-| `/wogi-start TASK-X` | Start task (self-completing loop) |
+| `/wogi-start wf-XXXXXXXX` | Start task (self-completing loop) |
 | `/wogi-story "title"` | Create story with acceptance criteria |
 | `/wogi-status` | Project overview |
 | `/wogi-health` | Check workflow health |

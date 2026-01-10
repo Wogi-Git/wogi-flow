@@ -1,14 +1,14 @@
-Load all context needed to implement a task. Provide task ID: `/wogi-context TASK-012`
+Load all context needed to implement a task. Provide task ID: `/wogi-context wf-012`
 
 Gather:
-1. **Story** - From `.workflow/changes/*/TASK-XXX.md` or tasks.json
+1. **Story** - From `.workflow/changes/*/wf-XXX.md` or tasks.json
 2. **Related history** - Search request-log for task ID and related tags
 3. **Components** - Load details for any components mentioned in technical notes
 4. **Decisions** - Show relevant patterns from decisions.md
 
 Output:
 ```
-📚 Context for TASK-012
+📚 Context for wf-012
 
 ═══════════════════════════════════════
 STORY

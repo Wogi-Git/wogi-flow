@@ -497,6 +497,18 @@ function writeFile(filePath, content) {
 }
 
 /**
+ * Check if a path is within the project directory (prevents path traversal)
+ * @param {string} targetPath - Path to validate
+ * @param {string} [baseDir=PROJECT_ROOT] - Base directory to check against
+ * @returns {boolean} True if path is within base directory
+ */
+function isPathWithinProject(targetPath, baseDir = PROJECT_ROOT) {
+  const resolved = path.resolve(targetPath);
+  const resolvedBase = path.resolve(baseDir);
+  return resolved === resolvedBase || resolved.startsWith(resolvedBase + path.sep);
+}
+
+/**
  * Validate JSON file syntax
  */
 function validateJson(filePath) {
@@ -1752,6 +1764,7 @@ module.exports = {
   readFile,
   writeFile,
   validateJson,
+  isPathWithinProject,
 
   // Config
   getConfig,

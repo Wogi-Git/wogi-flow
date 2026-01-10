@@ -1,4 +1,4 @@
-Show dependency tree for a task. Provide task ID: `/wogi-deps TASK-015`
+Show dependency tree for a task. Provide task ID: `/wogi-deps wf-015`
 
 Search all tasks.json files in `.workflow/changes/` to find:
 1. What this task depends on
@@ -6,27 +6,27 @@ Search all tasks.json files in `.workflow/changes/` to find:
 
 Output:
 ```
-🔗 Dependencies for TASK-015
+🔗 Dependencies for wf-015
 
 Depends On:
-  ✓ TASK-012: Add forgot password link (completed)
-  → TASK-014: User API endpoint (in progress)
+  ✓ wf-012: Add forgot password link (completed)
+  → wf-014: User API endpoint (in progress)
 
 Blocking:
-  • TASK-018: Profile settings modal
-  • TASK-020: Account deletion
+  • wf-018: Profile settings modal
+  • wf-020: Account deletion
 
-Status: BLOCKED (waiting on TASK-014)
+Status: BLOCKED (waiting on wf-014)
 ```
 
 If task has no dependencies, show:
 ```
-🔗 Dependencies for TASK-015
+🔗 Dependencies for wf-015
 
 Depends On: None
 
 Blocking:
-  • TASK-018: Profile settings modal
+  • wf-018: Profile settings modal
 
 Status: READY
 ```
