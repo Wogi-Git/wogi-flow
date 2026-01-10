@@ -6,6 +6,13 @@ Python/FastAPI patterns and best practices.
 
 🚧 **Coming Soon** - This skill is under development.
 
+## Triggers
+
+- keywords: ["python", "pip", "django", "flask", "fastapi", "pytest", "pydantic", "sqlalchemy", "alembic", "uvicorn"]
+- filePatterns: ["*.py", "requirements.txt", "setup.py", "pyproject.toml", "Pipfile"]
+- taskTypes: ["feature", "bugfix", "refactor"]
+- categories: ["backend", "scripting", "api"]
+
 ## Planned Commands
 
 | Command | Description |

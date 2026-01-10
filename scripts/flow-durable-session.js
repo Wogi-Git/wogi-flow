@@ -19,6 +19,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const { getConfig, getProjectRoot } = require('./flow-utils');
+const { validateCommand } = require('./flow-workflow');
 
 // ============================================================================
 // Constants
@@ -631,6 +632,18 @@ function checkCompletion() {
     };
   }
 
+  // SECURITY: Max duration check to prevent indefinitely running sessions
+  const maxDurationMs = (config.durableSteps?.maxDurationMinutes || 120) * 60 * 1000; // Default 2 hours
+  const sessionDuration = Date.now() - new Date(session.startedAt).getTime();
+  if (sessionDuration >= maxDurationMs) {
+    return {
+      complete: true,
+      reason: 'max-duration',
+      forced: true,
+      summary: `Max session duration (${config.durableSteps?.maxDurationMinutes || 120} minutes) reached.`
+    };
+  }
+
   return {
     complete: false,
     pending: pending.length,
@@ -762,10 +775,27 @@ function checkTimeCondition(config) {
 
 /**
  * Check poll-based resume condition (e.g., CI/CD)
+ *
+ * SECURITY: Commands are validated before execution to prevent injection.
+ * Only safe commands (no dangerous patterns) are allowed.
  */
 function checkPollCondition(config) {
   if (!config || !config.command) {
     return { canResume: false, reason: 'no-poll-command' };
+  }
+
+  // SECURITY: Validate command before execution
+  const validation = validateCommand(config.command);
+  if (validation.blocked) {
+    return {
+      canResume: false,
+      reason: 'poll-command-blocked',
+      error: `SECURITY: ${validation.reason}`
+    };
+  }
+
+  if (!validation.safe) {
+    console.warn(`Warning: Poll command may be unsafe - ${validation.reason}`);
   }
 
   try {

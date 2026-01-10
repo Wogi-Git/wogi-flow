@@ -6,6 +6,13 @@ React component patterns, hooks, and best practices.
 
 🚧 **Coming Soon** - This skill is under development.
 
+## Triggers
+
+- keywords: ["react", "component", "hook", "useState", "useEffect", "useContext", "jsx", "tsx", "frontend", "ui", "props", "state"]
+- filePatterns: ["*.tsx", "*.jsx", "use*.ts", "use*.tsx", "*.component.tsx"]
+- taskTypes: ["feature", "bugfix", "refactor"]
+- categories: ["frontend", "ui", "component"]
+
 ## Planned Commands
 
 | Command | Description |

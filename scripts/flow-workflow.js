@@ -235,10 +235,83 @@ function toYaml(obj, indent = 0) {
 }
 
 /**
- * Execute a shell command
+ * Dangerous command patterns that indicate injection attempts
+ * SECURITY: These patterns are blocked to prevent command injection
+ */
+const DANGEROUS_PATTERNS = [
+  /;\s*rm\s+-rf/i,           // ; rm -rf
+  /;\s*dd\s+if=/i,           // ; dd if=
+  /;\s*mkfs/i,               // ; mkfs
+  /;\s*wget.*\|.*sh/i,       // wget | sh
+  /;\s*curl.*\|.*sh/i,       // curl | sh
+  /`[^`]*`/,                 // Backtick command substitution
+  /\$\([^)]*\)/,             // $() command substitution
+  />\s*\/dev\/(sd|hd|nvme)/i, // Write to disk devices
+  /;\s*:(){ :|:& };:/,       // Fork bomb
+  /\|\s*base64\s+-d\s*\|/i,  // Encoded payload execution
+];
+
+/**
+ * Warning patterns - potentially dangerous but may be legitimate
+ */
+const WARNING_PATTERNS = [
+  /;\s*sudo/i,               // sudo in chained command
+  /\|\s*sh\s*$/i,            // Pipe to shell
+  /\|\s*bash\s*$/i,          // Pipe to bash
+  /eval\s+/i,                // eval usage
+];
+
+/**
+ * Validate command for injection patterns
+ * @param {string} command - Command to validate
+ * @returns {{ safe: boolean, blocked: boolean, reason?: string }}
+ */
+function validateCommand(command) {
+  // Check for dangerous patterns
+  for (const pattern of DANGEROUS_PATTERNS) {
+    if (pattern.test(command)) {
+      return {
+        safe: false,
+        blocked: true,
+        reason: `Dangerous command pattern detected: ${pattern.toString()}`
+      };
+    }
+  }
+
+  // Check for warning patterns
+  for (const pattern of WARNING_PATTERNS) {
+    if (pattern.test(command)) {
+      return {
+        safe: false,
+        blocked: false,
+        reason: `Potentially dangerous pattern: ${pattern.toString()}`
+      };
+    }
+  }
+
+  return { safe: true, blocked: false };
+}
+
+/**
+ * Execute a shell command with security validation
+ *
+ * SECURITY: Commands are validated for injection patterns before execution.
+ * Dangerous patterns are blocked, warning patterns are logged.
  */
 function executeCommand(command, options = {}) {
   return new Promise((resolve, reject) => {
+    // Security validation
+    const validation = validateCommand(command);
+
+    if (validation.blocked) {
+      reject(new Error(`SECURITY: Command blocked - ${validation.reason}`));
+      return;
+    }
+
+    if (!validation.safe && process.env.DEBUG) {
+      console.warn(`${c.yellow}Warning: ${validation.reason}${c.reset}`);
+    }
+
     const startTime = Date.now();
 
     const proc = spawn('sh', ['-c', command], {
@@ -276,31 +349,147 @@ function executeCommand(command, options = {}) {
 }
 
 /**
- * Evaluate a condition expression
+ * Safe condition evaluator - NO arbitrary code execution
+ * Only supports: ==, !=, >, <, >=, <=, &&, ||, !, true, false, strings, numbers
+ * Variables: $var or ${var}
+ *
+ * SECURITY: Uses whitelist parsing instead of eval/Function to prevent code injection
  */
 function evaluateCondition(condition, context) {
-  // Simple condition evaluator
-  // Supports: ==, !=, &&, ||, !
-  // Variables: $var or ${var}
-
-  let expr = condition;
-
-  // Replace variables
-  expr = expr.replace(/\$\{?(\w+)\}?/g, (match, name) => {
+  // Replace variables first
+  let expr = condition.replace(/\$\{?(\w+)\}?/g, (match, name) => {
     const value = context[name];
-    if (typeof value === 'string') return `"${value}"`;
+    if (typeof value === 'string') return JSON.stringify(value);
     if (typeof value === 'boolean') return value.toString();
     if (typeof value === 'number') return value.toString();
     return 'undefined';
   });
 
-  try {
-    // Safely evaluate
-    const fn = new Function('return ' + expr);
-    return fn();
-  } catch {
-    return false;
+  // Use safe parser instead of eval
+  return safeEvaluate(expr);
+}
+
+/**
+ * Parse a literal value safely - only allows primitives
+ */
+function parseValue(str) {
+  str = str.trim();
+
+  // Boolean
+  if (str === 'true') return true;
+  if (str === 'false') return false;
+  if (str === 'undefined' || str === 'null') return undefined;
+
+  // Number
+  if (/^-?\d+(\.\d+)?$/.test(str)) return parseFloat(str);
+
+  // String (quoted)
+  if ((str.startsWith('"') && str.endsWith('"')) ||
+      (str.startsWith("'") && str.endsWith("'"))) {
+    return str.slice(1, -1);
   }
+
+  // Unquoted string (identifier-like)
+  return str;
+}
+
+/**
+ * Safe expression evaluator - whitelist approach only
+ * Only allows: comparisons, logical operators, literals
+ *
+ * SECURITY: No eval, no Function, no dynamic code execution
+ */
+function safeEvaluate(expr) {
+  expr = expr.trim();
+
+  // Handle parentheses recursively
+  while (expr.includes('(')) {
+    expr = expr.replace(/\(([^()]+)\)/g, (_, inner) => {
+      return safeEvaluate(inner) ? 'true' : 'false';
+    });
+  }
+
+  // Handle logical OR (lowest precedence)
+  if (expr.includes('||')) {
+    const parts = splitOnOperator(expr, '||');
+    return parts.some(part => safeEvaluate(part.trim()));
+  }
+
+  // Handle logical AND
+  if (expr.includes('&&')) {
+    const parts = splitOnOperator(expr, '&&');
+    return parts.every(part => safeEvaluate(part.trim()));
+  }
+
+  // Handle NOT
+  if (expr.startsWith('!')) {
+    return !safeEvaluate(expr.slice(1).trim());
+  }
+
+  // Handle comparisons (order matters - check longer operators first)
+  const compMatch = expr.match(/^(.+?)\s*(===|!==|==|!=|>=|<=|>|<)\s*(.+)$/);
+  if (compMatch) {
+    const left = parseValue(compMatch[1].trim());
+    const op = compMatch[2];
+    const right = parseValue(compMatch[3].trim());
+
+    switch (op) {
+      case '==':
+      case '===':
+        return left === right;
+      case '!=':
+      case '!==':
+        return left !== right;
+      case '>':
+        return left > right;
+      case '>=':
+        return left >= right;
+      case '<':
+        return left < right;
+      case '<=':
+        return left <= right;
+      default:
+        return false;
+    }
+  }
+
+  // Handle simple boolean/truthy value
+  const val = parseValue(expr);
+  return val === true || val === 'true' || (typeof val === 'number' && val !== 0);
+}
+
+/**
+ * Split expression on operator, respecting quoted strings
+ */
+function splitOnOperator(expr, op) {
+  const parts = [];
+  let current = '';
+  let inQuote = false;
+  let quoteChar = '';
+
+  for (let i = 0; i < expr.length; i++) {
+    const char = expr[i];
+
+    if ((char === '"' || char === "'") && (i === 0 || expr[i-1] !== '\\')) {
+      if (!inQuote) {
+        inQuote = true;
+        quoteChar = char;
+      } else if (char === quoteChar) {
+        inQuote = false;
+      }
+    }
+
+    if (!inQuote && expr.slice(i, i + op.length) === op) {
+      parts.push(current);
+      current = '';
+      i += op.length - 1;
+    } else {
+      current += char;
+    }
+  }
+
+  parts.push(current);
+  return parts;
 }
 
 /**
@@ -668,6 +857,10 @@ module.exports = {
   validateWorkflow,
   executeCommand,
   evaluateCondition,
+  // Security utilities
+  validateCommand,
+  DANGEROUS_PATTERNS,
+  WARNING_PATTERNS,
   // Language-agnostic quality commands
   detectProjectType,
   getQualityCommand

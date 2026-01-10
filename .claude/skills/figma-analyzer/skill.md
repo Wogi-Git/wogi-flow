@@ -12,6 +12,13 @@ Use this skill when:
 - Adding new screens/features from Figma designs
 - Working with Figma MCP to generate code
 
+## Triggers
+
+- keywords: ["figma", "design", "ui", "component", "design-system", "tokens", "mockup", "wireframe", "screen"]
+- filePatterns: []
+- taskTypes: ["feature"]
+- categories: ["design", "ui", "frontend"]
+
 ## Workflow
 
 ### Step 1: Index the Codebase (First Time)

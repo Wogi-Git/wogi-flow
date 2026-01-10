@@ -701,10 +701,25 @@ function getReadyData() {
 /**
  * Write ready.json task queue
  * Note: Does not mutate the input data object
+ *
+ * WARNING: For concurrent access, use saveReadyDataAsync which uses file locking.
  */
 function saveReadyData(data) {
   const toSave = { ...data, lastUpdated: new Date().toISOString() };
   return writeJson(PATHS.ready, toSave);
+}
+
+/**
+ * Write ready.json with file locking (async version)
+ * Use this when multiple processes might be writing to ready.json
+ *
+ * SECURITY: Prevents race conditions that could corrupt ready.json
+ */
+async function saveReadyDataAsync(data) {
+  return withLock(PATHS.ready, () => {
+    const toSave = { ...data, lastUpdated: new Date().toISOString() };
+    return writeJson(PATHS.ready, toSave);
+  });
 }
 
 /**
@@ -731,6 +746,8 @@ function findTask(taskId) {
 
 /**
  * Move a task from one list to another
+ *
+ * WARNING: For concurrent access, use moveTaskAsync which uses file locking.
  */
 function moveTask(taskId, fromList, toList) {
   const data = getReadyData();
@@ -768,6 +785,53 @@ function moveTask(taskId, fromList, toList) {
   saveReadyData(data);
 
   return { success: true, task };
+}
+
+/**
+ * Move a task with file locking (async version)
+ * Atomically reads, modifies, and writes ready.json
+ *
+ * SECURITY: Prevents race conditions when multiple processes move tasks
+ */
+async function moveTaskAsync(taskId, fromList, toList) {
+  return withLock(PATHS.ready, () => {
+    const data = getReadyData();
+    const from = data[fromList] || [];
+    const to = data[toList] || [];
+
+    let taskIndex = -1;
+    let task = null;
+
+    for (let i = 0; i < from.length; i++) {
+      const t = from[i];
+      const id = typeof t === 'string' ? t : t.id;
+      if (id === taskId) {
+        taskIndex = i;
+        task = t;
+        break;
+      }
+    }
+
+    if (taskIndex === -1) {
+      return { success: false, error: `Task ${taskId} not found in ${fromList}` };
+    }
+
+    from.splice(taskIndex, 1);
+
+    if (toList === 'recentlyCompleted') {
+      to.unshift(task);
+      data[toList] = to.slice(0, 10); // Keep last 10
+    } else {
+      to.push(task);
+      data[toList] = to;
+    }
+
+    data[fromList] = from;
+    const toSave = { ...data, lastUpdated: new Date().toISOString() };
+    writeJson(PATHS.ready, toSave);
+
+    return { success: true, task };
+  });
 }
 
 /**
@@ -1502,8 +1566,10 @@ module.exports = {
   // Ready.json
   getReadyData,
   saveReadyData,
+  saveReadyDataAsync,   // Async with locking
   findTask,
   moveTask,
+  moveTaskAsync,        // Async with locking
   getTaskCounts,
 
   // Request Log

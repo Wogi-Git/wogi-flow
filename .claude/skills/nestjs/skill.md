@@ -20,6 +20,13 @@ Build production-ready NestJS modules with entities, DTOs, services, controllers
 - Database migrations
 - API design
 
+## Triggers
+
+- keywords: ["nestjs", "nest", "module", "controller", "service", "entity", "dto", "typeorm", "backend", "api", "crud"]
+- filePatterns: ["*.module.ts", "*.controller.ts", "*.service.ts", "*.entity.ts", "*.dto.ts"]
+- taskTypes: ["feature", "bugfix", "refactor"]
+- categories: ["backend", "api", "database"]
+
 ## File Patterns
 
 - `*.module.ts`
