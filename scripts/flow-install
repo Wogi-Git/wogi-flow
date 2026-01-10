@@ -61,6 +61,130 @@ check_existing() {
     fi
 }
 
+# Question 0: Setup type (fresh vs import)
+ask_setup_type() {
+    echo -e "${BOLD}How would you like to set up Wogi Flow?${NC}"
+    echo ""
+    echo "   (1) Fresh start - New configuration with guided setup"
+    echo "   (2) Import from profile - Use existing team/project profile"
+    echo "   (3) Quick setup - Defaults without questions"
+    echo ""
+
+    read -p "   Choice [1]: " setup_choice
+    case "$setup_choice" in
+        2)
+            import_from_profile
+            ;;
+        3)
+            quick_install
+            exit 0
+            ;;
+        *)
+            # Continue with normal flow
+            return 0
+            ;;
+    esac
+}
+
+# Import from existing profile
+import_from_profile() {
+    echo ""
+    echo -e "${CYAN}Import from Profile${NC}"
+    echo ""
+    echo "   Enter the path to your profile (zip file):"
+    echo "   Example: ~/my-team-profile.zip or ./wogi-profiles/team.zip"
+    echo ""
+
+    read -p "   Profile path: " profile_path
+
+    if [ -z "$profile_path" ]; then
+        echo -e "${YELLOW}No profile specified. Continuing with fresh setup.${NC}"
+        echo ""
+        return 0
+    fi
+
+    # Expand ~ to home directory
+    profile_path="${profile_path/#\~/$HOME}"
+
+    if [ ! -f "$profile_path" ]; then
+        echo -e "${RED}Profile not found: $profile_path${NC}"
+        echo ""
+        read -p "   Continue with fresh setup? (y/n): " continue_fresh
+        if [[ "$continue_fresh" =~ ^[Yy]$ ]]; then
+            return 0
+        else
+            exit 1
+        fi
+    fi
+
+    echo ""
+    echo -e "${CYAN}Importing profile...${NC}"
+    echo ""
+
+    # Run import-profile script
+    if "$SCRIPT_DIR/flow-import-profile" "$profile_path" --force; then
+        echo ""
+        echo -e "${GREEN}✓ Profile imported successfully!${NC}"
+        echo ""
+
+        # Ask if they want to continue with onboarding
+        read -p "   Continue with project onboarding to customize for this project? (Y/n): " continue_onboard
+
+        if [[ ! "$continue_onboard" =~ ^[Nn]$ ]]; then
+            echo ""
+            echo -e "${CYAN}Running onboarding...${NC}"
+            echo ""
+            "$SCRIPT_DIR/flow-onboard"
+        fi
+
+        # Print completion and exit
+        echo ""
+        echo -e "${GREEN}╔═══════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${GREEN}║           ✅ Setup complete with imported profile!            ║${NC}"
+        echo -e "${GREEN}╚═══════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        echo -e "${BOLD}Next steps:${NC}"
+        echo "  1. Review imported config: ${CYAN}cat .workflow/config.json${NC}"
+        echo "  2. Check workflow health:  ${CYAN}/wogi-health${NC}"
+        echo "  3. See available tasks:    ${CYAN}/wogi-ready${NC}"
+        echo ""
+        exit 0
+    else
+        echo -e "${RED}Import failed. Continuing with fresh setup.${NC}"
+        echo ""
+        return 0
+    fi
+}
+
+# Quick install (non-interactive)
+quick_install() {
+    local project_name="${PROJECT_NAME:-$(basename "$(pwd)")}"
+    create_structure
+    PROJECT_NAME="$project_name"
+    generate_config
+    generate_state_files
+    copy_core_files
+    migrate_old_skills
+
+    # Auto-install LSP dependencies for Node.js projects (non-interactive)
+    if [ -f "package.json" ]; then
+        if ! command -v typescript-language-server &> /dev/null && [ ! -f "node_modules/.bin/typescript-language-server" ]; then
+            echo -e "${CYAN}Installing LSP dependencies...${NC}"
+            npm install --save-dev typescript-language-server typescript 2>/dev/null && \
+                echo -e "  ${GREEN}✓${NC} typescript-language-server installed" || \
+                echo -e "  ${YELLOW}○${NC} LSP install skipped (run: npm i -D typescript-language-server typescript)"
+        fi
+    fi
+
+    echo -e "${GREEN}✓ Quick install complete${NC}"
+    echo ""
+    echo -e "${YELLOW}⚠️  STRICT MODE ENABLED (default)${NC}"
+    echo -e "   Claude will STOP before implementation to create tasks/stories."
+    echo -e "   To disable: edit .workflow/config.json → enforcement.strictMode"
+    echo ""
+    echo -e "${CYAN}💡 Tip:${NC} Run /wogi-setup-stack to configure your tech stack."
+}
+
 # Question 1: Project name
 ask_project_name() {
     echo -e "${BOLD}1. Project Name${NC}"
@@ -1215,6 +1339,7 @@ print_completion() {
 main() {
     print_header
     check_existing
+    ask_setup_type
 
     ask_project_name
     ask_project_type

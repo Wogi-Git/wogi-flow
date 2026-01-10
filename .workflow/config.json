@@ -646,6 +646,12 @@
     "squashTaskCommits": true,
     "commitMessageFormat": "conventional"
   },
+  "export": {
+    "defaultFlags": ["--rules"],
+    "sanitizeTemplates": true,
+    "includeSkillLearnings": true,
+    "excludePatterns": ["*.local.*", "*.secret.*", ".env*"]
+  },
   "security": {
     "scanBeforeCommit": true,
     "blockOnHigh": true,
