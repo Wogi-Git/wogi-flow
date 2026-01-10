@@ -756,6 +756,9 @@ case "${1:-}" in
     voice-input|voice)
         node "$SCRIPT_DIR/flow-voice-input.js" "${@:2}"
         ;;
+    transcript-digest|digest)
+        node "$SCRIPT_DIR/flow-transcript-digest.js" "${@:2}"
+        ;;
     version|--version|-v)
         show_version
         ;;
@@ -782,6 +785,7 @@ case "${1:-}" in
                     parallel) echo "Manage parallel execution. Subcommands: config, check, enable, disable" ;;
                     worktree) echo "Manage worktree isolation. Subcommands: enable, disable, list, cleanup" ;;
                     voice-input|voice) echo "Voice-to-transcript input. Subcommands: setup, status, test, record" ;;
+                    transcript-digest|digest) echo "Transcript digestion. Subcommands: status, new, check, topics, save-topics" ;;
                     *) echo "No detailed help for '$2'. Run 'flow help' for all commands." ;;
                 esac
                 ;;

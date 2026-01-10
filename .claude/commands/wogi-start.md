@@ -1,44 +1,102 @@
-Start working on a task. Provide the task ID as argument: `/wogi-start TASK-XXX`
+Start working on a task. Provide the task ID as argument: `/wogi-start wf-XXXXXXXX`
 
-## Self-Completing Loop (Default Behavior)
+## Droid-Inspired Execution (v2.1)
 
-This command runs a **self-completing loop** - it continues working until the task is truly done. You don't need to run `/wogi-done` separately.
+This command implements a **structured execution loop** inspired by Factory AI Droid:
+- **Model-invoked skills**: Auto-loads relevant skills based on task context
+- **Specification mode**: Generates spec before coding (for medium/large tasks)
+- **Four-phase loop**: Spec → Test → Implement → Verify
+- **File-based validation**: Every phase produces artifacts
+- **Self-reflection**: Checkpoints to pause and verify approach
 
 ### Execution Flow
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  /wogi-start TASK-XXX                               │
-├─────────────────────────────────────────────────────┤
-│  1. Load context                                    │
-│  2. Decompose into steps (TodoWrite)                │
-│  3. Work on each step                               │
-│  ┌───────────────────────────────────────────────┐  │
-│  │  FOR EACH acceptance criteria scenario:       │  │
-│  │    → Mark in_progress                         │  │
-│  │    → Implement                                │  │
-│  │    → Self-verify (did it work?)               │  │
-│  │    → If not working: fix and retry            │  │
-│  │    → Mark completed                           │  │
-│  └───────────────────────────────────────────────┘  │
-│  4. Run quality gates                               │
-│  5. If gates fail: fix and retry                    │
-│  6. Update request-log, app-map, ready.json         │
-│  7. Commit changes                                  │
-│  8. ✓ Task complete                                 │
-└─────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│  /wogi-start wf-XXXXXXXX                                │
+├─────────────────────────────────────────────────────────┤
+│  1. Load context + Match skills (auto-invoke)           │
+│  2. Generate specification (if medium/large task)       │
+│  3. SPEC PHASE: Plan implementation steps               │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │  🪞 Reflection: Does spec fully address needs?    │  │
+│  └───────────────────────────────────────────────────┘  │
+│  4. TEST PHASE: Write/update tests first                │
+│  5. IMPLEMENT PHASE: Code each acceptance criteria      │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │  FOR EACH scenario:                               │  │
+│  │    → Mark in_progress                             │  │
+│  │    → Implement                                    │  │
+│  │    → Verify (run tests, typecheck)                │  │
+│  │    → Save verification artifact                   │  │
+│  │    → If failing: fix and retry                    │  │
+│  │    → Mark completed                               │  │
+│  └───────────────────────────────────────────────────┘  │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │  🪞 Reflection: Any bugs or regressions?          │  │
+│  └───────────────────────────────────────────────────┘  │
+│  6. VERIFY PHASE: Run all quality gates                 │
+│  7. Save final verification artifact                    │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │  🪞 Reflection: Does this match user request?     │  │
+│  └───────────────────────────────────────────────────┘  │
+│  8. Update request-log, app-map, ready.json             │
+│  9. Commit changes                                      │
+│  10. ✓ Task complete                                    │
+└─────────────────────────────────────────────────────────┘
 ```
 
-### Step 1: Load Context
+### Step 1: Load Context + Match Skills
 
 1. Read `.workflow/state/ready.json`
 2. Find the task in the ready array
 3. Move it to inProgress array, save ready.json
 4. Load task context:
-   - Find story file in `.workflow/changes/*/TASK-XXX.md` or tasks.json
+   - Find story file in `.workflow/changes/*/wf-XXXXXXXX.md` or tasks.json
    - Extract user story, acceptance criteria, technical notes
 5. Check `.workflow/state/app-map.md` for components mentioned
 6. Check `.workflow/state/decisions.md` for relevant patterns
+7. **Auto-invoke skills** based on task context:
+   - Run skill matcher against task description
+   - Load matched skills (patterns.md, anti-patterns.md, learnings.md)
+   - Display matched skills with scores
+
+**Skill Matching Output:**
+```
+🔧 Matched Skills:
+   nestjs [●●●●○]
+   keyword: "service", "entity", task type: "feature"
+   react [●●○○○]
+   keyword: "component"
+```
+
+### Step 1.5: Generate Specification (Medium/Large Tasks)
+
+For medium/large tasks (check `config.json → specificationMode`):
+
+1. Generate specification to `.workflow/specs/wf-XXXXXXXX.md`:
+   - Acceptance criteria (structured Given/When/Then)
+   - Implementation steps
+   - Files to change (auto-detected)
+   - Test strategy
+   - Verification commands
+2. Display spec summary
+3. **Reflection checkpoint**: "Does this spec fully address the requirements?"
+4. Wait for implicit approval (continue = approved)
+
+**Spec Output:**
+```
+📋 Generated Specification:
+
+Acceptance Criteria: 4 scenarios
+Implementation Steps: 6 steps
+Files to Change: 3 files (medium confidence)
+Verification Commands: 4 commands
+
+🪞 Reflection: Does this spec fully address the requirements?
+   - Are there any edge cases not covered?
+   - Is the scope clear and achievable?
+```
 
 ### Step 2: Decompose into TodoWrite Checklist
 
@@ -60,15 +118,30 @@ Also add:
 For each acceptance criteria:
 
 1. **Mark in_progress** in TodoWrite
-2. **Implement** the scenario
-3. **Self-verify**:
-   - Does the code actually do what the scenario describes?
-   - If testable, run the relevant test
-   - If UI, describe what should happen and confirm it would
-4. **If not working**: Debug, fix, retry verification
-5. **Mark completed** only when truly working
+2. **Implement** the scenario following matched skill patterns
+3. **Run verification** (saves artifact to `.workflow/verifications/`):
+   - Run lint: `npm run lint`
+   - Run typecheck: `npm run typecheck` or `npx tsc --noEmit`
+   - Run related tests if they exist
+4. **Save verification artifact** (JSON file with exit codes, output)
+5. **If not working**: Debug, fix, retry verification (max 5 attempts)
+6. **Mark completed** only when verification passes
 
-### Step 4: Run Quality Gates
+**Verification Artifact:**
+```json
+{
+  "taskId": "wf-abc123",
+  "phase": "implementation",
+  "timestamp": "2026-01-10T...",
+  "results": [
+    {"command": "npm run lint", "exitCode": 0, "passed": true},
+    {"command": "npm run typecheck", "exitCode": 0, "passed": true}
+  ],
+  "allPassed": true
+}
+```
+
+### Step 4: Run Quality Gates + Final Verification
 
 Read `config.json` → `qualityGates` for task type and verify:
 
@@ -77,19 +150,42 @@ Read `config.json` → `qualityGates` for task type and verify:
 - `appMapUpdate`: Verify new components are in app-map.md
 - `noNewFeatures`: (for refactors) Verify no new features added
 
+**Save final verification artifact** to `.workflow/verifications/wf-XXXXXXXX-final.json`
+
+**Reflection checkpoint:**
+```
+🪞 Reflection: Have I introduced any bugs or regressions?
+   - Does the code follow project patterns from decisions.md?
+   - Is there any code that could be simplified?
+```
+
 **If any gate fails**: Fix the issue and re-verify. Do not proceed until all required gates pass.
 
-### Step 5: Finalize
+### Step 5: Final Reflection + Finalize
 
-1. Update ready.json: Move task to recentlyCompleted
-2. Git add and commit with message: `feat: Complete TASK-XXX - [title]`
-3. Show completion summary
+1. **Pre-completion reflection:**
+   ```
+   🪞 Reflection: Does this match what the user asked for?
+      - Have all acceptance criteria been met?
+      - Are there any loose ends to address?
+   ```
+2. Update ready.json: Move task to recentlyCompleted
+3. Git add and commit with message: `feat: Complete wf-XXXXXXXX - [title]`
+4. Show completion summary with verification results
 
 ### Output
 
 **Start:**
 ```
-✓ Started: TASK-XXX - [Title]
+✓ Started: wf-XXXXXXXX - [Title]
+
+🔧 Matched Skills:
+   nestjs [●●●●○] - keyword: "service", task type: "feature"
+
+📋 Specification generated: .workflow/specs/wf-XXXXXXXX.md
+   Acceptance Criteria: 4 scenarios
+   Implementation Steps: 6 steps
+   Files to Change: 3 (medium confidence)
 
 User Story:
 As a [user], I want [action], so that [benefit]
@@ -100,38 +196,55 @@ Acceptance Criteria (4 scenarios):
 □ 3. Given... When... Then...
 □ 4. Given... When... Then...
 
-Technical Notes:
-- Components to use: [from app-map]
-- Patterns to follow: [from decisions.md]
+🪞 Reflection: Does spec fully address requirements? ✓
 
-Beginning implementation loop...
+Beginning structured execution loop...
 ```
 
 **During (for each scenario):**
 ```
-Working on scenario 1/4: [description]
+[IMPLEMENT] Working on scenario 1/4: [description]
 → Implementing...
-→ Verifying...
+→ Running verification...
+   ✓ lint passed
+   ✓ typecheck passed
+→ Artifact saved: .workflow/verifications/wf-XXXXXXXX-scenario-1.json
 → ✓ Scenario complete
 
-Working on scenario 2/4: [description]
+[IMPLEMENT] Working on scenario 2/4: [description]
 → Implementing...
-→ Verifying... ✗ Failed (reason)
+→ Running verification...
+   ✗ typecheck failed: Property 'x' does not exist
 → Fixing...
-→ Verifying... ✓ Fixed
+→ Running verification... ✓
+→ Artifact saved: .workflow/verifications/wf-XXXXXXXX-scenario-2.json
 → ✓ Scenario complete
+```
+
+**Reflection checkpoint (post-implementation):**
+```
+🪞 Reflection: Have I introduced any bugs or regressions?
+   - Code follows patterns from decisions.md ✓
+   - No unnecessary complexity detected ✓
 ```
 
 **End:**
 ```
-Running quality gates...
-  ✓ tests passed
+[VERIFY] Running final quality gates...
+  ✓ tests passed (12/12)
+  ✓ lint passed
+  ✓ typecheck passed
   ✓ requestLogEntry found
   ✓ appMapUpdate verified
 
-✓ Completed: TASK-XXX - [Title]
+Final verification artifact: .workflow/verifications/wf-XXXXXXXX-final.json
+
+🪞 Reflection: Does this match user request? ✓
+
+✓ Completed: wf-XXXXXXXX - [Title]
   4/4 scenarios implemented
-  Changes committed: "feat: Complete TASK-XXX - [title]"
+  Verification artifacts: 5 files
+  Changes committed: "feat: Complete wf-XXXXXXXX - [title]"
 ```
 
 ## Options
@@ -139,19 +252,43 @@ Running quality gates...
 ### `--no-loop`
 Disable the self-completing loop. Just load context and stop (old behavior):
 ```
-/wogi-start TASK-XXX --no-loop
+/wogi-start wf-XXXXXXXX --no-loop
+```
+
+### `--no-spec`
+Skip specification generation (for small tasks or quick fixes):
+```
+/wogi-start wf-XXXXXXXX --no-spec
+```
+
+### `--no-skills`
+Skip automatic skill loading:
+```
+/wogi-start wf-XXXXXXXX --no-skills
+```
+
+### `--no-reflection`
+Skip reflection checkpoints (faster but less thorough):
+```
+/wogi-start wf-XXXXXXXX --no-reflection
 ```
 
 ### `--max-retries N`
 Limit retry attempts per scenario (default: 5):
 ```
-/wogi-start TASK-XXX --max-retries 3
+/wogi-start wf-XXXXXXXX --max-retries 3
 ```
 
 ### `--pause-between`
 Ask for confirmation between scenarios:
 ```
-/wogi-start TASK-XXX --pause-between
+/wogi-start wf-XXXXXXXX --pause-between
+```
+
+### `--verify-only`
+Only run verification without implementation (for debugging):
+```
+/wogi-start wf-XXXXXXXX --verify-only
 ```
 
 ## When Things Go Wrong

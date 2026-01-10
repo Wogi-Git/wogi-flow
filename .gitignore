@@ -47,6 +47,14 @@ mcp-memory-server/node_modules/
 .workflow/state/digests/
 .workflow/state/durable-*.json
 
+# Verification artifacts (task-specific, transient)
+.workflow/verifications/**
+!.workflow/verifications/.gitkeep
+
+# Specification files (task-specific)
+.workflow/specs/**
+!.workflow/specs/.gitkeep
+
 # User stories and changes (development-specific)
 .workflow/changes/**
 !.workflow/changes/.gitkeep

@@ -122,6 +122,25 @@
     "loadingStates": true,
     "errorStates": true
   },
+  "specificationMode": {
+    "enabled": true,
+    "mandatory": true,
+    "mandatoryFor": ["medium", "large"],
+    "skipFor": ["small", "bugfix"],
+    "requireApproval": true,
+    "specDirectory": ".workflow/specs",
+    "template": "default",
+    "sections": {
+      "acceptanceCriteria": true,
+      "implementationSteps": true,
+      "filesToChange": true,
+      "testStrategy": true,
+      "verificationCommands": true,
+      "rollbackPlan": false
+    },
+    "autoDetectFiles": true,
+    "autoSuggestTests": true
+  },
   "qualityGates": {
     "feature": {
       "require": [
@@ -229,8 +248,14 @@
       "nestjs",
       "react",
       "python",
-      "figma-analyzer"
-    ]
+      "figma-analyzer",
+      "transcript-digestion"
+    ],
+    "autoInvoke": true,
+    "maxSkillsPerTask": 3,
+    "loadPatterns": true,
+    "loadAntiPatterns": true,
+    "loadLearnings": true
   },
   "skillLearning": {
     "enabled": true,
@@ -566,6 +591,27 @@
     "defaultDuration": 30,
     "sampleRate": 16000,
     "channels": 1
+  },
+  "transcriptDigestion": {
+    "enabled": true,
+    "autoTriggerThreshold": 2000,
+    "autoTriggerTypes": ["transcript", "specs", "requirements", "feature-request"],
+    "clarificationStyle": "grouped",
+    "verificationLevel": "statement",
+    "storyPresentation": "user-controlled",
+    "autoResolveContradictions": true,
+    "showSourceStatements": true,
+    "voiceClarification": true,
+    "supportedLanguages": ["en", "uk", "ru", "he"],
+    "chunkingThreshold": 10000,
+    "chunkSize": 5000,
+    "chunkOverlap": 500,
+    "outputLanguage": "en",
+    "adaptiveComplexity": {
+      "enabled": true,
+      "smallThreshold": { "topics": 3, "statements": 10 },
+      "mediumThreshold": { "topics": 8, "statements": 30 }
+    }
   },
   "lsp": {
     "enabled": true,
