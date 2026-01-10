@@ -10,7 +10,7 @@
 const {
   PATHS,
   fileExists,
-  moveTask,
+  moveTaskAsync,
   findTask,
   color,
   error,
@@ -144,8 +144,8 @@ async function main() {
     process.exit(1);
   }
 
-  // Move task from ready to inProgress
-  const result = moveTask(taskId, 'ready', 'inProgress');
+  // Move task from ready to inProgress (with file locking)
+  const result = await moveTaskAsync(taskId, 'ready', 'inProgress');
 
   if (!result.success) {
     error(result.error);

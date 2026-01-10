@@ -12,7 +12,7 @@ const {
   PATHS,
   fileExists,
   getConfig,
-  moveTask,
+  moveTaskAsync,
   findTask,
   readFile,
   writeJson,
@@ -314,8 +314,8 @@ async function main() {
     process.exit(1);
   }
 
-  // Move task from inProgress to recentlyCompleted
-  const result = moveTask(taskId, 'inProgress', 'recentlyCompleted');
+  // Move task from inProgress to recentlyCompleted (with file locking)
+  const result = await moveTaskAsync(taskId, 'inProgress', 'recentlyCompleted');
 
   if (!result.success) {
     error(result.error);
