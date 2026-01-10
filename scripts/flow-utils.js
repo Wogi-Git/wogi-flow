@@ -420,6 +420,10 @@ function dirExists(dirPath) {
 
 /**
  * Read JSON file safely
+ * @param {string} filePath - Path to JSON file
+ * @param {*} [defaultValue=undefined] - Default value if file doesn't exist or is invalid
+ * @returns {*} Parsed JSON or defaultValue
+ * @throws {Error} If file cannot be read and no defaultValue provided
  */
 function readJson(filePath, defaultValue = undefined) {
   try {
@@ -437,6 +441,10 @@ function readJson(filePath, defaultValue = undefined) {
 /**
  * Write JSON file with pretty formatting using atomic write pattern
  * (writes to temp file, then renames for crash safety)
+ * @param {string} filePath - Path to JSON file
+ * @param {*} data - Data to serialize as JSON
+ * @returns {boolean} True on success
+ * @throws {Error} If file cannot be written
  */
 function writeJson(filePath, data) {
   const tempPath = filePath + '.tmp.' + process.pid;
@@ -454,6 +462,10 @@ function writeJson(filePath, data) {
 
 /**
  * Read text file safely
+ * @param {string} filePath - Path to text file
+ * @param {*} [defaultValue=undefined] - Default value if file doesn't exist
+ * @returns {string|*} File contents or defaultValue
+ * @throws {Error} If file cannot be read and no defaultValue provided
  */
 function readFile(filePath, defaultValue = undefined) {
   try {
@@ -651,6 +663,9 @@ function getConfigValue(configPath, defaultValue = null) {
 /**
  * Update config value (uses locking to prevent race conditions)
  * SECURITY: Always acquires lock before writing to prevent data corruption
+ * @param {string} configPath - Dot-notation path (e.g., 'parallel.enabled')
+ * @param {*} newValue - New value to set
+ * @returns {Promise<void>}
  * @throws {Error} If lock cannot be acquired after retries
  */
 async function setConfigValue(configPath, newValue) {
@@ -769,7 +784,8 @@ function validateReadyJson(data) {
 
 /**
  * Read ready.json task queue with optional validation
- * @param {boolean} validate - Whether to validate structure (default: false)
+ * @param {boolean} [validate=false] - Whether to validate structure
+ * @returns {Object} Task queue data with ready, inProgress, blocked, recentlyCompleted arrays
  * @throws {Error} If validate is true and structure is invalid
  */
 function getReadyData(validate = false) {
