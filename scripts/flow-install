@@ -800,7 +800,23 @@ EOF
 generate_state_files() {
     echo -e "${CYAN}Creating state files...${NC}"
     
-    # ready.json with new fields
+    # Copy from templates if they exist (for fresh installs)
+    local TEMPLATE_DIR="$SCRIPT_DIR/../.workflow/state"
+    local template_files=("ready.json" "request-log.md" "progress.md" "component-index.json" "app-map.md")
+    
+    for tfile in "${template_files[@]}"; do
+        if [ -f "$TEMPLATE_DIR/${tfile}.template" ]; then
+            if [ ! -f "$WORKFLOW_DIR/state/${tfile}" ]; then
+                cp "$TEMPLATE_DIR/${tfile}.template" "$WORKFLOW_DIR/state/${tfile}"
+                echo -e "  ${GREEN}✓${NC} Created ${tfile} from template"
+            fi
+        fi
+    done
+    
+    # Generate files that don't have templates or weren't copied
+    
+    # ready.json with new fields (only if not created from template)
+    if [ ! -f "$WORKFLOW_DIR/state/ready.json" ]; then
     cat > "$WORKFLOW_DIR/state/ready.json" << EOF
 {
   "lastUpdated": "$(date -Iseconds)",
@@ -810,8 +826,10 @@ generate_state_files() {
   "recentlyCompleted": []
 }
 EOF
+    fi
     
-    # request-log.md
+    # request-log.md (only if not created from template)
+    if [ ! -f "$WORKFLOW_DIR/state/request-log.md" ]; then
     cat > "$WORKFLOW_DIR/state/request-log.md" << EOF
 # Request Log
 
@@ -820,8 +838,10 @@ All changes, fixes, and additions are logged here.
 ---
 
 EOF
+    fi
     
-    # app-map.md
+    # app-map.md (only if not created from template)
+    if [ ! -f "$WORKFLOW_DIR/state/app-map.md" ]; then
     cat > "$WORKFLOW_DIR/state/app-map.md" << EOF
 # App Map - Component Registry
 
@@ -844,6 +864,7 @@ EOF
 | - | - | - |
 
 EOF
+    fi
     
     # decisions.md
     cat > "$WORKFLOW_DIR/state/decisions.md" << EOF
@@ -865,7 +886,8 @@ Coding patterns, architectural decisions, and conventions.
 
 EOF
     
-    # progress.md
+    # progress.md (only if not created from template)
+    if [ ! -f "$WORKFLOW_DIR/state/progress.md" ]; then
     cat > "$WORKFLOW_DIR/state/progress.md" << EOF
 # Progress - $PROJECT_NAME
 
@@ -895,6 +917,7 @@ EOF
 - Set up development environment
 
 EOF
+    fi
     
     # feedback-patterns.md
     cat > "$WORKFLOW_DIR/state/feedback-patterns.md" << EOF

@@ -1,0 +1,14 @@
+# Progress
+
+Current session progress and context for resumption.
+
+## Current Focus
+None - start with `/wogi-ready` to see available tasks.
+
+## Recent Changes
+None yet.
+
+## Next Steps
+1. Run `/wogi-status` to see project overview
+2. Run `/wogi-ready` to see available tasks
+3. Run `/wogi-start TASK-ID` to begin work

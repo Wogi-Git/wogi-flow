@@ -35,3 +35,25 @@ mcp-memory-server/node_modules/
 
 # Note: When users install Wogi Flow in their projects,
 # they should use .gitignore-project instead (rename it)
+
+# ===========================================
+# User-specific state (created from templates on install)
+# ===========================================
+.workflow/state/ready.json
+.workflow/state/request-log.md
+.workflow/state/progress.md
+.workflow/state/component-index.json
+.workflow/state/app-map.md
+.workflow/state/digests/
+.workflow/state/durable-*.json
+
+# User stories and changes (development-specific)
+.workflow/changes/**
+!.workflow/changes/.gitkeep
+
+# Skills developed by user (keep directory structure)
+.claude/skills/*/
+!.claude/skills/.gitkeep
+
+# Claude plans (user-specific)
+.claude/plans/
