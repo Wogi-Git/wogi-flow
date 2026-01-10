@@ -96,6 +96,16 @@ Proper wrap-up and documentation.
 
 [Read more: Completion](./04-completion.md)
 
+### Step 5: Session Review (Optional)
+Comprehensive code review before finalizing changes.
+
+**Key Features:**
+- **3 Parallel Agents**: Code/Logic, Security, Architecture
+- **Natural Triggers**: Say "please review" to run
+- **Consolidated Report**: Issues ranked by severity
+
+[Read more: Session Review](./05-session-review.md)
+
 ---
 
 ## Essential Configuration

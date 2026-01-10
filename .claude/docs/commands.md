@@ -29,6 +29,7 @@ When user types these commands, execute the corresponding action immediately.
 
 | Command | Action |
 |---------|--------|
+| `/wogi-session-review` | **Comprehensive code review.** Runs 3 parallel agents: Code & Logic, Security, Architecture & Conflicts. Triggered by command or "please review". Options: `--commits N`, `--staged`, `--security-only`, `--quick`. |
 | `/wogi-health` | Check all workflow files exist and are valid. Verify config.json and ready.json are valid JSON. Check app-map sync with src/components. Report issues. |
 | `/wogi-standup` | Generate standup summary: what was done (from request-log), what's in progress, what's next, any blockers. |
 | `/wogi-session-end` | Ensure request-log is current. Update app-map if components created. Update progress.md. Commit all changes. Offer to push. |

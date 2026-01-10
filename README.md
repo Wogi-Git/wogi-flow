@@ -39,6 +39,7 @@ A self-improving AI development workflow that learns from your feedback and accu
 | **Context Monitor**       | Tracks context window usage with warnings at 70%/85%                                        |
 | **Guided Edit Mode**      | Step-by-step multi-file editing with session persistence                                    |
 | **Smart Rule Loading**    | Rules with `alwaysApply: false` loaded only when relevant to task context                   |
+| **Session Review**        | Comprehensive code review using 3 parallel agents (code, security, architecture)            |
 | **Component Index Freshness** | Auto-refresh on session start, post-task, and pre-commit with configurable staleness    |
 
 ## Documentation
@@ -99,6 +100,7 @@ Daily commands for working with Wogi Flow. Start with `/wogi-ready` to see tasks
 
 # Session Checkpoint
 /wogi-session-end              # Save progress and commit
+/wogi-session-review           # Comprehensive code review (3 parallel agents)
 
 # Context Management (Critical)
 /compact                       # Free up context (built-in, use after 2-3 tasks)
@@ -1602,7 +1604,7 @@ Quick reference for chat commands:
 
 | Category       | Commands                                                                                             |
 | -------------- | ---------------------------------------------------------------------------------------------------- |
-| **Tasks**      | `/wogi-ready`, `/wogi-start`, `/wogi-done`, `/wogi-bulk`, `/wogi-status`, `/wogi-deps`               |
+| **Tasks**      | `/wogi-ready`, `/wogi-start`, `/wogi-done`, `/wogi-bulk`, `/wogi-status`, `/wogi-deps`, `/wogi-session-review` |
 | **Create**     | `/wogi-story`, `/wogi-feature`, `/wogi-bug`                                                          |
 | **Components** | `/wogi-map`, `/wogi-map-add`, `/wogi-map-scan`, `/wogi-map-check`, `/wogi-map-sync`                  |
 | **Figma**      | `flow figma scan`, `flow figma analyze`, `flow figma confirm`, `flow figma generate`, `flow figma server` |
