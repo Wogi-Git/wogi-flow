@@ -650,6 +650,8 @@ function getConfigValue(configPath, defaultValue = null) {
 
 /**
  * Update config value (uses locking to prevent race conditions)
+ * SECURITY: Always acquires lock before writing to prevent data corruption
+ * @throws {Error} If lock cannot be acquired after retries
  */
 async function setConfigValue(configPath, newValue) {
   // Use file lock to prevent concurrent writes
@@ -657,12 +659,11 @@ async function setConfigValue(configPath, newValue) {
   let release;
 
   try {
-    release = await acquireLock(lockPath, { retries: 3, retryDelay: 100 });
-  } catch {
-    // Fall back to non-locked write if locking fails
-    if (process.env.DEBUG) {
-      console.warn('[DEBUG] Could not acquire config lock, proceeding without lock');
-    }
+    // More retries with exponential backoff for better reliability
+    release = await acquireLock(lockPath, { retries: 5, retryDelay: 100, exponentialBackoff: true });
+  } catch (lockError) {
+    // SECURITY: Don't fall back to non-locked write - throw instead
+    throw new Error(`Could not acquire config lock after retries: ${lockError.message}. Config not updated.`);
   }
 
   try {
@@ -715,15 +716,78 @@ function setConfigValueSync(configPath, newValue) {
 // ============================================================
 
 /**
- * Read ready.json task queue
+ * Validate ready.json structure
+ * @param {Object} data - Data to validate
+ * @returns {Object} { valid: boolean, errors: string[] }
  */
-function getReadyData() {
-  return readJson(PATHS.ready, {
+function validateReadyJson(data) {
+  const errors = [];
+
+  // Check required top-level arrays
+  const requiredArrays = ['ready', 'inProgress', 'blocked', 'recentlyCompleted'];
+  for (const key of requiredArrays) {
+    if (!Array.isArray(data[key])) {
+      errors.push(`Missing or invalid "${key}" array`);
+    }
+  }
+
+  if (errors.length > 0) {
+    return { valid: false, errors };
+  }
+
+  // Validate tasks in each array
+  const allArrays = [...requiredArrays];
+  for (const arrayName of allArrays) {
+    const tasks = data[arrayName] || [];
+    for (let i = 0; i < tasks.length; i++) {
+      const task = tasks[i];
+      const prefix = `${arrayName}[${i}]`;
+
+      // Required fields
+      if (!task.id || typeof task.id !== 'string') {
+        errors.push(`${prefix}: missing or invalid "id"`);
+      }
+
+      // Optional but validated fields
+      if (task.title !== undefined && typeof task.title !== 'string') {
+        errors.push(`${prefix}: "title" must be a string`);
+      }
+      if (task.status !== undefined && typeof task.status !== 'string') {
+        errors.push(`${prefix}: "status" must be a string`);
+      }
+      if (task.priority !== undefined && !/^P[0-4]$/.test(task.priority)) {
+        errors.push(`${prefix}: "priority" must be P0-P4`);
+      }
+      if (task.dependencies !== undefined && !Array.isArray(task.dependencies)) {
+        errors.push(`${prefix}: "dependencies" must be an array`);
+      }
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Read ready.json task queue with optional validation
+ * @param {boolean} validate - Whether to validate structure (default: false)
+ * @throws {Error} If validate is true and structure is invalid
+ */
+function getReadyData(validate = false) {
+  const data = readJson(PATHS.ready, {
     ready: [],
     inProgress: [],
     blocked: [],
     recentlyCompleted: []
   });
+
+  if (validate) {
+    const validation = validateReadyJson(data);
+    if (!validation.valid) {
+      throw new Error(`Invalid ready.json: ${validation.errors.join(', ')}`);
+    }
+  }
+
+  return data;
 }
 
 /**
@@ -1684,6 +1748,7 @@ module.exports = {
 
   // Ready.json
   getReadyData,
+  validateReadyJson,
   saveReadyData,
   saveReadyDataAsync,   // Async with locking
   findTask,

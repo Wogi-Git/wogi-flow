@@ -266,9 +266,12 @@ When user corrects you:
 - `durable-history.json` - Completed session history
 - `component-index.json` - Auto-generated component index
 - `digests/` - Transcript digestion session files
+- `components/` - Component metadata files
 
 **System-managed (don't edit manually):**
 - `session-state.json` - Transient session state
+- `hybrid-session.json` - Hybrid mode session state
+- `export-map.json` - Export/import mappings
 - `*.template` files - Templates for fresh installs
 
 ## Commit Behavior (IMPORTANT)

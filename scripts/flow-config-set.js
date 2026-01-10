@@ -17,7 +17,7 @@
 const {
   PATHS,
   readJson,
-  writeJson,
+  withLock,
   invalidateConfigCache,
   color,
   success,
@@ -87,7 +87,7 @@ function getNestedValue(obj, path) {
   return path.split('.').reduce((o, k) => o?.[k], obj);
 }
 
-function main() {
+async function main() {
   const keyPath = process.argv[2];
   const valueStr = process.argv[3];
 
@@ -103,7 +103,7 @@ function main() {
     process.exit(1);
   }
 
-  // Load config
+  // Load config (read-only, no lock needed)
   const config = readJson(PATHS.config, {});
 
   // If no value provided, just print current value
@@ -117,22 +117,36 @@ function main() {
     process.exit(0);
   }
 
-  // Parse and set the value
+  // Parse the value
   const value = parseValue(valueStr);
   const oldValue = getNestedValue(config, keyPath);
 
-  setNestedValue(config, keyPath, value);
+  // Use file lock to prevent race conditions during write
+  try {
+    await withLock(PATHS.config, () => {
+      // Re-read config after acquiring lock (may have changed)
+      const freshConfig = readJson(PATHS.config, {});
+      setNestedValue(freshConfig, keyPath, value);
 
-  // Write and invalidate cache
-  writeJson(PATHS.config, config);
-  invalidateConfigCache();
+      // Write config using fs directly (withLock handles the file)
+      const fs = require('fs');
+      fs.writeFileSync(PATHS.config, JSON.stringify(freshConfig, null, 2));
+      invalidateConfigCache();
+    });
 
-  // Output result
-  if (oldValue === undefined) {
-    success(`Set ${keyPath} = ${JSON.stringify(value)}`);
-  } else {
-    success(`Changed ${keyPath}: ${JSON.stringify(oldValue)} → ${JSON.stringify(value)}`);
+    // Output result
+    if (oldValue === undefined) {
+      success(`Set ${keyPath} = ${JSON.stringify(value)}`);
+    } else {
+      success(`Changed ${keyPath}: ${JSON.stringify(oldValue)} → ${JSON.stringify(value)}`);
+    }
+  } catch (lockError) {
+    error(`Failed to update config: ${lockError.message}`);
+    process.exit(1);
   }
 }
 
-main();
+main().catch(err => {
+  error(`Unexpected error: ${err.message}`);
+  process.exit(1);
+});
