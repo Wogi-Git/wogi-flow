@@ -27,10 +27,16 @@ if [ "$ENABLED" = "true" ]; then
 
     echo ""
     echo "Session state:"
-    if [ -f ".workflow/state/hybrid-session.json" ]; then
-        jq '.' .workflow/state/hybrid-session.json
+    # Use durable session (v2.0) - check durable-history.json for active sessions
+    if [ -f ".workflow/state/durable-history.json" ]; then
+        ACTIVE=$(jq -r '.activeSession // empty' .workflow/state/durable-history.json)
+        if [ -n "$ACTIVE" ] && [ "$ACTIVE" != "null" ]; then
+            jq '.activeSession' .workflow/state/durable-history.json
+        else
+            echo "No active session"
+        fi
     else
-        echo "No active session"
+        echo "No durable session history"
     fi
 fi
 

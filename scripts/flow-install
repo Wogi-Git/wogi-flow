@@ -556,9 +556,17 @@ generate_config() {
 
   "testing": {
     "runAfterTask": false,
-    "runBeforeCommit": $ENABLE_HOOKS,
-    "browserTests": false,
-    "browserTestUrl": "http://localhost:3000"
+    "runBeforeCommit": $ENABLE_HOOKS
+  },
+
+  "browserTesting": {
+    "enabled": false,
+    "runOnTaskComplete": false,
+    "runForUITasks": true,
+    "autoRun": false,
+    "timeout": 30000,
+    "screenshotOnFailure": true,
+    "baseUrl": "http://localhost:3000"
   },
 
   "hooks": {

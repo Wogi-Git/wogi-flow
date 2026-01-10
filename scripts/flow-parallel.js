@@ -263,29 +263,50 @@ async function executeParallel(tasks, executor, options = {}) {
     // Execute up to maxConcurrent tasks at once
     const batch = parallelizable.slice(0, maxConcurrent);
     const promises = batch.map(async (task) => {
-      if (tracker) tracker.start(task.id);
-      if (onStart) onStart(task);
+      try {
+        if (tracker) tracker.start(task.id);
+        if (onStart) onStart(task);
+      } catch (callbackError) {
+        // Don't let callback errors prevent task execution
+        console.warn(`Callback error for ${task.id}: ${callbackError.message}`);
+      }
 
       try {
         const result = await executor(task);
         finished.add(task.id);
         succeeded.add(task.id);
 
-        if (tracker) tracker.complete(task.id, result);
-        if (onComplete) onComplete(task, result);
+        try {
+          if (tracker) tracker.complete(task.id, result);
+          if (onComplete) onComplete(task, result);
+        } catch (callbackError) {
+          console.warn(`Completion callback error for ${task.id}: ${callbackError.message}`);
+        }
 
         return { taskId: task.id, success: true, result };
       } catch (error) {
         finished.add(task.id); // Mark as finished but NOT succeeded
 
-        if (tracker) tracker.fail(task.id, error);
-        if (onError) onError(task, error);
+        try {
+          if (tracker) tracker.fail(task.id, error);
+          if (onError) onError(task, error);
+        } catch (callbackError) {
+          console.warn(`Error callback error for ${task.id}: ${callbackError.message}`);
+        }
 
         return { taskId: task.id, success: false, error: error.message };
       }
     });
 
-    await Promise.all(promises);
+    // Use allSettled to prevent one failure from killing all tasks
+    const results = await Promise.allSettled(promises);
+
+    // Handle any unexpected rejections (shouldn't happen but safety first)
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        console.error(`Unexpected rejection in parallel execution: ${result.reason}`);
+      }
+    }
   }
 
   return tracker ? tracker.getSummary() : { finished: finished.size, succeeded: succeeded.size };

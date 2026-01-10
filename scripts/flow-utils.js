@@ -878,11 +878,34 @@ function getLastRequestLogEntry() {
 }
 
 /**
+ * Get the highest request ID number from request-log.md
+ * More robust than counting - handles gaps and deleted entries
+ */
+function getHighestRequestId() {
+  try {
+    const content = readFile(PATHS.requestLog, '');
+    // Match all R-XXX patterns (3+ digits)
+    const matches = content.match(/### R-(\d{3,})/g);
+    if (!matches || matches.length === 0) return 0;
+
+    // Extract numbers and find the max
+    const numbers = matches.map(m => {
+      const num = m.match(/R-(\d+)/);
+      return num ? parseInt(num[1], 10) : 0;
+    });
+    return Math.max(...numbers);
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Get next request ID
+ * Uses highest existing ID + 1 to avoid duplicates even with gaps
  */
 function getNextRequestId() {
-  const count = countRequestLogEntries();
-  return `R-${String(count + 1).padStart(3, '0')}`;
+  const highestId = getHighestRequestId();
+  return `R-${String(highestId + 1).padStart(3, '0')}`;
 }
 
 /**
@@ -1187,13 +1210,35 @@ async function acquireLock(filePath, options = {}) {
         file: filePath
       }));
 
-      // Return release function
+      // Return release function with robust cleanup
       return () => {
+        // Try to remove info file first
         try {
           fs.unlinkSync(lockInfoFile);
+        } catch (unlinkErr) {
+          // ENOENT is fine - file already gone
+          // Other errors we log but continue to try rmdir
+          if (unlinkErr.code !== 'ENOENT' && process.env.DEBUG) {
+            console.warn(`[DEBUG] Lock info cleanup warning: ${unlinkErr.message}`);
+          }
+        }
+
+        // Always try to remove lock directory
+        try {
           fs.rmdirSync(lockDir);
-        } catch {
-          // Lock already released or cleaned up
+        } catch (rmdirErr) {
+          // ENOENT is fine - directory already gone
+          if (rmdirErr.code !== 'ENOENT') {
+            // Directory not empty or other error - force cleanup
+            try {
+              fs.rmSync(lockDir, { recursive: true, force: true });
+            } catch {
+              // Last resort failed - log if debug
+              if (process.env.DEBUG) {
+                console.warn(`[DEBUG] Lock dir cleanup failed: ${rmdirErr.message}`);
+              }
+            }
+          }
         }
       };
     } catch (err) {
@@ -1290,6 +1335,10 @@ async function withLockSync(filePath, fn, options = {}) {
 /**
  * Clean up any stale locks in a directory
  * Useful for cleanup after crashes
+ *
+ * @param {string} dirPath - Directory to scan for .lock directories
+ * @param {number} [staleMs=30000] - Consider locks older than this as stale
+ * @returns {number} Number of locks cleaned up
  */
 function cleanupStaleLocks(dirPath, staleMs = 30000) {
   try {
@@ -1309,12 +1358,38 @@ function cleanupStaleLocks(dirPath, staleMs = 30000) {
         const age = Date.now() - info.timestamp;
 
         if (age > staleMs) {
-          fs.unlinkSync(lockInfoFile);
-          fs.rmdirSync(lockDir);
-          cleaned++;
+          // Clean up stale lock
+          try {
+            fs.unlinkSync(lockInfoFile);
+          } catch (unlinkErr) {
+            if (unlinkErr.code !== 'ENOENT') {
+              if (process.env.DEBUG) {
+                console.warn(`[DEBUG] cleanupStaleLocks: Could not delete ${lockInfoFile}: ${unlinkErr.message}`);
+              }
+            }
+          }
+
+          try {
+            fs.rmdirSync(lockDir);
+            cleaned++;
+          } catch (rmdirErr) {
+            if (rmdirErr.code !== 'ENOENT') {
+              // Directory not empty or other error - force cleanup
+              try {
+                fs.rmSync(lockDir, { recursive: true, force: true });
+                cleaned++;
+              } catch (forceErr) {
+                if (process.env.DEBUG) {
+                  console.warn(`[DEBUG] cleanupStaleLocks: Could not force delete ${lockDir}: ${forceErr.message}`);
+                }
+              }
+            }
+          }
         }
-      } catch {
-        // Can't read - try to remove anyway if old enough
+      } catch (readErr) {
+        // Can't read lock info - try to remove based on directory mtime
+        if (readErr.code === 'ENOENT') continue; // Lock already gone
+
         try {
           const stat = fs.statSync(lockDir);
           const age = Date.now() - stat.mtimeMs;
@@ -1322,14 +1397,20 @@ function cleanupStaleLocks(dirPath, staleMs = 30000) {
             fs.rmSync(lockDir, { recursive: true, force: true });
             cleaned++;
           }
-        } catch {
-          // Ignore
+        } catch (statErr) {
+          // Directory gone or inaccessible - skip
+          if (statErr.code !== 'ENOENT' && process.env.DEBUG) {
+            console.warn(`[DEBUG] cleanupStaleLocks: Could not stat ${lockDir}: ${statErr.message}`);
+          }
         }
       }
     }
 
     return cleaned;
-  } catch {
+  } catch (dirErr) {
+    if (process.env.DEBUG) {
+      console.warn(`[DEBUG] cleanupStaleLocks: Could not scan ${dirPath}: ${dirErr.message}`);
+    }
     return 0;
   }
 }
@@ -1575,6 +1656,7 @@ module.exports = {
   // Request Log
   countRequestLogEntries,
   getLastRequestLogEntry,
+  getHighestRequestId,
   getNextRequestId,
   addRequestLogEntry,
 
@@ -1605,3 +1687,23 @@ module.exports = {
   findCustomHooks,
   findTypeDefinitions,
 };
+
+// ============================================================
+// Automatic Stale Lock Cleanup on Module Load
+// ============================================================
+
+// Clean up any stale locks from previous sessions/crashes
+// This runs once when the module is first required
+(function autoCleanupStaleLocks() {
+  try {
+    // Only clean up if STATE_DIR exists (workflow initialized)
+    if (dirExists(STATE_DIR)) {
+      const cleaned = cleanupStaleLocks(STATE_DIR, 60000); // 60s stale threshold
+      if (cleaned > 0 && process.env.DEBUG) {
+        console.log(`[DEBUG] Auto-cleaned ${cleaned} stale lock(s) from ${STATE_DIR}`);
+      }
+    }
+  } catch {
+    // Silent failure - don't break module loading
+  }
+})();

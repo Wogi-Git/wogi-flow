@@ -3114,6 +3114,9 @@ ${step.description || ''}
     }
 
     // Legacy fallback: write to hybrid-session.json directly
+    // DEPRECATED: This path is kept for backward compatibility but will be removed
+    // Enable durableSteps in config.json to use the modern session management
+    console.warn('[DEPRECATED] Using legacy hybrid-session.json - enable durableSteps.enabled in config.json');
     const sessionPath = path.join(STATE_DIR, 'hybrid-session.json');
 
     let session = {
@@ -3150,9 +3153,10 @@ ${step.description || ''}
       return durableSession.getHybridSession();
     }
 
-    // Legacy fallback
+    // Legacy fallback - DEPRECATED
     const sessionPath = path.join(STATE_DIR, 'hybrid-session.json');
     if (fs.existsSync(sessionPath)) {
+      console.warn('[DEPRECATED] Reading legacy hybrid-session.json - enable durableSteps.enabled in config.json');
       return JSON.parse(fs.readFileSync(sessionPath, 'utf-8'));
     }
     return null;

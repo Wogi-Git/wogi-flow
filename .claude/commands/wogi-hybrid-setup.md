@@ -41,8 +41,8 @@ node scripts/flow-hybrid-interactive.js
    - Tests the connection
    - Saves configuration to `config.json`
 
-4. **Creates state file**
-   - `hybrid-session.json` for tracking execution
+4. **Uses durable session system**
+   - Session state tracked in `durable-history.json`
 
 ## Requirements
 

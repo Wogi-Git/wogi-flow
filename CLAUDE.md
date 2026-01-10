@@ -253,11 +253,21 @@ When user corrects you:
 
 ## Workflow State Files
 
-**Only these belong in `.workflow/state/`:**
-- `ready.json`, `request-log.md`, `app-map.md`, `decisions.md`
-- `progress.md`, `feedback-patterns.md`, `components/`
+**Core state files in `.workflow/state/`:**
+- `ready.json` - Task queue (ready, inProgress, blocked, recentlyCompleted)
+- `request-log.md` - Log of all requests that changed files
+- `app-map.md` - Component registry
+- `decisions.md` - Project coding patterns and rules
+- `progress.md` - Session progress tracking
+- `feedback-patterns.md` - Learning from user corrections
+- `durable-session.json` - Current task session state (v2.0)
+- `durable-history.json` - Completed session history
+- `component-index.json` - Auto-generated component index
+- `digests/` - Transcript digestion session files
 
-**NEVER create additional files in `.workflow/state/`**
+**System-managed (don't edit manually):**
+- `session-state.json` - Transient session state
+- `*.template` files - Templates for fresh installs
 
 ## Commit Behavior (IMPORTANT)
 

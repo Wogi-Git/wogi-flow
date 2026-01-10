@@ -204,9 +204,60 @@ function analyzeForDecomposition(title) {
 }
 
 /**
+ * Sanitize feature name to prevent path traversal and invalid characters
+ * @param {string} feature - The feature name to sanitize
+ * @returns {string} Sanitized feature name
+ */
+function sanitizeFeatureName(feature) {
+  if (!feature || typeof feature !== 'string') {
+    return 'general';
+  }
+
+  // Remove path traversal attempts and normalize
+  let sanitized = feature
+    .replace(/\.\./g, '')           // Remove ..
+    .replace(/[\/\\]/g, '-')        // Replace slashes with dashes
+    .replace(/[<>:"|?*\x00-\x1f]/g, '')  // Remove invalid filename chars
+    .replace(/^[.\s]+|[.\s]+$/g, '')    // Remove leading/trailing dots and spaces
+    .trim();
+
+  // If empty after sanitization, use default
+  if (!sanitized) {
+    return 'general';
+  }
+
+  // Limit length
+  if (sanitized.length > 100) {
+    sanitized = sanitized.substring(0, 100);
+  }
+
+  return sanitized;
+}
+
+/**
+ * Validate that a path stays within the allowed directory
+ * @param {string} targetPath - The path to validate
+ * @param {string} allowedDir - The directory that must contain the path
+ * @returns {boolean} True if valid
+ */
+function isPathWithinDir(targetPath, allowedDir) {
+  const resolved = path.resolve(targetPath);
+  const resolvedAllowed = path.resolve(allowedDir);
+  return resolved.startsWith(resolvedAllowed + path.sep) || resolved === resolvedAllowed;
+}
+
+/**
  * Create story with optional deep decomposition
  */
 async function createStory(title, feature, options = {}) {
+  // Input validation
+  if (!title || typeof title !== 'string' || title.trim().length === 0) {
+    throw new Error('Title is required and must be a non-empty string');
+  }
+
+  // Sanitize feature name to prevent path traversal
+  const sanitizedFeature = sanitizeFeatureName(feature);
+
   const config = getConfig();
   const decompositionConfig = config.storyDecomposition || {};
 
@@ -214,8 +265,14 @@ async function createStory(title, feature, options = {}) {
   const defaultPriority = getConfigValue('priorities.defaultPriority', 'P2');
   const priority = options.priority || defaultPriority;
 
-  // Ensure directories exist
-  const featureDir = path.join(CHANGES_DIR, feature);
+  // Build and validate feature directory path
+  const featureDir = path.join(CHANGES_DIR, sanitizedFeature);
+
+  // Ensure the path stays within CHANGES_DIR (defense in depth)
+  if (!isPathWithinDir(featureDir, CHANGES_DIR)) {
+    throw new Error(`Invalid feature name: path traversal detected`);
+  }
+
   fs.mkdirSync(featureDir, { recursive: true });
 
   // Generate hash-based task ID
@@ -229,7 +286,7 @@ async function createStory(title, feature, options = {}) {
   const result = {
     taskId,
     title,
-    feature,
+    feature: sanitizedFeature,
     priority,
     storyFile,
     subTasks: []

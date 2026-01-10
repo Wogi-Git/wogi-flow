@@ -213,9 +213,7 @@
   },
   "testing": {
     "runAfterTask": false,
-    "runBeforeCommit": false,
-    "browserTests": false,
-    "browserTestUrl": "http://localhost:3000"
+    "runBeforeCommit": false
   },
   "regressionTesting": {
     "enabled": true,
@@ -229,7 +227,8 @@
     "runForUITasks": true,
     "autoRun": false,
     "timeout": 30000,
-    "screenshotOnFailure": true
+    "screenshotOnFailure": true,
+    "baseUrl": "http://localhost:3000"
   },
   "componentRules": {
     "preferVariants": true,
@@ -246,10 +245,12 @@
   "skills": {
     "installed": [
       "nestjs",
-      "react",
-      "python",
       "figma-analyzer",
       "transcript-digestion"
+    ],
+    "comingSoon": [
+      "react",
+      "python"
     ],
     "autoInvoke": true,
     "maxSkillsPerTask": 3,
