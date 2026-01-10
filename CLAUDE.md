@@ -99,8 +99,19 @@ Before writing ANY code, verify:
 | `/wogi-story "title"` | Create story with acceptance criteria |
 | `/wogi-status` | Project overview |
 | `/wogi-health` | Check workflow health |
+| `/wogi-session-review` | Comprehensive code review with 3 parallel agents |
 
 See `.claude/docs/commands.md` for complete command reference.
+
+## Automatic Triggers
+
+These phrases automatically invoke commands:
+
+| User Says | Action |
+|-----------|--------|
+| "please review" | Run `/wogi-session-review` |
+| "review what we did" | Run `/wogi-session-review` |
+| "review the changes" | Run `/wogi-session-review` |
 
 ## Session Startup
 
