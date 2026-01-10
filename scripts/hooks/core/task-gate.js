@@ -79,6 +79,26 @@ function getActiveTask() {
  */
 function checkTaskGate(options = {}) {
   const { filePath, operation = 'edit' } = options;
+  // Exempt workflow state files from task gating
+  if (filePath && filePath.includes('.workflow/state/')) {
+    return {
+      allowed: true,
+      blocked: false,
+      message: null,
+      reason: 'workflow_state_exempt'
+    };
+  }
+
+  // Also exempt plan files
+  if (filePath && filePath.includes('.claude/plans/')) {
+    return {
+      allowed: true,
+      blocked: false,
+      message: null,
+      reason: 'plan_file_exempt'
+    };
+  }
+
 
   // Check if gating is enabled
   if (!isTaskGatingEnabled()) {
@@ -142,7 +162,7 @@ function generateBlockMessage(operation, filePath) {
 
 To proceed:
 1. Check available tasks: /wogi-ready
-2. Start an existing task: /wogi-start TASK-XXX
+2. Start an existing task: /wogi-start wf-XXXXXXXX
 3. Or create a new task: /wogi-story "description"
 
 Task gating is enforced when strictMode is enabled.`;
