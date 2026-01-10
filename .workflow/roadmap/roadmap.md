@@ -655,6 +655,40 @@ Only implement if users have 3+ models configured.
 
 ---
 
+### Variable Substitution in Config
+
+**Source**: OpenCode analysis (2026-01-10)
+**Why**: Cleaner config with dynamic values - `{env:VAR}` and `{file:path}` patterns
+**Trigger**: When users request file-based secrets or composable config
+**Effort**: 4-6 hours
+**Risk**: Adds syntax complexity for marginal benefit
+
+**Use Cases**:
+1. **File-based secrets** (Kubernetes pattern):
+   ```json
+   "providers": {
+     "anthropic": { "apiKey": "{file:~/.secrets/anthropic-key}" }
+   }
+   ```
+
+2. **Composable prompts**:
+   ```json
+   "agents": {
+     "reviewer": { "rules": "{file:.workflow/prompts/review-rules.md}" }
+   }
+   ```
+
+3. **Team-wide templates**:
+   ```json
+   "storyTemplate": "{file:~/.company/wogi/story-template.md}"
+   ```
+
+**Current alternative**: We already load files via paths (agents/, skills/). This would add inline substitution for cleaner config.
+
+**Would implement when**: Users explicitly request file-based secrets or report env var limitations.
+
+---
+
 ### Background Sync Daemon
 
 **Source**: Beads framework analysis (Steve Yegge)
@@ -760,6 +794,7 @@ We're skeptical these add value. Would need strong evidence.
 
 | Date | Change |
 |------|--------|
+| 2026-01-10 | Added: Variable Substitution in Config - `{env:VAR}` and `{file:path}` patterns (Priority 3, low priority) |
 | 2026-01-09 | Added: Hosted Pricing & Performance Table - live pricing API, performance benchmarks, cost-performance matrix, model recommendations |
 | 2026-01-09 | Added: Model-Specific Configuration & Prompting - folder structures, provider rules, version adjustments, prompt templates per model |
 | 2026-01-09 | Added: npm Package Distribution - easy install/update via npm (Priority 2) |
