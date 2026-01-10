@@ -1,8 +1,8 @@
 Start working on a task. Provide the task ID as argument: `/wogi-start wf-XXXXXXXX`
 
-## Droid-Inspired Execution (v2.1)
+## Structured Execution (v2.1)
 
-This command implements a **structured execution loop** inspired by Factory AI Droid:
+This command implements a **structured execution loop**:
 - **Model-invoked skills**: Auto-loads relevant skills based on task context
 - **Specification mode**: Generates spec before coding (for medium/large tasks)
 - **Four-phase loop**: Spec → Test → Implement → Verify

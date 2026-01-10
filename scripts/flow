@@ -159,6 +159,13 @@ show_help() {
     echo "  loop stats           Show loop statistics"
     echo "  loop can-exit        Check if current loop can exit"
     echo ""
+    echo "Task Queue (v2.1):"
+    echo "  queue init <ids...>  Initialize multi-task queue"
+    echo "  queue status         Show queue status"
+    echo "  queue clear          Clear the queue"
+    echo "  queue parse \"text\"   Parse natural language for task IDs"
+    echo "  queue advance        Advance to next task"
+    echo ""
     echo "Durable Sessions (v2.0):"
     echo "  suspend              Suspend current task"
     echo "  suspend --wait-ci    Wait for CI/CD pipeline"
@@ -429,6 +436,9 @@ case "${1:-}" in
                 echo "Usage: flow loop [status|stats|can-exit|enable|disable]"
                 ;;
         esac
+        ;;
+    queue)
+        node "$SCRIPT_DIR/flow-queue.js" "${@:2}"
         ;;
     suspend)
         node "$SCRIPT_DIR/flow-suspend.js" "${@:2}"

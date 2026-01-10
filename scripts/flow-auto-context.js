@@ -9,7 +9,7 @@
  * - component-index.json (auto-scanned files)
  * - Codebase grep results
  *
- * Inspired by Factory AI's proactive context gathering approach.
+ * Uses proactive context gathering approach.
  *
  * Usage as module:
  *   const { getAutoContext } = require('./flow-auto-context');

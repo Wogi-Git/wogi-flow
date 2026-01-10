@@ -191,7 +191,7 @@ class ClaudeCodeAdapter extends BaseAdapter {
   }
 
   /**
-   * Transform Stop result (loop enforcement)
+   * Transform Stop result (loop enforcement + task queue continuation)
    */
   transformStop(coreResult) {
     // Can exit
@@ -202,7 +202,42 @@ class ClaudeCodeAdapter extends BaseAdapter {
       };
     }
 
-    // Block exit
+    // Continue to next task in queue (not blocked, just continue)
+    if (coreResult.continueToNext) {
+      const nextTaskMsg = `
+✓ Task complete!
+
+**Continuing to next task in queue:** ${coreResult.nextTaskId}
+(${coreResult.remaining} task(s) remaining)
+
+Run: /wogi-start ${coreResult.nextTaskId}`;
+
+      return {
+        continue: true, // Force continue to next task
+        systemMessage: nextTaskMsg,
+        hookSpecificOutput: {
+          hookEventName: 'Stop',
+          decision: 'continue_queue',
+          nextTaskId: coreResult.nextTaskId,
+          remaining: coreResult.remaining
+        }
+      };
+    }
+
+    // Prompt before continuing to next task (pauseBetweenTasks: true)
+    if (coreResult.shouldPrompt) {
+      return {
+        continue: true,
+        systemMessage: coreResult.message,
+        hookSpecificOutput: {
+          hookEventName: 'Stop',
+          decision: 'prompt_continue',
+          nextTaskId: coreResult.nextTaskId
+        }
+      };
+    }
+
+    // Block exit - criteria not complete
     return {
       continue: true, // Force continue
       stopReason: coreResult.message || 'Acceptance criteria not complete',

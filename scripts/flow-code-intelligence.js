@@ -9,7 +9,7 @@
  * - Function call graphs
  * - Semantic code search
  *
- * Inspired by Factory AI Droid's HyperCode + ByteRank approach.
+ * Uses semantic code analysis for better understanding.
  *
  * Usage:
  *   const { analyzeRelationships, findRelatedCode } = require('./flow-code-intelligence');

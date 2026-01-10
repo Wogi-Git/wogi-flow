@@ -3,7 +3,7 @@
 /**
  * Wogi Flow - Multi-Approach Validation
  *
- * Inspired by Factory AI's multi-trajectory approach:
+ * Uses multi-trajectory validation approach:
  * For complex tasks, generate multiple solution approaches,
  * validate each, and select the best one.
  *

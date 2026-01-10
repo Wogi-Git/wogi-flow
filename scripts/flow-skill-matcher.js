@@ -8,7 +8,7 @@
  * - File patterns being modified
  * - Task type (feature, bugfix, refactor)
  *
- * Inspired by Factory AI Droid's model-invoked skills approach.
+ * Uses model-invoked skills approach.
  *
  * Usage:
  *   const { matchSkills, loadSkillContext } = require('./flow-skill-matcher');

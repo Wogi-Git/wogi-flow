@@ -14,6 +14,7 @@ const fs = require('fs');
 
 // Import from parent scripts directory
 const { getConfig, PATHS } = require('../../flow-utils');
+const { checkQueueContinuation, advanceTaskQueue } = require('../../flow-durable-session');
 
 /**
  * Check if loop enforcement is enabled
@@ -123,11 +124,45 @@ function checkLoopExit() {
   const criteriaStatus = checkCriteriaStatus(session);
 
   if (criteriaStatus.allComplete) {
+    // Task criteria complete - check if there are more tasks in queue
+    const queueResult = checkQueueContinuation();
+
+    if (queueResult.shouldContinue) {
+      // Advance queue and signal to continue to next task
+      advanceTaskQueue();
+      return {
+        canExit: false,
+        blocked: false,
+        continueToNext: true,
+        nextTaskId: queueResult.nextTaskId,
+        remaining: queueResult.remaining,
+        message: queueResult.message,
+        reason: 'queue_has_more_tasks',
+        criteriaStatus
+      };
+    }
+
+    if (queueResult.shouldPrompt) {
+      // Pause between tasks (if configured)
+      return {
+        canExit: false,
+        blocked: false,
+        shouldPrompt: true,
+        nextTaskId: queueResult.nextTaskId,
+        message: queueResult.message,
+        reason: 'queue_pause_between_tasks',
+        criteriaStatus
+      };
+    }
+
+    // No queue or queue complete - allow exit
     return {
       canExit: true,
       blocked: false,
-      message: `All ${criteriaStatus.completed} acceptance criteria completed.`,
-      reason: 'criteria_complete',
+      message: queueResult.reason === 'queue_complete'
+        ? queueResult.message
+        : `All ${criteriaStatus.completed} acceptance criteria completed.`,
+      reason: queueResult.reason === 'queue_complete' ? 'queue_complete' : 'criteria_complete',
       criteriaStatus
     };
   }

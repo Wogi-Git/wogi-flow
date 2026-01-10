@@ -213,6 +213,52 @@ Load context → Decompose into todos → FOR EACH scenario:
 
 Options: `--no-loop`, `--pause-between`, `--max-retries N`
 
+## Multi-Task Execution (v2.1)
+
+When user requests multiple tasks, automatically queue them for sequential execution with full quality validation per task.
+
+### Natural Language Detection
+
+Detect multi-task requests without requiring slash commands:
+
+| User Says | Action |
+|-----------|--------|
+| "do story wf-001, wf-002, wf-003" | Queue these 3 specific tasks |
+| "work on tasks 1-3" | Queue first 3 ready tasks |
+| "implement these 3 features" | Queue next 3 from ready.json |
+| "do all ready tasks" | Queue all from ready.json |
+
+### How to Handle
+
+When multi-task request detected:
+1. Parse task IDs from request (or get N from ready.json)
+2. Read ready.json to validate tasks exist
+3. Initialize task queue: `initTaskQueue([taskIds], 'natural')`
+4. Start first task with `/wogi-start <first-task>`
+5. After each task completes, loop automatically continues to next
+6. Only stop when ALL queued tasks are complete
+
+### Queue Behavior
+
+- **Default**: Auto-continue to next task (no pause)
+- **Configurable**: Set `taskQueue.pauseBetweenTasks: true` to confirm between tasks
+- **Full quality per task**: Each task gets complete execution loop with all validation
+
+### Example Flow
+
+```
+User: "work on stories wf-001, wf-002, wf-003"
+
+→ Initialize queue with [wf-001, wf-002, wf-003]
+→ Start wf-001 with full loop
+→ [wf-001 completes]
+→ Auto-continue to wf-002
+→ [wf-002 completes]
+→ Auto-continue to wf-003
+→ [wf-003 completes]
+→ Queue complete! All 3 tasks done.
+```
+
 ## Agent Personas
 
 Load from `agents/` when needed:

@@ -12,7 +12,7 @@
  * 3. Records per-model success/failure patterns
  * 4. Auto-learns from repeated mistakes (updates adapter file)
  *
- * Inspired by Factory AI's multi-model approach and per-model learning.
+ * Uses multi-model approach with per-model learning.
  *
  * Usage as module:
  *   const { getCurrentModel, getPromptAdjustments, recordModelResult } = require('./flow-model-adapter');

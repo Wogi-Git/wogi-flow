@@ -1,99 +1,144 @@
 Execute multiple tasks in sequence, following all workflow rules.
 
-Usage:
+**v2.1**: Now uses task queue for automatic continuation between tasks.
+
+## Usage
+
 - `/wogi-bulk` - Work through all ready tasks
 - `/wogi-bulk 3` - Work through next 3 tasks
-- `/wogi-bulk TASK-001 TASK-003 TASK-005` - Work specific tasks in order
+- `/wogi-bulk wf-001 wf-002 wf-003` - Work specific tasks in order
+
+**Natural Language Alternative** (no slash command needed):
+- "do story 1-3" or "work on tasks 1-5"
+- "do wf-001, wf-002, wf-003"
+- "work on these 3 stories"
+
+## How It Works (v2.1)
+
+1. **Initialize Queue**:
+   - Parse task IDs from arguments or natural language
+   - Store in durable session's `taskQueue`
+   - Run `flow queue init <task-ids>`
+
+2. **Start First Task**:
+   - Run `/wogi-start <first-task-id>`
+   - Full execution loop with all quality gates
+
+3. **Automatic Continuation**:
+   - When task completes, stop hook checks queue
+   - If more tasks, outputs next task instruction
+   - Continues until queue is empty
+
+4. **Quality Per Task**:
+   - Each task runs complete execution loop
+   - Spec generation (if needed)
+   - All acceptance criteria verification
+   - Quality gates and validation
+   - Request log and app-map updates
 
 ## Execution Flow
 
-1. **Plan the order**:
-   - Read `ready.json` for available tasks
-   - Sort by: dependencies first, then priority (high→medium→low)
-   - Skip blocked tasks
-   - Show plan and get user confirmation
-
-2. **For each task**:
-   ```
-   ═══════════════════════════════════════
-   TASK 1 of 5: TASK-012 - Add forgot password link
-   ═══════════════════════════════════════
-   ```
-   
-   a. **Before** (load context):
-      - Check app-map.md for components
-      - Check decisions.md for patterns
-      - Load acceptance criteria
-   
-   b. **Implement**:
-      - Follow acceptance criteria exactly
-      - Reuse existing components
-      - Follow coding patterns
-   
-   c. **After** (quality gates):
-      - Update request-log.md
-      - Update app-map.md if new components
-      - Verify all acceptance criteria
-      - Run tests if configured
-      - Update ready.json
-   
-   d. **Checkpoint**:
-      - Commit changes
-      - Check context size
-      - Compact if needed (after every 2-3 tasks)
-
-3. **Between tasks**:
-   - Brief summary of what was done
-   - Ask: "Continue to next task?" (unless running unattended)
-
-4. **Final summary**:
-   ```
-   ═══════════════════════════════════════
-   BULK EXECUTION COMPLETE
-   ═══════════════════════════════════════
-   
-   Completed: 5 tasks
-   - TASK-012: Add forgot password link ✓
-   - TASK-015: User profile page ✓
-   - TASK-018: Settings modal ✓
-   - TASK-020: Email preferences ✓
-   - TASK-022: Notification settings ✓
-   
-   Skipped: 1 task
-   - TASK-025: Blocked by TASK-024
-   
-   Request-log: 5 entries added
-   Components: 2 new, 3 reused
-   Commits: 5
-   ```
-
-## Example Output
-
 ```
-📋 Bulk Execution Plan
+┌─────────────────────────────────────────────────────────────┐
+│  /wogi-bulk 3                                               │
+├─────────────────────────────────────────────────────────────┤
+│  1. Get 3 ready tasks sorted by priority                    │
+│  2. Initialize task queue: [wf-001, wf-002, wf-003]         │
+│  3. Start wf-001 (full loop)                                │
+│     → All scenarios implemented and verified                │
+│     → Quality gates pass                                    │
+│     → Committed                                             │
+│  4. Stop hook detects queue has more tasks                  │
+│  5. Auto-continue to wf-002 (full loop)                     │
+│     → ...                                                   │
+│  6. Auto-continue to wf-003 (full loop)                     │
+│     → ...                                                   │
+│  7. Queue empty - stop                                      │
+└─────────────────────────────────────────────────────────────┘
+```
 
-Order (by dependencies + priority):
-1. TASK-012: Add forgot password link [High] - no deps
-2. TASK-014: Password reset API [High] - depends on TASK-012
-3. TASK-015: User profile page [Medium] - no deps
-4. TASK-018: Settings modal [Low] - depends on TASK-015
+## Output
 
-Skipping (blocked):
-- TASK-025: Waiting on external API
+**Start:**
+```
+📋 Task Queue Initialized
 
-Proceed with 4 tasks? (y/n)
+Tasks (3):
+  1. wf-001 - Add user login [P1]
+  2. wf-002 - Password reset [P2]
+  3. wf-003 - Session management [P2]
+
+Starting first task...
+```
+
+**Between Tasks (automatic):**
+```
+✓ Task complete!
+
+Continuing to next task in queue: wf-002
+(2 task(s) remaining)
+
+Run: /wogi-start wf-002
+```
+
+**Final (after last task):**
+```
+✓ All tasks complete!
+
+Queue Summary:
+  ✓ wf-001 - Add user login
+  ✓ wf-002 - Password reset
+  ✓ wf-003 - Session management
+
+3/3 tasks completed successfully.
 ```
 
 ## Options
 
-- **Unattended mode**: `/wogi-bulk --auto` - Don't pause between tasks
-- **Dry run**: `/wogi-bulk --plan` - Show order without executing
-- **Feature only**: `/wogi-bulk --feature auth` - Only tasks in auth feature
+- `--auto` - Don't pause between tasks (default behavior in v2.1)
+- `--pause` - Pause and ask before each task
+- `--plan` - Show order without executing
+- `--feature <name>` - Only tasks in specified feature
+
+## Configuration
+
+In `config.json`:
+```json
+{
+  "taskQueue": {
+    "enabled": true,
+    "autoContinue": true,
+    "pauseBetweenTasks": false,  // Default: automatic
+    "maxQueueSize": 10,
+    "showProgressSummary": true
+  }
+}
+```
+
+## CLI Commands
+
+```bash
+# Initialize queue directly
+flow queue init wf-001 wf-002 wf-003
+
+# Check queue status
+flow queue status
+
+# Parse natural language
+flow queue parse "do story 1-3"
+
+# Clear queue
+flow queue clear
+
+# Advance manually
+flow queue advance
+```
 
 ## Important Rules
 
-1. **Always follow Task Execution Rules** from CLAUDE.md
-2. **Compact proactively** - After every 2-3 tasks to avoid context overflow
-3. **Commit after each task** - Don't batch commits
-4. **Stop on failure** - If a task fails quality gates, stop and report
-5. **Respect dependencies** - Never start a task before its dependencies are done
+1. **Full loop per task** - Each task runs complete execution with all quality gates
+2. **Automatic continuation** - Default is no pause between tasks
+3. **Commit after each task** - Progress saved even if interrupted
+4. **Stop on failure** - If quality gates fail, stop and report
+5. **Respect dependencies** - Tasks sorted by dependencies then priority
+6. **Context management** - Consider `/wogi-compact` after 3+ tasks

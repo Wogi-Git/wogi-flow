@@ -1,3 +1,8 @@
+---
+loadable: false
+status: coming-soon
+---
+
 # Python Skill
 
 Python/FastAPI patterns and best practices.

@@ -4,7 +4,7 @@
  * Wogi Flow - Command Metrics Tracking
  *
  * Tracks command success/failure rates to surface problematic tools.
- * Inspired by Factory AI's insight that tool reliability is a primary bottleneck.
+ * Based on insight that tool reliability is a primary bottleneck.
  *
  * Usage as module:
  *   const { recordCommandResult, getProblematicCommands } = require('./flow-metrics');

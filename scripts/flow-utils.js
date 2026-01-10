@@ -118,7 +118,7 @@ const PATHS = {
   checkpoints: path.join(WORKFLOW_DIR, 'checkpoints'),
   corrections: path.join(WORKFLOW_DIR, 'corrections'),
   traces: path.join(WORKFLOW_DIR, 'traces'),
-  // Factory AI-inspired features
+  // Advanced workflow features
   commandMetrics: path.join(STATE_DIR, 'command-metrics.json'),
   modelStats: path.join(STATE_DIR, 'model-stats.json'),
   approaches: path.join(STATE_DIR, 'approaches'),

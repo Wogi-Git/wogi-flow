@@ -6,7 +6,7 @@
  * Every phase produces artifacts. Never trust chat output.
  * Explicit success criteria with commands and pass/fail conditions.
  *
- * Inspired by Factory AI Droid's file-based validation approach.
+ * Uses file-based validation approach.
  *
  * Key principle: "Logs are state - next iteration depends on them"
  *
@@ -300,7 +300,7 @@ ${result.results.map(r =>
 
 /**
  * Execute structured loop: Spec → Test → Implement → Verify
- * This is the core Droid-inspired execution model
+ * This is the core structured execution model
  *
  * @param {string} taskId - Task ID
  * @param {object} callbacks - Phase callbacks

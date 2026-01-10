@@ -51,6 +51,13 @@
     "recheckAllAfterFix": true,
     "regressionOnRecheck": "warn"
   },
+  "taskQueue": {
+    "enabled": true,
+    "autoContinue": true,
+    "pauseBetweenTasks": false,
+    "maxQueueSize": 10,
+    "showProgressSummary": true
+  },
   "durableSteps": {
     "enabled": true,
     "autoResume": true,

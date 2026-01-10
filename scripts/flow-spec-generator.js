@@ -4,9 +4,9 @@
  * Wogi Flow - Specification Generator (Priority 2: Mandatory Spec Mode)
  *
  * Generates comprehensive specifications BEFORE implementation starts.
- * Inspired by Factory AI Droid's "Spec Mode" - planning before coding.
+ * Follows "spec-first" approach - planning before coding.
  *
- * Key principle: "A droid is only as good as its plan"
+ * Key principle: "Quality code starts with quality planning"
  *
  * Usage:
  *   const { generateSpec, loadSpec, validateSpec } = require('./flow-spec-generator');

@@ -190,6 +190,16 @@ function createSessionObject(taskId, taskType, steps = []) {
       stepsFailed: 0,
       stepsSkipped: 0,
       tokensSaved: 0
+    },
+
+    // Task queue for multi-task execution (v2.1)
+    taskQueue: {
+      enabled: false,
+      tasks: [],           // Array of task IDs to process
+      currentIndex: 0,     // Current position in queue
+      source: null,        // How queue was created: "bulk", "natural", "manual"
+      queuedAt: null,
+      completedTasks: []   // Track completed task IDs
     }
   };
 }
@@ -1184,6 +1194,190 @@ function getSessionStats() {
 }
 
 // ============================================================================
+// Task Queue Management (v2.1)
+// ============================================================================
+
+/**
+ * Initialize a task queue for multi-task execution
+ * @param {string[]} taskIds - Array of task IDs to queue
+ * @param {string} source - Source of queue: "bulk", "natural", "manual"
+ * @returns {Object} Updated session
+ */
+function initTaskQueue(taskIds, source = 'manual') {
+  const session = loadDurableSession();
+  if (!session) {
+    throw new Error('No active session to initialize queue');
+  }
+
+  session.taskQueue = {
+    enabled: true,
+    tasks: taskIds,
+    currentIndex: 0,
+    source,
+    queuedAt: new Date().toISOString(),
+    completedTasks: []
+  };
+
+  // Ensure first task matches current session
+  if (taskIds[0] && session.taskId !== taskIds[0]) {
+    console.warn(`[Queue] First task ${taskIds[0]} doesn't match current session ${session.taskId}`);
+  }
+
+  session.updatedAt = new Date().toISOString();
+  saveDurableSession(session);
+  return session;
+}
+
+/**
+ * Get current queue status
+ * @returns {Object} Queue status: { hasQueue, hasMoreTasks, currentTask, nextTask, remaining, completed }
+ */
+function getQueueStatus() {
+  const session = loadDurableSession();
+  if (!session || !session.taskQueue?.enabled) {
+    return {
+      hasQueue: false,
+      hasMoreTasks: false,
+      currentTask: session?.taskId || null,
+      nextTask: null,
+      remaining: 0,
+      completed: 0,
+      total: 0
+    };
+  }
+
+  const queue = session.taskQueue;
+  const remaining = queue.tasks.length - queue.currentIndex - 1;
+  const nextTask = remaining > 0 ? queue.tasks[queue.currentIndex + 1] : null;
+
+  return {
+    hasQueue: true,
+    hasMoreTasks: remaining > 0,
+    currentTask: queue.tasks[queue.currentIndex],
+    nextTask,
+    remaining,
+    completed: queue.completedTasks.length,
+    total: queue.tasks.length,
+    source: queue.source
+  };
+}
+
+/**
+ * Advance to next task in queue (called when current task completes)
+ * @returns {Object} { advanced, nextTaskId, queueComplete }
+ */
+function advanceTaskQueue() {
+  const session = loadDurableSession();
+  if (!session || !session.taskQueue?.enabled) {
+    return { advanced: false, nextTaskId: null, queueComplete: true };
+  }
+
+  const queue = session.taskQueue;
+
+  // Mark current task as completed
+  const currentTaskId = queue.tasks[queue.currentIndex];
+  if (currentTaskId && !queue.completedTasks.includes(currentTaskId)) {
+    queue.completedTasks.push(currentTaskId);
+  }
+
+  // Check if more tasks
+  if (queue.currentIndex >= queue.tasks.length - 1) {
+    // Queue complete
+    session.updatedAt = new Date().toISOString();
+    saveDurableSession(session);
+    return {
+      advanced: false,
+      nextTaskId: null,
+      queueComplete: true,
+      completedTasks: queue.completedTasks
+    };
+  }
+
+  // Advance to next task
+  queue.currentIndex++;
+  const nextTaskId = queue.tasks[queue.currentIndex];
+
+  session.updatedAt = new Date().toISOString();
+  saveDurableSession(session);
+
+  return {
+    advanced: true,
+    nextTaskId,
+    queueComplete: false,
+    remaining: queue.tasks.length - queue.currentIndex - 1
+  };
+}
+
+/**
+ * Clear the task queue
+ * @returns {boolean} Success
+ */
+function clearTaskQueue() {
+  const session = loadDurableSession();
+  if (!session) return false;
+
+  session.taskQueue = {
+    enabled: false,
+    tasks: [],
+    currentIndex: 0,
+    source: null,
+    queuedAt: null,
+    completedTasks: session.taskQueue?.completedTasks || []
+  };
+
+  session.updatedAt = new Date().toISOString();
+  saveDurableSession(session);
+  return true;
+}
+
+/**
+ * Check if should continue to next task (used by stop hook)
+ * @returns {Object} { shouldContinue, nextTaskId, message }
+ */
+function checkQueueContinuation() {
+  const config = getConfig();
+  const queueConfig = config.taskQueue || {};
+
+  // Check if queue feature is enabled
+  if (queueConfig.enabled === false) {
+    return { shouldContinue: false, reason: 'queue_disabled' };
+  }
+
+  const status = getQueueStatus();
+
+  if (!status.hasQueue) {
+    return { shouldContinue: false, reason: 'no_queue' };
+  }
+
+  if (!status.hasMoreTasks) {
+    return {
+      shouldContinue: false,
+      reason: 'queue_complete',
+      message: `All ${status.total} tasks completed!`,
+      completedTasks: status.completed
+    };
+  }
+
+  // Check if should pause between tasks
+  if (queueConfig.pauseBetweenTasks) {
+    return {
+      shouldContinue: false,
+      shouldPrompt: true,
+      nextTaskId: status.nextTask,
+      message: `Task complete. Next: ${status.nextTask} (${status.remaining} remaining). Continue?`
+    };
+  }
+
+  // Auto-continue (default)
+  return {
+    shouldContinue: true,
+    nextTaskId: status.nextTask,
+    remaining: status.remaining,
+    message: `Task complete. Auto-continuing to: ${status.nextTask}`
+  };
+}
+
+// ============================================================================
 // Exports
 // ============================================================================
 
@@ -1240,7 +1434,14 @@ module.exports = {
 
   // Utilities
   getSessionStats,
-  normalizeStep
+  normalizeStep,
+
+  // Task Queue (v2.1)
+  initTaskQueue,
+  getQueueStatus,
+  advanceTaskQueue,
+  clearTaskQueue,
+  checkQueueContinuation
 };
 
 // ============================================================================
