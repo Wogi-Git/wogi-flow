@@ -1,4 +1,4 @@
-# [TASK-XXX] [Title]
+# [wf-XXXXXXXX] [Title]
 
 ## User Story
 **As a** [user type]
@@ -46,7 +46,7 @@
 3. [ ] [Step 3: Verify edge case]
 
 ## Dependencies
-- [TASK-XXX] - [why needed first]
+- [wf-XXXXXXXX] - [why needed first]
 - None
 
 ## Complexity

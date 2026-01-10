@@ -22,6 +22,7 @@ const {
   RESUME_CONDITION
 } = require('./flow-durable-session');
 const { color, getConfig } = require('./flow-utils');
+const { validateCommand } = require('./flow-workflow');
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -38,6 +39,14 @@ function parseArgs() {
     switch (arg) {
       case '--wait-ci':
       case '-c':
+        // SECURITY: Validate command before storing
+        if (nextArg) {
+          const validation = validateCommand(nextArg);
+          if (validation.blocked) {
+            console.error(color('red', `Error: Unsafe command rejected - ${validation.reason}`));
+            process.exit(1);
+          }
+        }
         options.type = SUSPENSION_TYPE.CI_CD;
         options.reason = `Waiting for CI/CD: ${nextArg}`;
         options.resumeCondition = {

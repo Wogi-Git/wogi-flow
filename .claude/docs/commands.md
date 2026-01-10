@@ -184,19 +184,6 @@ When user types these commands, execute the corresponding action immediately.
 | `/wogi-correction [TASK-XXX]` | Create detailed correction report for significant bug fix. |
 | `/wogi-help` | Show all available Wogi Flow commands with descriptions. |
 
-### Metrics & Insights
-
-| Command | Action |
-|---------|--------|
-| `/wogi-metrics` | Show command success/failure statistics. |
-| `/wogi-metrics --problems` | Show only commands with >30% failure rate. |
-| `/wogi-metrics --reset` | Clear all metrics data. |
-| `/wogi-insights` | Regenerate codebase-insights.md. |
-| `/wogi-model-adapter` | Show current model adapter info. |
-| `/wogi-model-adapter --stats` | Show per-model success/failure statistics. |
-| `/wogi-multi-approach "task"` | Start multi-approach session for complex task. |
-| `/wogi-multi-approach --analyze "task"` | Analyze task for multi-approach suitability. |
-
 ## CLI Commands
 
 ```bash

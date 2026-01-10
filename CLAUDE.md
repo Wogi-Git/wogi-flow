@@ -31,8 +31,10 @@ If **YES** → Continue to Step 2.
 
 Check `.workflow/state/ready.json` for existing tasks.
 
-- If **YES** → Use `/wogi-start TASK-XXX`
+- If **YES** → Use `/wogi-start <task-id>` (e.g., `wf-a1b2c3d4`)
 - If **NO** → Continue to Step 3
+
+> **Note**: Task IDs use hash-based format `wf-XXXXXXXX`. Legacy `TASK-XXX` format is also supported.
 
 ### Step 3: Assess task size
 
@@ -188,7 +190,7 @@ After EVERY request that changes files:
 
 Use `/wogi-story "title"` to create. Format:
 ```markdown
-# [TASK-XXX] [Title]
+# [wf-XXXXXXXX] [Title]
 
 ## User Story
 **As a** [user] **I want** [action] **So that** [benefit]
@@ -202,7 +204,7 @@ See `agents/story-writer.md` for complete guidance.
 
 ## Self-Completing Task Loop
 
-When you run `/wogi-start TASK-XXX`:
+When you run `/wogi-start <task-id>`:
 ```
 Load context → Decompose into todos → FOR EACH scenario:
   → Implement → Self-verify → Fix if broken → Mark complete

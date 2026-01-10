@@ -1,10 +1,10 @@
-# Correction Report: [TASK-XXX]-Correction-[N]
+# Correction Report: [wf-XXXXXXXX]-Correction-[N]
 
 ## Meta
 
 | Field | Value |
 |-------|-------|
-| Task ID | [TASK-XXX] |
+| Task ID | [wf-XXXXXXXX] |
 | Correction # | [N] |
 | Date | [YYYY-MM-DD] |
 | Severity | [minor/moderate/critical] |
@@ -87,4 +87,4 @@
 ## Linked
 
 - **Request Log**: R-[XXX]
-- **Task**: [TASK-XXX]
+- **Task**: [wf-XXXXXXXX]

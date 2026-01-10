@@ -31,6 +31,51 @@ const PATTERNS_FILE = path.join(WORKFLOW_DIR, 'damage-control.yaml');
 const EVENT_TYPES = ['bash', 'file', 'stop', 'prompt', 'all'];
 const ACTIONS = ['block', 'warn', 'ask', 'allow'];
 
+// Maximum allowed regex pattern length to prevent abuse
+const MAX_REGEX_LENGTH = 500;
+
+/**
+ * Create a RegExp safely, rejecting patterns that could cause ReDoS
+ * @param {string} pattern - The regex pattern string
+ * @param {string} flags - Optional regex flags
+ * @returns {RegExp|null} - Compiled regex or null if unsafe/invalid
+ */
+function safeRegExp(pattern, flags = '') {
+  // Reject overly long patterns
+  if (pattern.length > MAX_REGEX_LENGTH) {
+    console.error(`Regex pattern too long (${pattern.length} > ${MAX_REGEX_LENGTH}): ${pattern.substring(0, 50)}...`);
+    return null;
+  }
+
+  // Check for common ReDoS patterns (nested quantifiers)
+  // These patterns can cause exponential backtracking
+  const redosPatterns = [
+    /\([^)]*\+[^)]*\)\+/,  // (a+)+ nested quantifiers
+    /\([^)]*\*[^)]*\)\+/,  // (a*)+
+    /\([^)]*\+[^)]*\)\*/,  // (a+)*
+    /\([^)]*\*[^)]*\)\*/,  // (a*)*
+    /\([^)]*\+[^)]*\)\{/, // (a+){n}
+    /\([^)]*\*[^)]*\)\{/, // (a*){n}
+    /\.\*\.\*/,           // .*.* greedy wildcards
+    /\.\+\.\+/,           // .+.+ greedy wildcards
+    /\([^)]*\|[^)]*\)\+/, // (a|b)+ alternation with quantifier
+  ];
+
+  for (const redos of redosPatterns) {
+    if (redos.test(pattern)) {
+      console.error(`Potentially unsafe regex pattern (ReDoS risk): ${pattern}`);
+      return null;
+    }
+  }
+
+  try {
+    return new RegExp(pattern, flags);
+  } catch (e) {
+    console.error(`Invalid regex pattern: ${pattern} - ${e.message}`);
+    return null;
+  }
+}
+
 function log(color, ...args) {
   console.log(colors[color] + args.join(' ') + colors.reset);
 }
@@ -343,14 +388,12 @@ function checkEventRule(rule, eventType, context) {
       return null; // Field doesn't exist
     }
 
-    try {
-      const regex = new RegExp(condition.pattern, 'i');
-      if (!regex.test(String(value))) {
-        return null; // Condition not met
-      }
-    } catch (e) {
-      // Invalid regex, skip this condition
-      return null;
+    const regex = safeRegExp(condition.pattern, 'i');
+    if (!regex) {
+      return null; // Invalid or unsafe regex, skip this condition
+    }
+    if (!regex.test(String(value))) {
+      return null; // Condition not met
     }
   }
 
@@ -529,18 +572,14 @@ function checkCommand(cmd) {
 
   // Check blocked patterns
   for (const pattern of patterns.blocked || []) {
-    try {
-      const regex = new RegExp(pattern, 'i');
-      if (regex.test(cmd)) {
-        return {
-          action: 'block',
-          reason: `Matches blocked pattern: ${pattern}`,
-          pattern
-        };
-      }
-    } catch (e) {
-      // Invalid regex, skip
-      console.error(`Invalid regex pattern: ${pattern}`);
+    const regex = safeRegExp(pattern, 'i');
+    if (!regex) continue; // Skip invalid/unsafe patterns
+    if (regex.test(cmd)) {
+      return {
+        action: 'block',
+        reason: `Matches blocked pattern: ${pattern}`,
+        pattern
+      };
     }
   }
 
@@ -549,18 +588,14 @@ function checkCommand(cmd) {
     const pattern = typeof item === 'string' ? item : item.pattern;
     const reason = typeof item === 'object' ? item.reason : 'Matches sensitive pattern';
 
-    try {
-      const regex = new RegExp(pattern, 'i');
-      if (regex.test(cmd)) {
-        return {
-          action: 'ask',
-          reason,
-          pattern
-        };
-      }
-    } catch (e) {
-      // Invalid regex, skip
-      console.error(`Invalid regex pattern: ${pattern}`);
+    const regex = safeRegExp(pattern, 'i');
+    if (!regex) continue; // Skip invalid/unsafe patterns
+    if (regex.test(cmd)) {
+      return {
+        action: 'ask',
+        reason,
+        pattern
+      };
     }
   }
 

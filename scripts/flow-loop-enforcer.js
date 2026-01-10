@@ -18,6 +18,29 @@ const { getConfig, getProjectRoot } = require('./flow-utils');
 const durableSession = require('./flow-durable-session');
 
 /**
+ * Sanitize a string for safe use in shell commands
+ * Only allows alphanumeric, underscore, hyphen, and dot characters
+ * @param {string} str - String to sanitize
+ * @returns {string} - Sanitized string
+ */
+function sanitizeShellArg(str) {
+  if (!str || typeof str !== 'string') return '';
+  // Only allow safe characters: alphanumeric, underscore, hyphen, dot
+  return str.replace(/[^a-zA-Z0-9_.-]/g, '');
+}
+
+/**
+ * Escape a path for safe use in shell commands
+ * @param {string} p - Path to escape
+ * @returns {string} - Escaped path
+ */
+function escapeShellPath(p) {
+  if (!p || typeof p !== 'string') return '';
+  // Escape special shell characters in paths
+  return p.replace(/(["\s'$`\\!*?#~<>^()[\]{}|;&])/g, '\\$1');
+}
+
+/**
  * Check if loop enforcement is enabled
  */
 function isEnforcementEnabled() {
@@ -831,8 +854,12 @@ function verifyCriterion(criterion, context = {}) {
       const searchDir = path.join(projectRoot, searchPath);
       if (fs.existsSync(searchDir)) {
         try {
+          // Sanitize component name and escape path for shell safety
+          const safeName = sanitizeShellArg(componentName);
+          const safeLower = sanitizeShellArg(componentName.toLowerCase());
+          const safePath = escapeShellPath(searchDir);
           const files = execSync(
-            `find "${searchDir}" -name "${componentName}.*" -o -name "${componentName.toLowerCase()}.*" 2>/dev/null`,
+            `find "${safePath}" -name "${safeName}.*" -o -name "${safeLower}.*" 2>/dev/null`,
             { encoding: 'utf-8', timeout: 5000 }
           ).trim();
           if (files) {
@@ -859,8 +886,10 @@ function verifyCriterion(criterion, context = {}) {
   const cliMatch = descLower.match(/(?:command|cli|flow)\s+["`']?(\w+)["`']?\s+(?:works?|runs?|executes?)/i);
   if (cliMatch) {
     const cmd = cliMatch[1];
+    // Sanitize command name for shell safety
+    const safeCmd = sanitizeShellArg(cmd);
     try {
-      execSync(`./scripts/flow ${cmd} --help`, {
+      execSync(`./scripts/flow ${safeCmd} --help`, {
         cwd: projectRoot,
         encoding: 'utf-8',
         timeout: 10000,

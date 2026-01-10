@@ -14,7 +14,6 @@
 
 const {
   loadDurableSession,
-  isSuspended,
   getSuspensionStatus,
   checkResumeCondition,
   resumeSession,
@@ -204,8 +203,8 @@ function main() {
     process.exit(1);
   }
 
-  // Not suspended?
-  if (!isSuspended()) {
+  // Check suspension state from loaded session (avoids race condition from re-reading)
+  if (!session.suspension) {
     console.log(color('green', 'Task is not suspended. Continue working!'));
     const resumeInfo = canResumeFromStep(session);
     if (resumeInfo.canResume && resumeInfo.fromStep) {
@@ -215,7 +214,7 @@ function main() {
     process.exit(0);
   }
 
-  // Try to resume
+  // Try to resume (resumeSession re-loads session internally for atomicity)
   const result = resumeSession({
     force: options.force,
     approve: options.approve,

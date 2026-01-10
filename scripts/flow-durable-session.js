@@ -18,7 +18,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-const { getConfig, getProjectRoot, MAX_SESSION_HISTORY } = require('./flow-utils');
+const { getConfig, getProjectRoot, MAX_SESSION_HISTORY, withLock } = require('./flow-utils');
 const { validateCommand } = require('./flow-workflow');
 
 // ============================================================================
@@ -97,7 +97,42 @@ function createDurableSession(taskId, taskType, steps = []) {
     return existing;
   }
 
-  const session = {
+  const session = createSessionObject(taskId, taskType, steps);
+  saveDurableSession(session);
+  return session;
+}
+
+/**
+ * Create a new durable session with file locking (async version)
+ * SECURITY: Prevents race conditions when multiple processes try to create sessions
+ *
+ * @param {string} taskId - Task identifier
+ * @param {string} taskType - Type: "task", "loop", "bulk"
+ * @param {Array} steps - Array of step definitions
+ * @returns {Promise<Object>} Created or existing session
+ */
+async function createDurableSessionAsync(taskId, taskType, steps = []) {
+  const sessionPath = getSessionPath();
+
+  return withLock(sessionPath, () => {
+    // Check if session already exists for this task (inside lock)
+    const existing = loadDurableSession();
+    if (existing && existing.taskId === taskId) {
+      // Return existing session for resume
+      return existing;
+    }
+
+    const session = createSessionObject(taskId, taskType, steps);
+    saveDurableSession(session);
+    return session;
+  });
+}
+
+/**
+ * Create a session object (internal helper)
+ */
+function createSessionObject(taskId, taskType, steps = []) {
+  return {
     version: SESSION_VERSION,
     sessionId: `sess-${Date.now()}`,
     taskId,
@@ -128,9 +163,6 @@ function createDurableSession(taskId, taskType, steps = []) {
       tokensSaved: 0
     }
   };
-
-  saveDurableSession(session);
-  return session;
 }
 
 /**
@@ -1123,6 +1155,7 @@ module.exports = {
 
   // Core session management
   createDurableSession,
+  createDurableSessionAsync,  // Async version with file locking
   loadDurableSession,
   saveDurableSession,
   archiveDurableSession,

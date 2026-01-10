@@ -29,6 +29,7 @@ const { trackTaskStart, checkAndDisplayResumeContext } = require('./flow-session
 const {
   loadDurableSession,
   createDurableSession,
+  createDurableSessionAsync,
   canResumeFromStep,
   getResumeContext,
   getSuspensionStatus,
@@ -169,27 +170,21 @@ async function main() {
     if (process.env.DEBUG) console.error(`[DEBUG] Task tracking: ${e.message}`);
   }
 
-  // v2.0: Initialize durable session for crash recovery
+  // v2.0: Initialize durable session for crash recovery (with file locking)
   if (config.durableSteps?.enabled !== false) {
     try {
-      const existingSession = loadDurableSession();
+      // Extract acceptance criteria if available
+      const acceptanceCriteria = result.task?.acceptanceCriteria || result.task?.scenarios || [];
+      const steps = Array.isArray(acceptanceCriteria) ? acceptanceCriteria : [];
+      const sessionSteps = steps.length > 0 ? steps : [taskTitle || taskId];
 
-      // Only create new session if none exists or it's for a different task
-      if (!existingSession || existingSession.taskId !== taskId) {
-        // Extract acceptance criteria if available
-        const acceptanceCriteria = result.task?.acceptanceCriteria || result.task?.scenarios || [];
-        const steps = Array.isArray(acceptanceCriteria) ? acceptanceCriteria : [];
+      // Use async version with file locking to prevent race conditions
+      const session = await createDurableSessionAsync(taskId, 'task', sessionSteps);
 
-        if (steps.length > 0) {
-          createDurableSession(taskId, 'task', steps);
-          console.log(color('cyan', `📋 Durable session initialized with ${steps.length} steps`));
-        } else {
-          // Create minimal session for tracking
-          createDurableSession(taskId, 'task', [taskTitle || taskId]);
-          if (process.env.DEBUG) {
-            console.log(color('cyan', '📋 Durable session initialized (no acceptance criteria)'));
-          }
-        }
+      if (steps.length > 0) {
+        console.log(color('cyan', `📋 Durable session initialized with ${steps.length} steps`));
+      } else if (process.env.DEBUG) {
+        console.log(color('cyan', '📋 Durable session initialized (no acceptance criteria)'));
       }
     } catch (e) {
       if (process.env.DEBUG) console.error(`[DEBUG] Durable session init: ${e.message}`);
