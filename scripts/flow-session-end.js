@@ -6,7 +6,7 @@
  * Ensures all workflow state is saved, optionally commits and pushes.
  */
 
-const { execSync, spawnSync } = require('child_process');
+const { execSync, execFileSync, spawnSync } = require('child_process');
 const readline = require('readline');
 const path = require('path');
 const {
@@ -103,7 +103,8 @@ async function handleUncommittedChanges() {
 
       try {
         execSync('git add -A', { stdio: 'pipe' });
-        execSync(`git commit -m "${commitMsg}"`, { stdio: 'pipe' });
+        // Use execFileSync to prevent command injection from commit message
+        execFileSync('git', ['commit', '-m', commitMsg], { stdio: 'pipe' });
         success('Changes committed');
       } catch (e) {
         warn(`Commit failed: ${e.message}`);

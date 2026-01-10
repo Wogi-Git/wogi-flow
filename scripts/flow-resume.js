@@ -19,6 +19,7 @@ const {
   resumeSession,
   canResumeFromStep,
   getRemainingSteps,
+  isSuspended,
   RESUME_CONDITION
 } = require('./flow-durable-session');
 const { color, getConfig } = require('./flow-utils');
