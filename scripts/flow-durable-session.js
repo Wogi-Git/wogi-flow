@@ -28,6 +28,7 @@ const { validateCommand } = require('./flow-workflow');
 const SESSION_VERSION = '2.0';
 const SESSION_FILE = 'durable-session.json';
 const HISTORY_FILE = 'durable-history.json';
+const LEGACY_HYBRID_FILE = 'hybrid-session.json'; // Deprecated, cleaned up on new session
 // MAX_HISTORY imported from flow-utils as MAX_SESSION_HISTORY
 
 const STEP_STATUS = {
@@ -76,6 +77,28 @@ function getHistoryPath() {
   return path.join(projectRoot, '.workflow', 'state', HISTORY_FILE);
 }
 
+function getLegacyHybridPath() {
+  const projectRoot = getProjectRoot();
+  return path.join(projectRoot, '.workflow', 'state', LEGACY_HYBRID_FILE);
+}
+
+/**
+ * Clean up legacy hybrid-session.json if it exists
+ * Called when creating a new durable session to prevent orphaned state
+ */
+function cleanupLegacyHybridSession() {
+  const legacyPath = getLegacyHybridPath();
+  if (fs.existsSync(legacyPath)) {
+    try {
+      fs.unlinkSync(legacyPath);
+      console.log('[Migration] Removed legacy hybrid-session.json - now using durable-session.json');
+    } catch (err) {
+      // Non-fatal - just log and continue
+      console.warn(`[Warning] Could not remove legacy hybrid-session.json: ${err.message}`);
+    }
+  }
+}
+
 // ============================================================================
 // Core Session Management
 // ============================================================================
@@ -96,6 +119,9 @@ function createDurableSession(taskId, taskType, steps = []) {
     // Return existing session for resume
     return existing;
   }
+
+  // Clean up legacy hybrid-session.json if present (migration to v2.0)
+  cleanupLegacyHybridSession();
 
   const session = createSessionObject(taskId, taskType, steps);
   saveDurableSession(session);
@@ -121,6 +147,9 @@ async function createDurableSessionAsync(taskId, taskType, steps = []) {
       // Return existing session for resume
       return existing;
     }
+
+    // Clean up legacy hybrid-session.json if present (migration to v2.0)
+    cleanupLegacyHybridSession();
 
     const session = createSessionObject(taskId, taskType, steps);
     saveDurableSession(session);
@@ -632,6 +661,18 @@ function checkCompletion() {
   const completed = session.steps.filter(s => s.status === STEP_STATUS.COMPLETED);
   const skipped = session.steps.filter(s => s.status === STEP_STATUS.SKIPPED);
   const inProgress = session.steps.filter(s => s.status === STEP_STATUS.IN_PROGRESS);
+  const suspended = session.steps.filter(s => s.status === STEP_STATUS.SUSPENDED);
+
+  // Session is suspended - not complete, waiting for resume
+  if (suspended.length > 0) {
+    return {
+      complete: false,
+      suspended: true,
+      suspendedSteps: suspended.length,
+      reason: 'session-suspended',
+      summary: `Session suspended with ${suspended.length} step(s) waiting to resume`
+    };
+  }
 
   // All done?
   if (pending.length === 0 && failed.length === 0 && inProgress.length === 0) {
@@ -682,7 +723,8 @@ function checkCompletion() {
     failed: failed.length,
     inProgress: inProgress.length,
     completed: completed.length,
-    skipped: skipped.length
+    skipped: skipped.length,
+    suspended: suspended.length
   };
 }
 
