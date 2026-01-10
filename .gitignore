@@ -57,3 +57,8 @@ mcp-memory-server/node_modules/
 
 # Claude plans (user-specific)
 .claude/plans/
+
+# Hybrid mode session (user-specific)
+.workflow/state/hybrid-session.json
+.workflow/state/decisions.md
+.workflow/state/feedback-patterns.md

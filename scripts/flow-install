@@ -802,7 +802,7 @@ generate_state_files() {
     
     # Copy from templates if they exist (for fresh installs)
     local TEMPLATE_DIR="$SCRIPT_DIR/../.workflow/state"
-    local template_files=("ready.json" "request-log.md" "progress.md" "component-index.json" "app-map.md")
+    local template_files=("ready.json" "request-log.md" "progress.md" "component-index.json" "app-map.md" "decisions.md" "feedback-patterns.md")
     
     for tfile in "${template_files[@]}"; do
         if [ -f "$TEMPLATE_DIR/${tfile}.template" ]; then
