@@ -18,7 +18,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-const { getConfig, getProjectRoot } = require('./flow-utils');
+const { getConfig, getProjectRoot, MAX_SESSION_HISTORY } = require('./flow-utils');
 const { validateCommand } = require('./flow-workflow');
 
 // ============================================================================
@@ -28,7 +28,7 @@ const { validateCommand } = require('./flow-workflow');
 const SESSION_VERSION = '2.0';
 const SESSION_FILE = 'durable-session.json';
 const HISTORY_FILE = 'durable-history.json';
-const MAX_HISTORY = 50;
+// MAX_HISTORY imported from flow-utils as MAX_SESSION_HISTORY
 
 const STEP_STATUS = {
   PENDING: 'pending',
@@ -284,8 +284,8 @@ function archiveDurableSession(status = 'completed') {
   history.push(session);
 
   // Keep only last N sessions
-  if (history.length > MAX_HISTORY) {
-    history = history.slice(-MAX_HISTORY);
+  if (history.length > MAX_SESSION_HISTORY) {
+    history = history.slice(-MAX_SESSION_HISTORY);
   }
 
   fs.writeFileSync(historyPath, JSON.stringify(history, null, 2));

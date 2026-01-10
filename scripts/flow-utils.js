@@ -13,6 +13,34 @@ const crypto = require('crypto');
 const { execSync } = require('child_process');
 
 // ============================================================
+// Constants - Named values for magic numbers
+// ============================================================
+
+/** Default timeout for shell commands (2 minutes) */
+const DEFAULT_COMMAND_TIMEOUT_MS = 120000;
+
+/** Quick command timeout (30 seconds) */
+const QUICK_COMMAND_TIMEOUT_MS = 30000;
+
+/** Default lock stale threshold (60 seconds) */
+const LOCK_STALE_THRESHOLD_MS = 60000;
+
+/** Cleanup lock stale threshold (30 seconds) */
+const CLEANUP_LOCK_STALE_MS = 30000;
+
+/** Default retry delay for lock acquisition (100ms) */
+const LOCK_RETRY_DELAY_MS = 100;
+
+/** Default max retries for lock acquisition */
+const LOCK_MAX_RETRIES = 5;
+
+/** Maximum history entries to keep in durable sessions */
+const MAX_SESSION_HISTORY = 50;
+
+/** Default max iterations for workflow loops */
+const MAX_WORKFLOW_ITERATIONS = 100;
+
+// ============================================================
 // Project Root Detection
 // ============================================================
 
@@ -1188,9 +1216,9 @@ function countFiles(dirPath, extensions = [], maxDepth = 10) {
  */
 async function acquireLock(filePath, options = {}) {
   const {
-    retries = 5,
-    retryDelay = 100,
-    staleMs = 60000  // 60s default - allow for complex operations
+    retries = LOCK_MAX_RETRIES,
+    retryDelay = LOCK_RETRY_DELAY_MS,
+    staleMs = LOCK_STALE_THRESHOLD_MS
   } = options;
 
   const lockDir = `${filePath}.lock`;
@@ -1340,7 +1368,7 @@ async function withLockSync(filePath, fn, options = {}) {
  * @param {number} [staleMs=30000] - Consider locks older than this as stale
  * @returns {number} Number of locks cleaned up
  */
-function cleanupStaleLocks(dirPath, staleMs = 30000) {
+function cleanupStaleLocks(dirPath, staleMs = CLEANUP_LOCK_STALE_MS) {
   try {
     if (!dirExists(dirPath)) return 0;
 
@@ -1598,6 +1626,16 @@ function findTypeDefinitions(namePattern = null, options = {}) {
 // ============================================================
 
 module.exports = {
+  // Constants
+  DEFAULT_COMMAND_TIMEOUT_MS,
+  QUICK_COMMAND_TIMEOUT_MS,
+  LOCK_STALE_THRESHOLD_MS,
+  CLEANUP_LOCK_STALE_MS,
+  LOCK_RETRY_DELAY_MS,
+  LOCK_MAX_RETRIES,
+  MAX_SESSION_HISTORY,
+  MAX_WORKFLOW_ITERATIONS,
+
   // Paths
   PATHS,
   PROJECT_ROOT,

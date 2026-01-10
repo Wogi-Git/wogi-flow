@@ -1,12 +1,25 @@
 ---
-name: {{SKILL_NAME}}
+name: _template
 version: 1.0.0
-description: {{SHORT_DESCRIPTION}}
+description: Template for creating new skills - DO NOT LOAD
 scope: project
 lastUpdated: {{DATE}}
 learningCount: 0
 successRate: 0
+template: true
+loadable: false
 ---
+
+<!--
+  ⚠️  THIS IS A TEMPLATE - DO NOT LOAD THIS SKILL
+
+  To create a new skill, copy this directory and replace:
+  - {{SKILL_NAME}} with your skill name
+  - {{SHORT_DESCRIPTION}} with a brief description
+  - {{USE_CASE_*}} with actual use cases
+  - {{FILE_PATTERN_*}} with file globs
+  - {{DATE}} with current date
+-->
 
 # {{SKILL_NAME}} Skill
 

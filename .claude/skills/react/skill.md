@@ -8,10 +8,10 @@ React component patterns, hooks, and best practices.
 
 ## Triggers
 
-- keywords: ["react", "component", "hook", "useState", "useEffect", "useContext", "jsx", "tsx", "frontend", "ui", "props", "state"]
+- keywords: ["react", "react-component", "react-hook", "useState", "useEffect", "useContext", "useMemo", "useCallback", "useRef", "jsx", "tsx", "props", "state-management"]
 - filePatterns: ["*.tsx", "*.jsx", "use*.ts", "use*.tsx", "*.component.tsx"]
 - taskTypes: ["feature", "bugfix", "refactor"]
-- categories: ["frontend", "ui", "component"]
+- categories: ["react", "frontend-framework"]
 
 ## Planned Commands
 

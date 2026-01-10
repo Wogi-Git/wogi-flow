@@ -73,6 +73,11 @@ const DEFAULT_TRIGGERS = {
  * Parses YAML frontmatter and extracts trigger configuration
  */
 function loadSkillMetadata(skillName) {
+  // Skip template skills
+  if (skillName === '_template' || skillName.startsWith('_')) {
+    return null;
+  }
+
   const skillPath = path.join(SKILLS_DIR, skillName, 'skill.md');
 
   if (!fs.existsSync(skillPath)) {
@@ -95,6 +100,11 @@ function loadSkillMetadata(skillName) {
           const value = valueParts.join(':').trim();
           metadata[key.trim()] = value;
         }
+      }
+
+      // Skip skills marked as not loadable or templates
+      if (metadata.loadable === 'false' || metadata.template === 'true') {
+        return null;
       }
     }
 

@@ -14,10 +14,10 @@ Use this skill when:
 
 ## Triggers
 
-- keywords: ["figma", "design", "ui", "component", "design-system", "tokens", "mockup", "wireframe", "screen"]
+- keywords: ["figma", "figma-link", "design-file", "design-system", "design-tokens", "mockup", "wireframe", "figma-mcp", "frame", "artboard"]
 - filePatterns: []
 - taskTypes: ["feature"]
-- categories: ["design", "ui", "frontend"]
+- categories: ["design", "design-to-code"]
 
 ## Workflow
 

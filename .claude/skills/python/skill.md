@@ -8,10 +8,10 @@ Python/FastAPI patterns and best practices.
 
 ## Triggers
 
-- keywords: ["python", "pip", "django", "flask", "fastapi", "pytest", "pydantic", "sqlalchemy", "alembic", "uvicorn"]
+- keywords: ["python", "pip", "django", "flask", "fastapi", "pytest", "pydantic", "sqlalchemy", "alembic", "uvicorn", "virtualenv", "poetry"]
 - filePatterns: ["*.py", "requirements.txt", "setup.py", "pyproject.toml", "Pipfile"]
 - taskTypes: ["feature", "bugfix", "refactor"]
-- categories: ["backend", "scripting", "api"]
+- categories: ["python", "python-backend"]
 
 ## Planned Commands
 
